@@ -58,6 +58,28 @@ def ingest():
 
 
 @app.command()
+def generate_reports():
+    cfg = load_config()
+    logger = setup_logger("report_generation", cfg.paths.log_dir)
+
+    if not validate_config(cfg):
+        logger.error("Configuration validation failed. Aborting.")
+        raise SystemExit(1)
+
+    if not validate_environment():
+        logger.error("Environment validation failed. Aborting.")
+        raise SystemExit(1)
+
+    set_seed(cfg.seed)
+    ProjectPaths(cfg).ensure_directories()
+
+    logger.info("--- Starting Data Ingestion Phase ---")
+    ingestor = AlpacaIngestor(cfg, logger)
+    ingestor.run(cfg.data.tickers)
+    logger.info("--- Ingestion Complete ---")
+
+
+@app.command()
 def process():
     """Phase 2: Validate, Clean, and Engineer Features."""
     cfg = load_config()
