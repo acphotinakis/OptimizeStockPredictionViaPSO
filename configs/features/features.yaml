@@ -31,3 +31,8 @@ denoising:
 selection:
   pearson_threshold: 0.95
   use_xgboost_importance: true
+  top_n_features: 20
+
+# Target Variable Creation
+target_method: "mid_price_return" # Options: "mid_price_return", "close_return", "close_price"
+target_horizon: 1 # Prediction horizon in time steps

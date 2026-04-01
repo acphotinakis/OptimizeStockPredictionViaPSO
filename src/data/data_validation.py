@@ -60,6 +60,48 @@ def check_missing_values(df):
     }
 
 
+def check_integrity(df):
+    """
+    Checks for data integrity issues like negative volumes or invalid OHLC relationships.
+    
+    Returns:
+        dict: Report of integrity issues found.
+    """
+    issues = []
+    
+    # Check for negative volumes
+    if "volume" in df.columns:
+        negative_volumes = (df["volume"] < 0).sum()
+        if negative_volumes > 0:
+            issues.append(f"Found {negative_volumes} negative volume values")
+    
+    # Check for zero volumes (suspicious but not necessarily invalid)
+    if "volume" in df.columns:
+        zero_volumes = (df["volume"] == 0).sum()
+        if zero_volumes > 0:
+            logger.warning(f"Found {zero_volumes} zero volume values")
+    
+    # Check OHLC relationships: high >= low, high >= open, high >= close, low <= open, low <= close
+    if all(col in df.columns for col in ["open", "high", "low", "close"]):
+        invalid_high = ((df["high"] < df["low"]) | 
+                       (df["high"] < df["open"]) | 
+                       (df["high"] < df["close"])).sum()
+        
+        invalid_low = ((df["low"] > df["open"]) | 
+                      (df["low"] > df["close"])).sum()
+        
+        if invalid_high > 0:
+            issues.append(f"Found {invalid_high} rows where high < other prices")
+        
+        if invalid_low > 0:
+            issues.append(f"Found {invalid_low} rows where low > other prices")
+    
+    return {
+        "issues": issues,
+        "is_valid": len(issues) == 0,
+    }
+
+
 def detect_outliers(df, method="iqr"):
     """
     Detects anomalies in price returns to flag extreme market shocks or bad data.
@@ -113,6 +155,7 @@ def run_validation_suite(df, cfg):
     dup_report = check_duplicates(df)
     null_report = check_missing_values(df)
     outlier_report = detect_outliers(df)
+    integrity_report = check_integrity(df)
 
     # Final pass/fail logic based on configuration
     failed_checks = []
@@ -123,6 +166,9 @@ def run_validation_suite(df, cfg):
 
     if not dup_report["is_valid"]:
         failed_checks.append("Duplicate timestamps detected in index")
+    
+    if not integrity_report["is_valid"]:
+        failed_checks.extend(integrity_report["issues"])
 
     is_fit_for_training = len(failed_checks) == 0
 
@@ -133,6 +179,7 @@ def run_validation_suite(df, cfg):
         "duplicates": dup_report,
         "null_values": null_report,
         "outliers": outlier_report,
+        "integrity": integrity_report,
     }
 
     if is_fit_for_training:

@@ -22,6 +22,14 @@ optimize:
 evaluate:
 	poetry run python main.py evaluate --model_path models/checkpoints/best_model.pt
 
+req-freeze:
+	@echo "Updating requirements.txt (clean)..."
+	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sort > requirements.txt
+
+req-no-versions:
+	@echo "Updating requirements_no_versions.txt..."
+	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sed 's/==.*//' | sort | uniq > requirements_no_versions.txt
+
 # Quality Control
 lint:
 	poetry run ruff check src/

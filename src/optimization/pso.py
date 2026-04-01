@@ -101,7 +101,11 @@ class ImprovedPSO:
     def evaluate_fitness(self, particle):
         """
         Calculates fitness by training an LSTM with the particle's parameters.
-        Primary metric: Sharpe Ratio on the validation set .
+        Primary metric: Sharpe Ratio on the validation set.
+        
+        Returns:
+            float: Fitness score (higher is better). Uses Sharpe ratio if configured,
+                   otherwise uses negative validation loss.
         """
         # 1. Instantiate LSTM with current particle hyperparameters
         model = LSTMModel(
@@ -116,13 +120,46 @@ class ImprovedPSO:
         current_cfg.model.training.learning_rate = particle.position["learning_rate"]
 
         # 3. Run training loop and get best validation loss
-        # Note: In a full implementation, you would return the Sharpe Ratio here
         model, val_loss = run_training(
             model, self.train_loader, self.val_loader, current_cfg, self.device
         )
 
-        # Fitness is inverse of loss (or Sharpe Ratio)
-        return -val_loss
+        # 4. Calculate fitness based on configured metric
+        fitness_metric = self.cfg.optimization.fitness.primary_metric
+        
+        if fitness_metric == "sharpe_ratio":
+            # Generate predictions on validation set to calculate Sharpe ratio
+            model.eval()
+            predictions = []
+            actuals = []
+            
+            with torch.no_grad():
+                for batch_x, batch_y in self.val_loader:
+                    batch_x = batch_x.to(self.device)
+                    outputs = model(batch_x)
+                    predictions.extend(outputs.cpu().numpy().flatten())
+                    actuals.extend(batch_y.numpy().flatten())
+            
+            # Calculate Sharpe ratio
+            from src.evaluation.metrics import calculate_sharpe_ratio
+            
+            # Strategy returns = sign(prediction) * actual_return
+            strategy_returns = np.sign(predictions) * np.array(actuals)
+            fitness = calculate_sharpe_ratio(strategy_returns)
+            
+            # Apply risk penalty if configured
+            if hasattr(self.cfg.optimization.fitness, 'risk_penalty'):
+                from src.evaluation.metrics import calculate_max_drawdown
+                cumulative_returns = (1 + strategy_returns).cumprod()
+                mdd = abs(calculate_max_drawdown(cumulative_returns))
+                fitness -= self.cfg.optimization.fitness.risk_penalty * mdd
+            
+            logger.info(f"Particle fitness (Sharpe): {fitness:.4f}")
+            return fitness
+        else:
+            # Fallback: use negative validation loss
+            logger.warning(f"Using validation loss as fitness (metric '{fitness_metric}' not implemented)")
+            return -val_loss
 
     def search(self):
         """Main optimization loop."""

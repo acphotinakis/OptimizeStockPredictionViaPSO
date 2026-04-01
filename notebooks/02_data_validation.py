@@ -1,35 +1,39 @@
+# ── Standard library imports ───────────────────────────────────────────
 import sys
 from pathlib import Path
+import logging
+import seaborn as sns
+
+# ── Third-party imports ───────────────────────────────────────────────
 import pandas as pd
 import matplotlib.pyplot as plt
-from src.features.build_features import calculate_indicators
-
 from hydra import initialize, compose
 
-# Add project root to sys.path
+# ── Add project root to sys.path for local module imports ─────────────
 root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
+if str(root_path) not in sys.path:
+    sys.path.append(str(root_path))
 
-# Hydra config
+# ── Local imports ─────────────────────────────────────────────────────
+from src.features.build_features import calculate_indicators
+from src.utils.logger import setup_logger
+
+# ── Hydra configuration ──────────────────────────────────────────────
 cfg_path = root_path / "configs"
 initialize(config_path=str(cfg_path), version_base="1.3")
 cfg = compose(config_name="config")
 
-# 02_data_validation.py
-# Validating data against thresholds for missing values, gaps, and outliers
+# ── Logger setup ─────────────────────────────────────────────────────
+logger = setup_logger("data_overview", cfg.paths.log_dir)
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+# ── Load raw data (e.g., SPY benchmark) ───────────────────────────────
+raw_path = Path(cfg.paths.data_storage.raw) / "SPY_1Min.parquet"
+logger.info("raw_path --> " + str(raw_path))
 
-# ── Assume df is already loaded (from 01_data_overview.py) ────────────
-# df = pd.read_parquet("../data/raw/SPY_1Min.parquet")
-# cfg = your config object with validation thresholds
-
-# ── Load raw data (e.g., SPY benchmark) ────────────────────────────────
-raw_path = Path("../data/raw/SPY_1Min.parquet")
 df = pd.read_parquet(raw_path)
+logger.info(f"Dataset Shape: {df.shape}")
+logger.info(f"Time Range: {df.index.min()} to {df.index.max()}")
+logger.info(f"\n{df.head()}")
 
 # ── Gap Detection (Missing 1-Min Intervals) ─────────────────────────────
 expected_intervals = pd.date_range(
@@ -50,4 +54,6 @@ returns = df["close"].pct_change().dropna()
 
 sns.boxplot(x=returns)
 plt.title("Distribution of 1-Min Returns (Outlier Detection)")
+plot_path = Path(cfg.paths.data_storage.plots) / "02_data_validation.png"
+plt.savefig(plot_path)
 plt.show()

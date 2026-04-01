@@ -12,6 +12,7 @@ from src.features.build_features import calculate_indicators
 from src.features.wavelet_denoising import apply_denoising_pipeline
 from src.features.selection import run_selection_pipeline
 from src.features.scaling import fit_scaler, transform_data, save_scaler, validate_inverse_transform
+from src.features.target import create_target_variable, validate_target
 from src.data.split import time_series_split
 from src.utils.logger import setup_logger
 from src.utils.seed import set_seed
@@ -90,10 +91,18 @@ def process():
         # 3. Feature Engineering on denoised data
         df_feats = calculate_indicators(df_denoised, cfg.features)
 
-        # 4. Split data BEFORE feature selection to prevent leakage
-        train_df, val_df, test_df = time_series_split(df_feats, cfg)
+        # 4. Create target variable (mid-price return for next time step)
+        target_method = getattr(cfg.features, "target_method", "mid_price_return")
+        df_with_target = create_target_variable(df_feats, method=target_method, horizon=1)
         
-        # 5. Feature Selection ONLY on training data
+        if not validate_target(df_with_target):
+            logger.error(f"Target validation failed for {ticker}. Skipping.")
+            continue
+
+        # 5. Split data BEFORE feature selection to prevent leakage
+        train_df, val_df, test_df = time_series_split(df_with_target, cfg)
+        
+        # 6. Feature Selection ONLY on training data
         train_selected = run_selection_pipeline(train_df, cfg.features.selection, selected_features=None)
         selected_feature_names = [col for col in train_selected.columns if col != "target"]
         
@@ -101,7 +110,7 @@ def process():
         val_selected = run_selection_pipeline(val_df, cfg.features.selection, selected_features=selected_feature_names)
         test_selected = run_selection_pipeline(test_df, cfg.features.selection, selected_features=selected_feature_names)
         
-        # 6. Scaling - fit ONLY on training data
+        # 7. Scaling - fit ONLY on training data
         logger.info("Fitting scaler on training data only...")
         train_features = train_selected.drop(columns=["target"]) if "target" in train_selected.columns else train_selected
         scaler = fit_scaler(train_features)

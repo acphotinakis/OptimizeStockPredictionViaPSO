@@ -21,6 +21,7 @@ paths:
     raw: "data/raw"
     interim: "data/interim"
     processed: "data/processed"
+    plots: "data/plots"
 
 # Hydra execution overrides
 hydra:
