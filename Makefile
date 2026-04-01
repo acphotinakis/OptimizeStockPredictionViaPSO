@@ -22,13 +22,23 @@ optimize:
 evaluate:
 	poetry run python main.py evaluate --model_path models/checkpoints/best_model.pt
 
+# ── Pip requirements ──────────────────────────────────────────────────────
 req-freeze:
-	@echo "Updating requirements.txt (clean)..."
+	@echo "Updating requirements.txt (with versions)..."
 	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sort > requirements.txt
 
 req-no-versions:
-	@echo "Updating requirements_no_versions.txt..."
+	@echo "Updating requirements_no_versions.txt (without versions)..."
 	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sed 's/==.*//' | sort | uniq > requirements_no_versions.txt
+
+# ── Conda environment export ─────────────────────────────────────────────
+conda-export:
+	@echo "Exporting full conda environment (with versions)..."
+	conda env export --no-builds | grep -v '^prefix:' > environment.yml
+
+conda-export-no-versions:
+	@echo "Exporting conda environment (without versions)..."
+	conda list -e | sed 's/==.*//' | sort | uniq > conda_packages_no_versions.txt
 
 # Quality Control
 lint:
