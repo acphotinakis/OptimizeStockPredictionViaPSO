@@ -7,20 +7,20 @@ setup:
 
 # Data Pipeline
 ingest:
-	poetry run python main.py ingest
+	poetry run python3 main.py ingest
 
 features:
-	poetry run python main.py features
+	poetry run python3 main.py features
 
 # ML Workflow
 train:
-	poetry run python main.py train --config model=base_lstm
+	poetry run python3 main.py train --config model=base_lstm
 
 optimize:
-	poetry run python main.py optimize --swarm_size 20 --iterations 50
+	poetry run python3 main.py optimize --swarm_size 20 --iterations 50
 
 evaluate:
-	poetry run python main.py evaluate --model_path models/checkpoints/best_model.pt
+	poetry run python3 main.py evaluate --model_path models/checkpoints/best_model.pt
 
 # ── Pip requirements ──────────────────────────────────────────────────────
 req-freeze:
