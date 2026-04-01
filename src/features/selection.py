@@ -73,14 +73,33 @@ def xgboost_importance_filter(
     return df[top_features]
 
 
-def run_selection_pipeline(df: pd.DataFrame, cfg) -> pd.DataFrame:
+def run_selection_pipeline(df: pd.DataFrame, cfg, selected_features=None) -> pd.DataFrame:
     """
     Orchestrates feature selection based on Hydra configuration.
+    
+    IMPORTANT: To prevent data leakage, this function should be called ONLY on training data
+    during the initial feature selection phase. The selected feature names should then be
+    applied to validation and test sets.
 
     Args:
         df (pd.DataFrame): Dataframe with all engineered features.
         cfg: Hydra configuration (cfg.features.selection).
+        selected_features (list, optional): If provided, only select these features (for val/test sets).
+    
+    Returns:
+        pd.DataFrame: Dataframe with selected features (and target if present).
     """
+    # If feature names are provided (for val/test sets), just filter and return
+    if selected_features is not None:
+        logger.info(f"Applying pre-selected features (count: {len(selected_features)})")
+        available_cols = [col for col in selected_features if col in df.columns]
+        if "target" in df.columns and "target" not in available_cols:
+            available_cols.append("target")
+        return df[available_cols]
+    
+    # Otherwise, perform feature selection (TRAINING SET ONLY)
+    logger.warning("Performing feature selection. Ensure this is ONLY called on training data to prevent leakage.")
+    
     # Pearson filter is the primary requirement
     df = correlation_filter(df, cfg.pearson_threshold)
 
@@ -89,7 +108,7 @@ def run_selection_pipeline(df: pd.DataFrame, cfg) -> pd.DataFrame:
     if cfg.use_xgboost_importance and "target" in df.columns:
         target = df["target"]
         features = df.drop(columns=["target"])
-        df_selected = xgboost_importance_filter(features, target)
+        df_selected = xgboost_importance_filter(features, target, top_n=cfg.get('top_n_features', 20))
         # Re-attach target for the next pipeline stage
         df = pd.concat([df_selected, target], axis=1)
 

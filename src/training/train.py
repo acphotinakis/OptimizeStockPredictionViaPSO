@@ -59,9 +59,12 @@ class EarlyStopping:
         self.val_loss_min = val_loss
 
 
-def train_one_epoch(model, train_loader, optimizer, criterion, device):
+def train_one_epoch(model, train_loader, optimizer, criterion, device, clip_value=1.0):
     """
-    Performs one full pass over the training dataset.
+    Performs one full pass over the training dataset with gradient clipping and NaN detection.
+    
+    Args:
+        clip_value (float): Maximum gradient norm for clipping (prevents exploding gradients).
     """
     model.train()
     total_loss = 0
@@ -73,8 +76,30 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device):
         # Standard PyTorch training step
         optimizer.zero_grad()
         outputs = model(batch_x)
+        
+        # Check for NaN in model outputs
+        if torch.isnan(outputs).any():
+            logger.error("NaN detected in model outputs. Training unstable.")
+            raise ValueError("NaN detected in forward pass")
+        
         loss = criterion(outputs, batch_y)
+        
+        # Check for NaN in loss
+        if torch.isnan(loss):
+            logger.error("NaN detected in loss computation.")
+            raise ValueError("NaN detected in loss")
+        
         loss.backward()
+        
+        # Gradient clipping to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+        
+        # Check for NaN in gradients
+        for name, param in model.named_parameters():
+            if param.grad is not None and torch.isnan(param.grad).any():
+                logger.error(f"NaN detected in gradients for parameter: {name}")
+                raise ValueError(f"NaN gradient detected in {name}")
+        
         optimizer.step()
 
         total_loss += loss.item()
@@ -141,8 +166,10 @@ def run_training(model, train_loader, val_loader, cfg, device):
     )
 
     epochs = cfg.model.training.epochs
+    clip_value = getattr(cfg.model.training, 'gradient_clip_value', 1.0)
+    
     for epoch in range(1, epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, clip_value)
         val_loss = validate(model, val_loader, criterion, device)
 
         logger.info(

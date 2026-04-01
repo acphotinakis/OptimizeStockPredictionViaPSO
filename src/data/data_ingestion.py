@@ -69,9 +69,9 @@ class AlpacaIngestor:
         # Define parameters based on project requirements (5-year historical span)
         request_params = StockBarsRequest(
             symbol_or_symbols=ticker,
-            timeframe=self.timeframe_map.get(self.cfg.timeframe, TimeFrame.Minute),
-            start=self.cfg.start_date,
-            end=self.cfg.end_date,
+            timeframe=self.timeframe_map.get(self.cfg.data.timeframe, TimeFrame.Minute),
+            start=self.cfg.data.start_date,
+            end=self.cfg.data.end_date,
             adjustment="all",  # Adjusts for splits and dividends to ensure data continuity
         )
 
@@ -82,7 +82,7 @@ class AlpacaIngestor:
 
             if df is None or df.empty:
                 logger.warning(
-                    f"No data returned for {ticker} within the range {self.cfg.start_date} to {self.cfg.end_date}."
+                    f"No data returned for {ticker} within the range {self.cfg.data.start_date} to {self.cfg.data.end_date}."
                 )
                 return pd.DataFrame()
 
@@ -133,7 +133,7 @@ class AlpacaIngestor:
             df (pd.DataFrame): The processed data.
             ticker (str): The ticker symbol for naming.
         """
-        filename = f"{ticker}_{self.cfg.timeframe}.parquet"
+        filename = f"{ticker}_{self.cfg.data.timeframe}.parquet"
         save_path = self.raw_path / filename
 
         try:

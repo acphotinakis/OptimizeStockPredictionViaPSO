@@ -79,6 +79,54 @@ def save_scaler(scaler: MinMaxScaler, path: str):
         raise
 
 
+def inverse_transform(df: pd.DataFrame, scaler: MinMaxScaler) -> pd.DataFrame:
+    """
+    Inverse transforms scaled data back to original scale.
+    
+    Critical for recovering actual price predictions from normalized LSTM outputs.
+    
+    Args:
+        df (pd.DataFrame): The scaled data to inverse transform.
+        scaler (MinMaxScaler): The fitted scaler object used for original transformation.
+    
+    Returns:
+        pd.DataFrame: Data in original scale, preserving index and columns.
+    """
+    logger.info(f"Inverse transforming dataset of shape {df.shape}.")
+    
+    inverse_values = scaler.inverse_transform(df)
+    inverse_df = pd.DataFrame(inverse_values, index=df.index, columns=df.columns)
+    
+    return inverse_df
+
+
+def validate_inverse_transform(original_df: pd.DataFrame, scaler: MinMaxScaler, tolerance: float = 1e-6) -> bool:
+    """
+    Validates that fit-transform-inverse recovers original values within tolerance.
+    
+    Args:
+        original_df (pd.DataFrame): The original unscaled data.
+        scaler (MinMaxScaler): A fitted scaler.
+        tolerance (float): Maximum allowed difference between original and recovered values.
+    
+    Returns:
+        bool: True if validation passes, False otherwise.
+    """
+    logger.info("Validating inverse transform accuracy...")
+    
+    scaled = transform_data(original_df, scaler)
+    recovered = inverse_transform(scaled, scaler)
+    
+    max_diff = (original_df - recovered).abs().max().max()
+    
+    if max_diff > tolerance:
+        logger.error(f"Inverse transform validation FAILED. Max difference: {max_diff:.2e} (tolerance: {tolerance:.2e})")
+        return False
+    
+    logger.info(f"Inverse transform validation PASSED. Max difference: {max_diff:.2e}")
+    return True
+
+
 def load_scaler(path: str) -> MinMaxScaler:
     """
     Loads a saved scaler object from disk.
