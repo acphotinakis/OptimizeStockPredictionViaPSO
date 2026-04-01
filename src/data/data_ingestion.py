@@ -10,6 +10,11 @@ from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 import pytz
+import numpy as np
+from scipy import stats
+
+import json
+from src.report_generation.generate_data_ingestion_report import generate_html_report
 
 
 class AlpacaIngestor:
@@ -106,9 +111,7 @@ class AlpacaIngestor:
             return df
 
         except Exception as e:
-            self.logger.error(
-                f"Critical error during Alpaca API request for {ticker}: {str(e)}"
-            )
+            self.logger.error(f"Critical error during Alpaca API request for {ticker}: {str(e)}")
             return pd.DataFrame()
 
     def download_symbol(self, symbol: str) -> pd.DataFrame:
@@ -122,9 +125,7 @@ class AlpacaIngestor:
         """
 
         # Map configuration values
-        timeframe_obj = self.timeframe_map.get(
-            self.cfg.data.timeframe, TimeFrame.Minute
-        )
+        timeframe_obj = self.timeframe_map.get(self.cfg.data.timeframe, TimeFrame.Minute)
         data_adjustment = self.cfg.data.adjustment
         data_feed = self.cfg.data.data_feed
 
@@ -132,9 +133,7 @@ class AlpacaIngestor:
         current_start = pd.Timestamp(self.cfg.data.start_date, tz="UTC")
         global_end = pd.Timestamp(datetime.now(timezone.utc)) - pd.Timedelta(minutes=16)
 
-        chunk_days = getattr(
-            self.cfg.data, "chunk_days", 5
-        )  # default chunk size if not set
+        chunk_days = getattr(self.cfg.data, "chunk_days", 5)  # default chunk size if not set
         eastern = pytz.timezone("US/Eastern")
 
         self.logger.info(f"Starting download for symbol: {symbol}")
@@ -142,9 +141,7 @@ class AlpacaIngestor:
         df_all = pd.DataFrame()
 
         while current_start < global_end:
-            current_chunk_end = min(
-                current_start + pd.Timedelta(days=chunk_days), global_end
-            )
+            current_chunk_end = min(current_start + pd.Timedelta(days=chunk_days), global_end)
             all_pages = []
             page_token: Optional[str] = None
 
@@ -171,9 +168,7 @@ class AlpacaIngestor:
                     df = response.df
 
                     if df is None or df.empty:
-                        self.logger.warning(
-                            f"No data returned for {symbol} in this chunk."
-                        )
+                        self.logger.warning(f"No data returned for {symbol} in this chunk.")
                         break
                     else:
                         self.logger.info(f"Grabbed {len(df)} rows from Alpaca")
@@ -206,9 +201,7 @@ class AlpacaIngestor:
             # Move to the next chunk
             current_start = current_chunk_end + pd.Timedelta(minutes=1)
 
-        self.logger.info(
-            f"Completed download for symbol: {symbol}, total rows: {len(df_all)}"
-        )
+        self.logger.info(f"Completed download for symbol: {symbol}, total rows: {len(df_all)}")
         return df_all
 
     def validate_response(self, df: pd.DataFrame):
@@ -233,9 +226,7 @@ class AlpacaIngestor:
             raise TypeError("Index validation failed: Data must have a DatetimeIndex.")
 
         if not df.index.is_monotonic_increasing:
-            self.logger.warning(
-                f"Data for ticker was out of order. Sorting index chronologically."
-            )
+            self.logger.warning(f"Data for ticker was out of order. Sorting index chronologically.")
             df.sort_index(inplace=True)
 
     def save_to_parquet(self, df: pd.DataFrame, ticker: str):
@@ -259,30 +250,120 @@ class AlpacaIngestor:
 
     def run(self, tickers: List[str]):
         """
-        Orchestrates the ingestion pipeline for a list of tickers.
-
-        Args:
-            tickers (List[str]): List of symbols to ingest (e.g., the 51 tickers in the proposal).
+        Orchestrates the ingestion pipeline for a list of tickers, skipping
+        already ingested tickers, and generates a JSON ingestion report.
         """
-        self.logger.info(
-            f"Starting Alpaca ingestion pipeline for {len(tickers)} symbols."
-        )
+        self.logger.info(f"Starting Alpaca ingestion pipeline for {len(tickers)} symbols.")
+
+        report = []
 
         for i, ticker in enumerate(tickers, start=1):
             self.logger.info(f"[{i}/{len(tickers)}] Processing ticker: {ticker}")
-            try:
-                data = self.fetch_data(ticker)
-                # data = self.download_symbol(ticker)
-                if not data.empty:
-                    self.validate_response(data)
-                    self.save_to_parquet(data, ticker)
-                    self.logger.info(f"Completed processing for {ticker}")
-                else:
-                    self.logger.warning(
-                        f"Ingestion skipped for {ticker} due to lack of source data."
-                    )
-            except Exception as e:
-                self.logger.error(f"Processing failed for ticker {ticker}: {str(e)}")
+
+            filename = f"{ticker}_{self.cfg.data.timeframe}.parquet"
+            parquet_path = self.raw_path / filename
+
+            ticker_summary = {
+                "ticker": ticker,
+                "status": "unknown",
+                "rows_fetched": 0,
+                "chunks_processed": 0,
+                "missing_values": {},
+                "summary_statistics": {},
+                "start_date": None,
+                "end_date": None,
+                "parquet_file": str(parquet_path),
+                "errors": None,
+                "skipped_existing": False,
+            }
+
+            # Skip API call if file already exists
+            if parquet_path.exists():
+                self.logger.info(f"Parquet file already exists for {ticker}, skipping API call.")
+                ticker_summary["status"] = "skipped_existing"
+                ticker_summary["skipped_existing"] = True
+
+                # Optional: load the existing file to capture statistics
+                try:
+                    df_existing = pd.read_parquet(parquet_path)
+                    ticker_summary["rows_fetched"] = len(df_existing)
+                    ticker_summary["start_date"] = str(df_existing.index.min())
+                    ticker_summary["end_date"] = str(df_existing.index.max())
+                    stats_desc = df_existing.describe().to_dict()
+                    ticker_summary["summary_statistics"] = stats_desc
+                    missing = df_existing.isnull().sum().to_dict()
+                    missing_pct = (df_existing.isnull().mean() * 100).to_dict()
+                    ticker_summary["missing_values"] = {
+                        col: {"count": missing[col], "percent": missing_pct[col]}
+                        for col in df_existing.columns
+                    }
+                except Exception as e:
+                    self.logger.warning(f"Failed to read existing file for {ticker}: {str(e)}")
+                    ticker_summary["errors"] = f"Failed to read existing file: {str(e)}"
+
+                report.append(ticker_summary)
                 continue
 
+            # If file does not exist, proceed with API fetch
+            try:
+                df = self.fetch_data(ticker)
+                # df = self.download_symbol(ticker)
+
+                if df.empty:
+                    ticker_summary["status"] = "skipped"
+                    ticker_summary["errors"] = "No data returned from API."
+                    self.logger.warning(f"Ingestion skipped for {ticker} due to no source data.")
+                    report.append(ticker_summary)
+                    continue
+
+                self.validate_response(df)
+
+                # Capture statistics
+                ticker_summary["rows_fetched"] = len(df)
+                ticker_summary["start_date"] = str(df.index.min())
+                ticker_summary["end_date"] = str(df.index.max())
+
+                # Missing values
+                missing = df.isnull().sum().to_dict()
+                missing_pct = (df.isnull().mean() * 100).to_dict()
+                ticker_summary["missing_values"] = {
+                    col: {"count": missing[col], "percent": missing_pct[col]} for col in df.columns
+                }
+
+                # Summary statistics
+                stats_desc = df.describe().to_dict()
+                ticker_summary["summary_statistics"] = stats_desc
+
+                # Outliers (z-score > 3) for numeric columns
+                numeric_cols = df.select_dtypes(include=[np.number]).columns
+                z_scores = np.abs(stats.zscore(df[numeric_cols].dropna()))
+                if z_scores.size > 0:
+                    outliers_count = dict(zip(numeric_cols, (z_scores > 3).sum(axis=0)))
+                    ticker_summary["outliers"] = outliers_count
+                else:
+                    ticker_summary["outliers"] = {}
+
+                self.save_to_parquet(df, ticker)
+                ticker_summary["status"] = "success"
+
+            except Exception as e:
+                self.logger.error(f"Processing failed for ticker {ticker}: {str(e)}")
+                ticker_summary["status"] = "failed"
+                ticker_summary["errors"] = str(e)
+
+            report.append(ticker_summary)
+
+        # Save the JSON report
+        report_path = Path(self.cfg.paths.data_storage.report) / "ingestion_report.json"
+        try:
+            with open(report_path, "w") as f:
+                json.dump(report, f, indent=4)
+            self.logger.info(f"Ingestion report saved to: {report_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save ingestion report: {str(e)}")
+
         self.logger.info("Ingestion pipeline run completed for all tickers.")
+
+        self.logger.info("Generating data ingestion report...")
+        html_report_path = Path(self.cfg.paths.data_storage.report) / "ingestion_report.html"
+        generate_html_report(report_json_path=report_path, output_path=html_report_path)

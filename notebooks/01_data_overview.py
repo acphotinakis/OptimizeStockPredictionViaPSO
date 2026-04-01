@@ -41,12 +41,23 @@ logger.info(f"\n{df.describe()}")
 logger.info("\nTotal Missing Values:")
 logger.info(f"\n{df.isnull().sum()}")
 
+# Additional descriptive statistics
+logger.info("\nSkewness of each column:")
+logger.info(f"\n{df.skew()}")
+
+logger.info("\nKurtosis of each column:")
+logger.info(f"\n{df.kurtosis()}")
+
+logger.info("\nMedian values of each column:")
+logger.info(f"\n{df.median()}")
+
+logger.info("\nQuantiles (5%, 25%, 50%, 75%, 95%):")
+logger.info(f"\n{df.quantile([0.05, 0.25, 0.5, 0.75, 0.95])}")
+
 # ── Price and Volume Visualization ───────────────────────────────────
 fig, ax = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
 df["close"].plot(ax=ax[0], color="blue", title="SPY Close Price")
-df["volume"].plot(
-    ax=ax[1], kind="area", color="gray", alpha=0.3, title="Transaction Volume"
-)
+df["volume"].plot(ax=ax[1], kind="area", color="gray", alpha=0.3, title="Transaction Volume")
 
 plt.tight_layout()
 plot_path = Path(cfg.paths.data_storage.plots) / "01_data_overview.png"

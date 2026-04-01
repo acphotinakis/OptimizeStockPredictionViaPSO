@@ -57,26 +57,58 @@ def ingest():
     logger.info("--- Ingestion Complete ---")
 
 
-@app.command()
-def generate_reports():
-    cfg = load_config()
-    logger = setup_logger("report_generation", cfg.paths.log_dir)
+# @app.command()
+# def generate_reports():
+#     cfg = load_config()
+#     logger = setup_logger("report_generation", cfg.paths.log_dir)
 
-    if not validate_config(cfg):
-        logger.error("Configuration validation failed. Aborting.")
-        raise SystemExit(1)
+#     if not validate_config(cfg):
+#         logger.error("Configuration validation failed. Aborting.")
+#         raise SystemExit(1)
 
-    if not validate_environment():
-        logger.error("Environment validation failed. Aborting.")
-        raise SystemExit(1)
+#     if not validate_environment():
+#         logger.error("Environment validation failed. Aborting.")
+#         raise SystemExit(1)
 
-    set_seed(cfg.seed)
-    ProjectPaths(cfg).ensure_directories()
+#     set_seed(cfg.seed)
+#     ProjectPaths(cfg).ensure_directories()
 
-    logger.info("--- Starting Data Ingestion Phase ---")
-    ingestor = AlpacaIngestor(cfg, logger)
-    ingestor.run(cfg.data.tickers)
-    logger.info("--- Ingestion Complete ---")
+#     logger.info("--- Starting Data Ingestion Phase ---")
+#     ingestor = AlpacaIngestor(cfg, logger)
+#     ingestor.run(cfg.data.tickers)
+#     logger.info("--- Ingestion Complete ---")
+
+
+import json
+from pathlib import Path
+from src.report_generation.generate_data_validation_report import generate_validation_html_report
+
+
+def save_and_report(cfg, report: dict, logger, json_report_name: str):
+    """
+    Save the JSON validation report and generate an HTML report.
+    """
+    report_dir = Path(cfg.paths.data_storage.report)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save JSON report
+    report_path = report_dir / f"{json_report_name}.json"
+    try:
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=4)
+        logger.info(f"Validation report saved to: {report_path}")
+    except Exception as e:
+        logger.error(f"Failed to save validation report: {str(e)}")
+        return  # Abort HTML generation if JSON fails
+
+    # Generate HTML report
+    html_report_path = report_dir / f"{json_report_name}.html"
+    try:
+        logger.info("Generating data validation HTML report...")
+        generate_validation_html_report(report_json_path=report_path, output_path=html_report_path)
+        logger.info(f"HTML report saved to: {html_report_path}")
+    except Exception as e:
+        logger.error(f"Failed to generate HTML report: {str(e)}")
 
 
 @app.command()
@@ -107,10 +139,12 @@ def process():
 
         # 1. Validation & Cleaning
         val_report = run_validation_suite(df, cfg)
+        save_and_report(cfg, val_report, logger, json_report_name=f"{ticker}_validation")
+        import sys
+
+        sys.exit(0)
         if not val_report["is_fit_for_training"]:
-            logger.error(
-                f"Data validation failed for {ticker}: {val_report['failed_reasons']}"
-            )
+            logger.error(f"Data validation failed for {ticker}: {val_report['failed_reasons']}")
             continue
         df_clean = run_cleaning_pipeline(df, cfg)
 
@@ -122,9 +156,7 @@ def process():
 
         # 4. Create target variable (mid-price return for next time step)
         target_method = getattr(cfg.features, "target_method", "mid_price_return")
-        df_with_target = create_target_variable(
-            df_feats, method=target_method, horizon=1
-        )
+        df_with_target = create_target_variable(df_feats, method=target_method, horizon=1)
 
         if not validate_target(df_with_target):
             logger.error(f"Target validation failed for {ticker}. Skipping.")
@@ -137,9 +169,7 @@ def process():
         train_selected = run_selection_pipeline(
             train_df, cfg.features.selection, selected_features=None
         )
-        selected_feature_names = [
-            col for col in train_selected.columns if col != "target"
-        ]
+        selected_feature_names = [col for col in train_selected.columns if col != "target"]
 
         # Apply same features to val/test sets
         val_selected = run_selection_pipeline(
@@ -226,9 +256,7 @@ def optimize():
     # using the `src.data.dataset` and `src.data.split` modules.
     train_loader, val_loader = None, None  # Placeholder for data loaders
 
-    pso = ImprovedPSO(
-        cfg, cfg.optimization.search_space, train_loader, val_loader, device
-    )
+    pso = ImprovedPSO(cfg, cfg.optimization.search_space, train_loader, val_loader, device)
     best_config = pso.search()
 
     logger.info(f"--- Optimization Complete ---")
