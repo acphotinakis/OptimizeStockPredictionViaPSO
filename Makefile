@@ -1,0 +1,52 @@
+.PHONY: setup ingest features train optimize evaluate clean lint test
+
+# Environment Setup
+setup:
+	poetry install
+	cp .env.example .env
+
+# Data Pipeline
+ingest:
+	poetry run python3 main.py ingest
+
+features:
+	poetry run python3 main.py features
+
+# ML Workflow
+train:
+	poetry run python3 main.py train --config model=base_lstm
+
+optimize:
+	poetry run python3 main.py optimize --swarm_size 20 --iterations 50
+
+evaluate:
+	poetry run python3 main.py evaluate --model_path models/checkpoints/best_model.pt
+
+# ── Pip requirements ──────────────────────────────────────────────────────
+req-freeze:
+	@echo "Updating requirements.txt (with versions)..."
+	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sort > requirements.txt
+
+req-no-versions:
+	@echo "Updating requirements_no_versions.txt (without versions)..."
+	pip3 freeze | grep -vE '^(pip|setuptools|wheel)' | sed 's/==.*//' | sort | uniq > requirements_no_versions.txt
+
+# ── Conda environment export ─────────────────────────────────────────────
+conda-export:
+	@echo "Exporting full conda environment (with versions)..."
+	conda env export --no-builds | grep -v '^prefix:' > environment.yml
+
+conda-export-no-versions:
+	@echo "Exporting conda environment (without versions)..."
+	conda list -e | sed 's/==.*//' | sort | uniq > conda_packages_no_versions.txt
+
+# Quality Control
+lint:
+	poetry run ruff check src/
+	poetry run black --check src/
+
+test:
+	poetry run pytest tests/
+
+clean:
+	rm -rf logs/* data/interim/* data/processed/*

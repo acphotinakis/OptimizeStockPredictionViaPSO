@@ -1,0 +1,29 @@
+# configs/config.yaml
+
+defaults:
+  - data: data
+  - features: features
+  - model: model
+  - optimization: pso
+  - _self_
+
+# Global Experiment Settings
+experiment_name: "pso_lstm_trading_v1"
+seed: 42
+device: "cuda" # Options: "cpu", "cuda", "mps"
+
+# Output and Artifact Management
+paths:
+  log_dir: "logs/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}"
+  model_save_path: "models/checkpoints/${experiment_name}"
+  results_dir: "reports/results/${experiment_name}"
+  data_storage:
+    raw: "data/raw"
+    interim: "data/interim"
+    processed: "data/processed"
+    plots: "data/plots"
+
+# Hydra execution overrides
+hydra:
+  run:
+    dir: ${paths.log_dir}

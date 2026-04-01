@@ -1,0 +1,38 @@
+# configs/features/features.yaml
+
+# Technical Indicator Windows 
+indicators:
+  rsi:
+    window: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  bollinger_bands:
+    window: 20
+    std_dev: 2
+  ema:
+    windows: [9, 21, 50]
+  sma:
+    windows: [50, 200]
+
+# Statistical Rolling Features
+statistics:
+  rolling_mean: 30 # Minutes
+  rolling_std: 30  # Minutes
+
+# Wavelet Denoising (Haar Transform) 
+denoising:
+  enabled: true
+  wavelet_type: "haar"
+  decomposition_level: 1
+
+# Feature Selection 
+selection:
+  pearson_threshold: 0.95
+  use_xgboost_importance: true
+  top_n_features: 20
+
+# Target Variable Creation
+target_method: "mid_price_return" # Options: "mid_price_return", "close_return", "close_price"
+target_horizon: 1 # Prediction horizon in time steps

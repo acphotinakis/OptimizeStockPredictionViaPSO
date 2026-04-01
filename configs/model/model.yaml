@@ -1,0 +1,23 @@
+# configs/model/model.yaml
+
+# Architecture Defaults 
+architecture:
+  input_size: null # Determined dynamically at runtime based on features
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  bidirectional: false
+
+# Training Settings 
+training:
+  optimizer: "Adam"
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 100
+  weight_decay: 1e-5
+  early_stopping_patience: 10
+
+# Normalization 
+scaling:
+  method: "minmax"
+  range: [-1, 1]
