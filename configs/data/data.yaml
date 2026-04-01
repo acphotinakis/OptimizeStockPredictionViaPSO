@@ -1,0 +1,30 @@
+# configs/data/data.yaml
+
+# Alpaca API Configuration (Interpolated from .env)
+api:
+  key: ${oc.env:ALPACA_API_KEY}
+  secret: ${oc.env:ALPACA_SECRET_KEY}
+  base_url: "https://paper-api.alpaca.markets"
+
+# Dataset Definition 
+tickers: ["SPY", "AAPL", "MSFT", "GOOGL", "TSLA", "NVDA", "JPM", "V", "UNH", "HD"]
+timeframe: "1Min" # High-frequency intraday 
+start_date: "2021-01-01"
+end_date: "2026-01-01"
+
+# Data Splits (3Y Train / 1Y Val / 1Y Test) 
+splits:
+  train_years: 3
+  val_years: 1
+  test_years: 1
+
+# Validation and Integrity 
+validation:
+  max_missing_pct: 0.05
+  drop_duplicates: true
+  handle_outliers: "winsorize" # Options: "drop", "winsorize", "none"
+
+# Cleaning Strategies 
+cleaning:
+  short_gap_threshold: 5 # Minutes (Forward-fill)
+  long_gap_threshold: 15 # Minutes (Delete sequence)

@@ -1,0 +1,33 @@
+# configs/features/features.yaml
+
+# Technical Indicator Windows 
+indicators:
+  rsi:
+    window: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  bollinger_bands:
+    window: 20
+    std_dev: 2
+  ema:
+    windows: [9, 21, 50]
+  sma:
+    windows: [50, 200]
+
+# Statistical Rolling Features
+statistics:
+  rolling_mean: 30 # Minutes
+  rolling_std: 30  # Minutes
+
+# Wavelet Denoising (Haar Transform) 
+denoising:
+  enabled: true
+  wavelet_type: "haar"
+  decomposition_level: 1
+
+# Feature Selection 
+selection:
+  pearson_threshold: 0.95
+  use_xgboost_importance: true

@@ -1,0 +1,37 @@
+# configs/optimization/pso.yaml
+
+# Swarm Parameters 
+swarm:
+  particles: 20
+  iterations: 50
+  inertia_weight: 0.9 # Decays over time (w)
+  cognitive_coeff: 1.5 # (c1)
+  social_coeff: 2.0 # (c2)
+  
+# Improved PSO Features 
+improvements:
+  mutation_factor: 0.1 # Adaptive mutation to avoid local optima
+  non_linear_inertia: true
+
+# Search Space Constraints 
+search_space:
+  hidden_size: 
+    type: "int"
+    range: [32, 512]
+  num_layers: 
+    type: "categorical"
+    values: [1, 2, 3, 4]
+  dropout: 
+    type: "float"
+    range: [0.0, 0.5]
+  learning_rate: 
+    type: "float"
+    range: [1e-5, 1e-1]
+  lookback_window: 
+    type: "categorical"
+    values: [10, 30, 60, 120] # Minutes 
+
+# Fitness Strategy 
+fitness:
+  primary_metric: "sharpe_ratio"
+  risk_penalty: 0.2 # Penalty for Max Drawdown
