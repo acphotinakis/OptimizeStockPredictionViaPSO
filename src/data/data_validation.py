@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 
-def check_missing_timestamps(df, freq="1min"):
+def check_missing_timestamps(df, logger, freq="1min"):
     """
     Checks for gaps in the time-series index based on the expected frequency.
 
@@ -21,22 +21,26 @@ def check_missing_timestamps(df, freq="1min"):
         logger.error("Dataframe must have a DatetimeIndex for timestamp validation.")
         return {"error": "Invalid index type"}
 
-    # Generate the perfect range based on start/end of the current dataframe
     expected_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq=freq)
     missing_ts = expected_range.difference(df.index)
+    missing_pct = len(missing_ts) / len(expected_range) if len(expected_range) > 0 else 0
 
-    missing_pct = (
-        len(missing_ts) / len(expected_range) if len(expected_range) > 0 else 0
+    logger.info(
+        f"Timestamp check: expected {len(expected_range)} entries, found {len(df.index)}, "
+        f"missing {len(missing_ts)} ({missing_pct:.2%})"
     )
+
+    if len(missing_ts) > 0:
+        logger.info(f"First 10 missing timestamps: {missing_ts[:10].tolist()}")
 
     return {
         "missing_count": len(missing_ts),
         "missing_pct": missing_pct,
-        "missing_indices": missing_ts.tolist()[:10],  # Return first 10 for debugging
+        "missing_indices": missing_ts.tolist()[:10],
     }
 
 
-def check_duplicates(df):
+def check_duplicates(df, logger):
     """
     Identifies duplicate timestamps in the index.
     """
@@ -46,7 +50,7 @@ def check_duplicates(df):
     return {"duplicate_count": int(duplicate_count), "is_valid": duplicate_count == 0}
 
 
-def check_missing_values(df):
+def check_missing_values(df, logger):
     """
     Checks for NaN or null values across all OHLCV columns.
     """
@@ -60,49 +64,48 @@ def check_missing_values(df):
     }
 
 
-def check_integrity(df):
+def check_integrity(df, logger):
     """
     Checks for data integrity issues like negative volumes or invalid OHLC relationships.
-    
+
     Returns:
         dict: Report of integrity issues found.
     """
     issues = []
-    
+
     # Check for negative volumes
     if "volume" in df.columns:
         negative_volumes = (df["volume"] < 0).sum()
         if negative_volumes > 0:
             issues.append(f"Found {negative_volumes} negative volume values")
-    
+
     # Check for zero volumes (suspicious but not necessarily invalid)
     if "volume" in df.columns:
         zero_volumes = (df["volume"] == 0).sum()
         if zero_volumes > 0:
             logger.warning(f"Found {zero_volumes} zero volume values")
-    
+
     # Check OHLC relationships: high >= low, high >= open, high >= close, low <= open, low <= close
     if all(col in df.columns for col in ["open", "high", "low", "close"]):
-        invalid_high = ((df["high"] < df["low"]) | 
-                       (df["high"] < df["open"]) | 
-                       (df["high"] < df["close"])).sum()
-        
-        invalid_low = ((df["low"] > df["open"]) | 
-                      (df["low"] > df["close"])).sum()
-        
+        invalid_high = (
+            (df["high"] < df["low"]) | (df["high"] < df["open"]) | (df["high"] < df["close"])
+        ).sum()
+
+        invalid_low = ((df["low"] > df["open"]) | (df["low"] > df["close"])).sum()
+
         if invalid_high > 0:
             issues.append(f"Found {invalid_high} rows where high < other prices")
-        
+
         if invalid_low > 0:
             issues.append(f"Found {invalid_low} rows where low > other prices")
-    
+
     return {
         "issues": issues,
         "is_valid": len(issues) == 0,
     }
 
 
-def detect_outliers(df, method="iqr"):
+def detect_outliers(df, logger, method="iqr"):
     """
     Detects anomalies in price returns to flag extreme market shocks or bad data.
 
@@ -138,24 +141,25 @@ def detect_outliers(df, method="iqr"):
     return outlier_report
 
 
-def run_validation_suite(df, cfg):
+def run_validation_suite(df, cfg, logger):
     """
     Orchestrates all checks and compares against project configuration thresholds.
 
     Returns:
         dict: A structured report indicating if the data is fit for training.
     """
+    logger.info("Running Valiation suite.")
     # Extract frequency from config (default to '1min' per proposal )
     freq = getattr(cfg.data, "timeframe", "1min")
     max_allowed_missing = cfg.data.validation.max_missing_pct
 
     logger.info("Running financial data validation suite...")
 
-    ts_report = check_missing_timestamps(df, freq)
-    dup_report = check_duplicates(df)
-    null_report = check_missing_values(df)
-    outlier_report = detect_outliers(df)
-    integrity_report = check_integrity(df)
+    ts_report = check_missing_timestamps(df, logger, freq)
+    dup_report = check_duplicates(df, logger)
+    null_report = check_missing_values(df, logger)
+    outlier_report = detect_outliers(df, logger)
+    integrity_report = check_integrity(df, logger)
 
     # Final pass/fail logic based on configuration
     failed_checks = []
@@ -166,7 +170,7 @@ def run_validation_suite(df, cfg):
 
     if not dup_report["is_valid"]:
         failed_checks.append("Duplicate timestamps detected in index")
-    
+
     if not integrity_report["is_valid"]:
         failed_checks.extend(integrity_report["issues"])
 

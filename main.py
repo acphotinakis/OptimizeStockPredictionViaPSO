@@ -81,34 +81,46 @@ def ingest():
 
 import json
 from pathlib import Path
-from src.report_generation.generate_data_validation_report import generate_validation_html_report
+from src.report_generation.generate_data_validation_report import (
+    generate_portfolio_validation_report,
+)
 
 
-def save_and_report(cfg, report: dict, logger, json_report_name: str):
-    """
-    Save the JSON validation report and generate an HTML report.
-    """
+def save_and_report(cfg, report, logger, json_report_name):
     report_dir = Path(cfg.paths.data_storage.report)
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save JSON report
     report_path = report_dir / f"{json_report_name}.json"
+
     try:
         with open(report_path, "w") as f:
-            json.dump(report, f, indent=4)
+            json.dump(report, f, indent=4, default=json_serializer)
         logger.info(f"Validation report saved to: {report_path}")
     except Exception as e:
         logger.error(f"Failed to save validation report: {str(e)}")
-        return  # Abort HTML generation if JSON fails
+        return
 
-    # Generate HTML report
-    html_report_path = report_dir / f"{json_report_name}.html"
-    try:
-        logger.info("Generating data validation HTML report...")
-        generate_validation_html_report(report_json_path=report_path, output_path=html_report_path)
-        logger.info(f"HTML report saved to: {html_report_path}")
-    except Exception as e:
-        logger.error(f"Failed to generate HTML report: {str(e)}")
+    # # Generate HTML report
+    # html_report_path = report_dir / f"{json_report_name}.html"
+    # try:
+    #     logger.info("Generating data validation HTML report...")
+    #     generate_validation_html_report(report_json_path=report_path, output_path=html_report_path)
+    #     logger.info(f"HTML report saved to: {html_report_path}")
+    # except Exception as e:
+    #     logger.error(f"Failed to generate HTML report: {str(e)}")
+
+
+def json_serializer(obj):
+    import numpy as np
+    import pandas as pd
+
+    if isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+        return str(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    return str(obj)
 
 
 @app.command()
@@ -126,6 +138,8 @@ def process():
 
     import pandas as pd
 
+    all_validation_reports = []
+
     logger.info("--- Starting Data Processing Phase ---")
     for ticker in cfg.data.tickers:
         logger.info(f"Processing ticker: {ticker}")
@@ -138,14 +152,17 @@ def process():
         df = pd.read_parquet(raw_file)
 
         # 1. Validation & Cleaning
-        val_report = run_validation_suite(df, cfg)
-        save_and_report(cfg, val_report, logger, json_report_name=f"{ticker}_validation")
-        import sys
+        val_report = run_validation_suite(df, cfg, logger)
+        val_report["ticker"] = ticker
 
-        sys.exit(0)
-        if not val_report["is_fit_for_training"]:
-            logger.error(f"Data validation failed for {ticker}: {val_report['failed_reasons']}")
-            continue
+        logger.info(f"Validation Report for {ticker}")
+        for key, value in enumerate(val_report):
+            logger.info(f"{key}: value {value}")
+        all_validation_reports.append((val_report))
+
+        # if not val_report["is_fit_for_training"]:
+        #     logger.error(f"Data validation failed for {ticker}: {val_report['failed_reasons']}")
+        #     continue
         df_clean = run_cleaning_pipeline(df, cfg)
 
         # 2. Denoising FIRST (before calculating indicators to reduce noise impact)
@@ -230,6 +247,12 @@ def process():
         logger.info(f"  Train: {save_path_train} ({len(train_scaled)} samples)")
         logger.info(f"  Val:   {save_path_val} ({len(val_scaled)} samples)")
         logger.info(f"  Test:  {save_path_test} ({len(test_scaled)} samples)")
+
+
+# save_and_report(cfg, all_validation_reports, logger, json_report_name=f"validation")
+# import sys
+
+# sys.exit(0)
 
 
 @app.command()

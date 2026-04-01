@@ -69,173 +69,142 @@ def _require_mpl(func):
     return wrapper
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Plot Functions
-# ══════════════════════════════════════════════════════════════════════════════
+import json
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
+import base64
+import io
+import logging
+
+logger = logging.getLogger(__name__)
+
+PLOT_DIR = Path("data/reports/plots")
+PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def render_summary_statistics(stats: dict) -> str:
+def _plot_dict_bar(data: dict, title: str, xlabel: str = "", ylabel: str = "Count") -> str:
     """
-    Generate a visually appealing transposed HTML table for summary statistics.
-    Columns = features (open, high, low, close, volume, trade_count, vwap)
-    Rows = metrics (count, mean, std, min, 25%, 50%, 75%, max)
+    Creates a horizontal bar plot from a dictionary and returns the base64-encoded PNG.
     """
-    if not stats:
-        return "<p>No summary statistics available.</p>"
+    if not data:
+        return "<p>No data to plot.</p>"
 
-    # Define the order of columns and rows
-    columns_order = ["open", "high", "low", "close", "volume", "trade_count", "vwap"]
-    rows_order = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
+    fig, ax = plt.subplots(figsize=(6, 4))
+    pd.Series(data).sort_values().plot(kind="barh", ax=ax, color="#58a6ff")
+    ax.set_title(title, fontsize=10, color="#c9d1d9")
+    ax.set_xlabel(xlabel, color="#c9d1d9")
+    ax.set_ylabel(ylabel, color="#c9d1d9")
+    ax.tick_params(colors="#c9d1d9")
+    fig.patch.set_facecolor("#0d1117")
+    ax.set_facecolor("#161b22")
+    plt.tight_layout()
 
-    # CSS styling
-    style = """
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="#0d1117")
+    plt.close(fig)
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode()
+    return f'<img src="data:image/png;base64,{img_base64}" style="width:100%;max-width:600px;margin:12px 0;">'
+
+
+def generate_portfolio_validation_report(report_json_path: Path, output_path: Path):
+    """
+    Generates a single HTML validation report for all tickers with a clickable ticker list.
+    """
+    with open(report_json_path, "r") as f:
+        reports = json.load(f)
+
+    if not isinstance(reports, list):
+        raise ValueError("Expected a list of reports in JSON file.")
+
+    html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <title>Portfolio Data Validation Report</title>
     <style>
-        .summary-table {
-            border-collapse: collapse;
-            width: 100%;
-            max-width: 900px;
-            margin: 12px 0;
-            font-family: monospace;
-        }
-        .summary-table th, .summary-table td {
-            border: 1px solid #30363d;
-            padding: 8px 12px;
-            text-align: center;
-        }
-        .summary-table th {
-            background-color: #161b22;
-            color: #58a6ff;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-        .summary-table tr:nth-child(even) {
-            background-color: #0d1117;
-        }
-        .summary-table tr:nth-child(odd) {
-            background-color: #161b22;
-        }
-        .summary-table tr:hover {
-            background-color: #21262d;
-        }
+        body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:24px; }
+        h1,h2,h3 { color:#58a6ff; }
+        table { border-collapse:collapse; width:100%; max-width:700px; margin:16px 0; }
+        th,td { border:1px solid #30363d; padding:8px 12px; text-align:left; }
+        th { background:#161b22; color:#8b949e; }
+        tr:hover { background:#161b22; }
+        .ticker-list { margin-bottom:24px; }
+        .ticker-link { margin-right:12px; color:#58a6ff; cursor:pointer; text-decoration:underline; }
+        .ticker-section { margin-bottom:48px; padding-bottom:24px; border-bottom:1px solid #30363d; }
     </style>
+    <script>
+        function scrollToTicker(id) {
+            const el = document.getElementById(id);
+            if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+        }
+    </script>
+    </head>
+    <body>
+    <h1>🚀 Portfolio Data Validation Report</h1>
+    <div class="ticker-list"><strong>Tickers:</strong> 
     """
 
-    # Build table header
-    header_html = "<tr><th>Metric</th>"
-    for col in columns_order:
-        header_html += f"<th>{col}</th>"
-    header_html += "</tr>"
+    # ticker navigation links
+    for report in reports:
+        ticker = report.get("ticker", "UNKNOWN")
+        html += f'<span class="ticker-link" onclick="scrollToTicker(\'ticker_{ticker}\')">{ticker}</span>'
+    html += "</div>"
 
-    # Build table rows
-    rows_html = ""
-    for metric in rows_order:
-        rows_html += f"<tr><td>{metric}</td>"
-        for col in columns_order:
-            value = stats.get(col, {}).get(metric, "—")
-            # Format numeric values
-            if isinstance(value, float):
-                value = f"{value:,.4f}"
-            rows_html += f"<td>{value}</td>"
-        rows_html += "</tr>"
+    # ticker sections
+    for report in reports:
+        ticker = report.get("ticker", "UNKNOWN")
+        html += f'<div class="ticker-section" id="ticker_{ticker}">'
+        html += f'<h2>{ticker} — {"✅ Fit for Training" if report["is_fit_for_training"] else "❌ Not Fit for Training"}</h2>'
 
-    table_html = (
-        style
-        + "<h3>Summary Statistics</h3>"
-        + "<table class='summary-table'>"
-        + header_html
-        + rows_html
-        + "</table>"
-    )
+        # Failed checks
+        failed = report.get("failed_reasons", [])
+        if failed:
+            html += "<h3>Failed Checks</h3><ul>"
+            for reason in failed:
+                html += f"<li style='color:#f85149'>{reason}</li>"
+            html += "</ul>"
 
-    return table_html
-
-
-def generate_validation_html_report(
-    report_json_path: Path,
-    output_path: Path = Path("data/reports/ingestion_report.html"),
-) -> Path:
-    """
-    Generate an HTML ingestion report from ingestion_report.json.
-    Includes per-ticker summary, missing values, and summary statistics.
-    """
-
-    # Load JSON data
-    try:
-        with open(report_json_path, "r") as f:
-            report_data = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load JSON report: {e}")
-        return None
-
-    # Helper to generate table row
-    def _row(label, value):
-        return f"<tr><td>{label}</td><td>{value}</td></tr>"
-
-    # Start HTML (CSS braces escaped)
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Alpaca Ingestion Report</title>
-<style>
-body {{ background:#0d1117; color:#c9d1d9; font-family:monospace; padding:24px; }}
-h1,h2 {{ color:#58a6ff; }}
-table {{ border-collapse:collapse; width:100%; max-width:900px; margin:16px 0; }}
-th,td {{ border:1px solid #30363d; padding:8px 12px; text-align:left; }}
-th {{ background:#161b22; color:#8b949e; font-size:0.85em; text-transform:uppercase; }}
-tr:hover {{ background:#161b22; }}
-.section {{ margin-top:32px; }}
-.badge-success {{ color:#3fb950; font-weight:bold; }}
-.badge-failed {{ color:#f85149; font-weight:bold; }}
-.badge-skipped {{ color:#f0a500; font-weight:bold; }}
-</style>
-</head>
-<body>
-<h1>🚀 Alpaca Ingestion Report</h1>
-<p>Total tickers: <strong>{len(report_data)}</strong></p>
-"""
-
-    # Iterate over each ticker entry
-    for entry in report_data:
-        status = entry.get("status", "unknown")
-        if status == "success":
-            badge = "<span class='badge-success'>✅ Success</span>"
-        elif status == "skipped_existing":
-            badge = "<span class='badge-skipped'>⏭ Skipped (exists)</span>"
-        else:
-            badge = "<span class='badge-failed'>❌ Failed</span>"
-
-        html += f"""
-<div class="section">
-<h2>{entry.get('ticker','—')} {badge}</h2>
-<table>
-<tr><th>Metric</th><th>Value</th></tr>
-{_row("Rows fetched", entry.get("rows_fetched","—"))}
-{_row("Chunks processed", entry.get("chunks_processed","—"))}
-{_row("Start date", entry.get("start_date","—"))}
-{_row("End date", entry.get("end_date","—"))}
-{_row("Parquet file", entry.get("parquet_file","—"))}
-{_row("Errors", entry.get("errors","—"))}
-</table>
-<h3>Missing Values (%)</h3>
-<table>
-<tr><th>Column</th><th>Count</th><th>Percent</th></tr>
-"""
-        missing = entry.get("missing_values", {})
-        for col, mv in missing.items():
-            html += f"<tr><td>{col}</td><td>{mv.get('count',0)}</td><td>{mv.get('percent',0.0):.2f}%</td></tr>"
-
+        # Timestamp integrity
+        ts = report.get("timestamp_integrity", {})
+        html += "<h3>Timestamp Integrity</h3><table><tr><th>Metric</th><th>Value</th></tr>"
+        for k, v in ts.items():
+            if k != "missing_indices":
+                html += f"<tr><td>{k}</td><td>{v}</td></tr>"
         html += "</table>"
 
-        stats = entry.get("summary_statistics", {})
-        html += render_summary_statistics(stats)
+        # Null values plot
+        nulls = report.get("null_values", {}).get("null_counts", {})
+        html += "<h3>Null Values</h3>" + _plot_dict_bar(nulls, f"Null Values per Column ({ticker})")
 
-        html += "</div>"
+        # Outliers plot
+        outliers = report.get("outliers", {})
+        html += "<h3>Outliers</h3>" + _plot_dict_bar(outliers, f"Outliers per Column ({ticker})")
+
+        # Integrity issues
+        integrity_issues = report.get("integrity", {}).get("issues", [])
+        html += "<h3>Integrity Issues</h3>"
+        if integrity_issues:
+            html += "<ul>"
+            for issue in integrity_issues:
+                html += f"<li style='color:#f85149'>{issue}</li>"
+            html += "</ul>"
+        else:
+            html += "<p style='color:#3fb950'>No integrity issues detected.</p>"
+
+        html += "</div>"  # close ticker-section
 
     html += "</body></html>"
 
-    # Write to file
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
-    logger.info(f"HTML ingestion report saved -> {output_path}")
+    logger.info(f"Portfolio HTML validation report generated -> {output_path}")
     return output_path
+
+
+if __name__ == "__main__":
+    generate_portfolio_validation_report(
+        Path("data/reports/validation.json"), Path("data/reports/validation.html")
+    )
