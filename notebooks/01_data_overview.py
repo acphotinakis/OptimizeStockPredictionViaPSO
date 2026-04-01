@@ -23,7 +23,7 @@ initialize(config_path=str(cfg_path), version_base="1.3")
 cfg = compose(config_name="config")
 
 # ── Logger setup ─────────────────────────────────────────────────────
-logger = setup_logger("data_overview", cfg.paths.log_dir)
+logger = setup_logger("01_data_overview", cfg.paths.log_dir)
 
 # ── Load raw data (e.g., SPY benchmark) ───────────────────────────────
 raw_path = Path(cfg.paths.data_storage.raw) / "SPY_1Min.parquet"

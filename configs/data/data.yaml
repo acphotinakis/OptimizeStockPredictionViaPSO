@@ -11,6 +11,8 @@ tickers: ["SPY", "AAPL", "MSFT", "GOOGL", "TSLA", "NVDA", "JPM", "V", "UNH", "HD
 timeframe: "1Min" # High-frequency intraday 
 start_date: "2021-01-01"
 end_date: "2026-01-01"
+adjustment: all
+data_feed: sip
 
 # Data Splits (3Y Train / 1Y Val / 1Y Test) 
 splits:
