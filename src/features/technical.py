@@ -94,8 +94,10 @@ def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["williams_r"] = -100 * (high14 - C) / (high14 - low14 + 1e-10)
 
     # ---- Rate of Change ----------------------------------------------------
-    out["roc_5"] = C.pct_change(5) * 100
-    out["roc_10"] = C.pct_change(10) * 100
+    # out["roc_5"] = C.pct_change(5) * 100
+    # out["roc_10"] = C.pct_change(10) * 100
+    out["roc_5"] = C.pct_change(5, fill_method=None) * 100
+    out["roc_10"] = C.pct_change(10, fill_method=None) * 100
 
     # ---- Money Flow Index --------------------------------------------------
     for period in (14, 30):

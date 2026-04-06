@@ -138,10 +138,13 @@ class FeatureSelector:
         # Detect GPU availability
         try:
             import torch
+
             gpu_available = torch.cuda.is_available()
-            tree_method = "gpu_hist" if gpu_available else "hist"
+            tree_method = "hist"
             if gpu_available:
-                logger.info("GPU detected - using gpu_hist for XGBoost feature selection")
+                logger.info(
+                    "GPU detected - using gpu_hist for XGBoost feature selection"
+                )
         except ImportError:
             tree_method = "hist"
             gpu_available = False
@@ -150,28 +153,34 @@ class FeatureSelector:
         nan_mask = np.isnan(y) | np.isinf(y)
         if nan_mask.any():
             n_invalid = nan_mask.sum()
-            logger.warning("Found %d NaN/inf values in labels (%.2f%%), removing them", 
-                          n_invalid, 100 * n_invalid / len(y))
+            logger.warning(
+                "Found %d NaN/inf values in labels (%.2f%%), removing them",
+                n_invalid,
+                100 * n_invalid / len(y),
+            )
             valid_mask = ~nan_mask
             X = X[valid_mask]
             y = y[valid_mask]
-        
+
         # Check for NaN/inf in features
         nan_mask_X = np.isnan(X) | np.isinf(X)
         if nan_mask_X.any():
             n_invalid = nan_mask_X.any(axis=1).sum()
-            logger.warning("Found %d rows with NaN/inf in features (%.2f%%), removing them", 
-                          n_invalid, 100 * n_invalid / len(X))
+            logger.warning(
+                "Found %d rows with NaN/inf in features (%.2f%%), removing them",
+                n_invalid,
+                100 * n_invalid / len(X),
+            )
             valid_mask = ~nan_mask_X.any(axis=1)
             X = X[valid_mask]
             y = y[valid_mask]
-        
+
         if len(X) == 0:
             logger.error("No valid samples remaining after removing NaN/inf")
             raise ValueError("All samples contain NaN/inf values")
-        
+
         logger.info("Using %d valid samples for feature selection", len(X))
-        
+
         model = xgb.XGBRegressor(
             n_estimators=300,
             max_depth=5,
@@ -179,12 +188,15 @@ class FeatureSelector:
             subsample=0.8,
             colsample_bytree=0.8,
             tree_method=tree_method,
+            device="cuda",
             random_state=42,
             verbosity=0,
             n_jobs=-1 if not gpu_available else 1,  # Use all CPUs if no GPU
         )
-        
-        logger.info("Fitting XGBoost for feature importance (method=%s)...", tree_method)
+
+        logger.info(
+            "Fitting XGBoost for feature importance (method=%s)...", tree_method
+        )
         model.fit(X, y)
         importances = model.feature_importances_  # gain-based
         self.feature_importances_ = importances

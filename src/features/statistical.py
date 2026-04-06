@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from numba import njit
 
 
 def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -40,9 +41,14 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
         out[f"ret_kurt_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).kurt()
 
     # ---- Lag-1 autocorrelation ---------------------------------------------
+    # for w in (20, 60):
+    #     out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
+    #         lambda x: pd.Series(x).autocorr(lag=1) if len(x) > 2 else 0.0,
+    #         raw=True,
+    #     )
     for w in (20, 60):
         out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
-            lambda x: pd.Series(x).autocorr(lag=1) if len(x) > 2 else 0.0,
+            lambda x: _fast_autocorr(x),
             raw=True,
         )
 
@@ -63,17 +69,33 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
     return out.fillna(0.0)
 
 
+def _fast_autocorr(x):
+    return np.corrcoef(x[:-1], x[1:])[0, 1] if len(x) > 2 else 0.0
+
+
 def _rolling_hurst(r: pd.Series, window: int) -> pd.Series:
     """Approximate Hurst exponent via rescaled range (R/S) analysis."""
 
-    def hurst_single(x: np.ndarray) -> float:
+    # def hurst_single(x: np.ndarray) -> float:
+    #     n = len(x)
+    #     if n < 10:
+    #         return 0.5
+    #     mean_x = np.mean(x)
+    #     deviations = np.cumsum(x - mean_x)
+    #     R = deviations.max() - deviations.min()
+    #     S = np.std(x, ddof=1)
+    #     if S < 1e-10:
+    #         return 0.5
+    #     return np.log(R / S) / np.log(n)
+    @njit
+    def hurst_single(x):
         n = len(x)
         if n < 10:
             return 0.5
         mean_x = np.mean(x)
-        deviations = np.cumsum(x - mean_x)
-        R = deviations.max() - deviations.min()
-        S = np.std(x, ddof=1)
+        dev = np.cumsum(x - mean_x)
+        R = dev.max() - dev.min()
+        S = np.std(x)
         if S < 1e-10:
             return 0.5
         return np.log(R / S) / np.log(n)
