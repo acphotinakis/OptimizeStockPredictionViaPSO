@@ -135,16 +135,30 @@ class FeatureSelector:
             logger.warning("XGBoost not installed; skipping importance filter.")
             return names
 
+        # Detect GPU availability
+        try:
+            import torch
+            gpu_available = torch.cuda.is_available()
+            tree_method = "gpu_hist" if gpu_available else "hist"
+            if gpu_available:
+                logger.info("GPU detected - using gpu_hist for XGBoost feature selection")
+        except ImportError:
+            tree_method = "hist"
+            gpu_available = False
+
         model = xgb.XGBRegressor(
             n_estimators=300,
             max_depth=5,
             learning_rate=0.05,
             subsample=0.8,
             colsample_bytree=0.8,
-            tree_method="hist",
+            tree_method=tree_method,
             random_state=42,
             verbosity=0,
+            n_jobs=-1 if not gpu_available else 1,  # Use all CPUs if no GPU
         )
+        
+        logger.info("Fitting XGBoost for feature importance (method=%s)...", tree_method)
         model.fit(X, y)
         importances = model.feature_importances_  # gain-based
         self.feature_importances_ = importances

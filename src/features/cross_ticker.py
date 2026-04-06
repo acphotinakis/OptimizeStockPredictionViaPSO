@@ -48,9 +48,11 @@ def compute_cross_ticker_features(
     # ---- SPY features -------------------------------------------------------
     if "SPY" in dfs:
         r_spy = dfs["SPY"]["log_return"].reindex(df_target.index).fillna(0.0)
-        C_spy = (
-            dfs["SPY"]["close"].reindex(df_target.index).ffill().fillna(method="bfill")
-        )
+        # C_spy = (
+        #     dfs["SPY"]["close"].reindex(df_target.index).ffill().fillna(method="bfill")
+        # )
+
+        C_spy = dfs["SPY"]["close"].reindex(df_target.index).ffill().bfill()
 
         # Rolling beta to SPY
         cov = r_target.rolling(rolling_window, min_periods=10).cov(r_spy)
@@ -151,7 +153,9 @@ def compute_cross_ticker_features(
         out[f"peer_corr_{rank}"] = 0.0
 
     result = out.fillna(0.0)
-    
+
     if return_peer_tickers:
-        return result, (computed_peer_tickers if computed_peer_tickers is not None else peer_tickers)
+        return result, (
+            computed_peer_tickers if computed_peer_tickers is not None else peer_tickers
+        )
     return result
