@@ -194,7 +194,8 @@ def train_default(
     """Train one XGBoostModel with hyperparameters from the config."""
 
     # Pull hyperparameters directly from cfg.xgboost
-    hp = cfg.xgboost
+    hp = getattr(cfg, "xgboost", {})
+    assert hp is not None
 
     hyperparams = {
         "objective": hp.get("objective", "multi:softprob"),
@@ -223,6 +224,7 @@ def train_default(
 
 
 def train_tune(
+    args,
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_val: np.ndarray,
@@ -331,7 +333,7 @@ def main() -> None:
     if args.mode == "default":
         model, hyperparams = train_default(cfg, X_train, y_train, X_val, y_val)
     else:
-        model, hyperparams = train_tune(X_train, y_train, X_val, y_val)
+        model, hyperparams = train_tune(args, X_train, y_train, X_val, y_val)
 
     elapsed = time.time() - t0
     print(f"\nTraining complete in {elapsed:.1f}s  ({elapsed/60:.1f} min)")

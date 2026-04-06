@@ -122,7 +122,8 @@ class XGBoostModel:
             **self._xgb_params,
         }
 
-        self._model = None  # type: Optional[xgb.XGBRegressor]
+        # self._model = None  # type: Optional[xgb.XGBRegressor]
+        self._model: Optional[xgb.XGBRegressor] = None
         self._best_iteration: int = 0
         self._feature_names: List[str] = []
         self.history: Dict[str, List[float]] = {"train_rmse": [], "val_rmse": []}
@@ -161,6 +162,8 @@ class XGBoostModel:
             early_stopping_rounds=self.early_stopping_rounds,
             eval_metric="rmse",
         )
+
+        assert self._model is not None, "XGBoost model not initialized."
 
         self._model.fit(
             X_tr_flat,
@@ -299,56 +302,15 @@ class XGBoostModel:
         except ImportError as exc:
             raise ImportError("xgboost not installed.") from exc
         self._model = xgb.XGBRegressor(**self._xgb_params)
+        assert self._model is not None
         self._model.load_model(path)
+
         logger.info("XGBoost model loaded from %s", path)
         return self
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def load_model(self, path: str) -> "XGBoostModel":
-        """Load a previously saved XGBoost booster from disk.
-
-        Args:
-            path: File path written by save().
-            cfg: Optional configuration object containing xgboost defaults.
-
-        Returns:
-            self
-        """
-        try:
-            import xgboost as xgb
-        except ImportError as exc:
-            raise ImportError(
-                "xgboost not installed. Run: pip install xgboost"
-            ) from exc
-
-        # Start with default YAML memory-safe params
-        xgb_params = _DEFAULT_PARAMS.copy()
-
-        # Override from cfg if provided
-        if self.cfg is not None:
-            xgb_params.update(getattr(self.cfg, "xgboost", {}))
-
-        # Keep the previously used constructor overrides if any
-        xgb_params.update(getattr(self, "_xgb_params", {}))
-
-        # Initialize the XGBRegressor
-        self._model = xgb.XGBRegressor(**xgb_params)
-
-        # Load the booster state from file
-        self._model.load_model(path)
-
-        # Store params for get_params()
-        self._xgb_params = xgb_params
-        self._init_kwargs = {
-            "lookback": getattr(self, "lookback", _DEFAULT_LOOKBACK),
-            **xgb_params,
-        }
-
-        logger.info("XGBoost model loaded from %s", path)
-        return self
 
     def _flatten(self, X: np.ndarray) -> np.ndarray:
         """Slice last `lookback` timesteps and flatten to [N, T×F].

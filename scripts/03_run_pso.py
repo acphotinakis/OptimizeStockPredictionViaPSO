@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
