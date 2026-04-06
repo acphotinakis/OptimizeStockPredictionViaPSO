@@ -61,7 +61,7 @@ def run_walk_forward_validation(
         if k in XGBoostModel.__init__.__code__.co_varnames
     }
     # Remove early_stopping_rounds for fold retraining (no separate val available)
-    hparams_notune = {**hparams, "early_stopping_rounds": 9999}
+    hparams_notune = {**hparams, "early_stopping_rounds": 50}
 
     N_val = len(X_val)
     fold_starts = list(range(0, N_val - fold_size, fold_size))[:max_folds]

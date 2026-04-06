@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.models.xgboost_model import XGBoostModel
+from src.models.xgboost_model import XGBoostModel, _DEFAULT_PARAMS
 from src.utils.config_loader import Config
 
 logger = logging.getLogger(__name__)
@@ -18,25 +18,7 @@ logger = logging.getLogger(__name__)
 def extract_hyperparameters(cfg: Config) -> Dict[str, Any]:
     """Extract XGBoost hyperparameters from config with defaults."""
     hp = getattr(cfg, "xgboost", {})
-
-    defaults = {
-        "objective": "multi:softprob",
-        # "num_class": 3,
-        "n_estimators": 200,
-        "max_depth": 4,
-        "learning_rate": 1e-5,
-        "subsample": 0.7,
-        "colsample_bytree": 0.6,
-        "min_child_weight": 5,
-        "gamma": 0.1,
-        "reg_alpha": 0.0,
-        "reg_lambda": 1.0,
-        "early_stopping_rounds": 50,
-        "tree_method": "hist",
-        "max_bin": 128,
-    }
-
-    return {key: hp.get(key, default) for key, default in defaults.items()}
+    return {key: hp.get(key, default) for key, default in _DEFAULT_PARAMS.items()}
 
 
 def load_artefacts(results_dir: Path, ticker: str, mode: str, seed: int):

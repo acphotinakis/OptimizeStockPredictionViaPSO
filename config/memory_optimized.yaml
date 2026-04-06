@@ -51,11 +51,11 @@ lstm:
 
 # --- XGBoost (Memory-Safe) ---
 xgboost:
-  objective: "multi:softprob"
+  objective: "reg:squarederror"
   num_class: 3
   n_estimators: 200            # smaller model
   max_depth: 4                 # shallower trees
-  learning_rate: 0.05
+  learning_rate: 0.01
   subsample: 0.7               # reduce rows per tree
   colsample_bytree: 0.6        # reduce features per tree
   min_child_weight: 5          # avoid tiny leaf nodes
@@ -68,6 +68,7 @@ xgboost:
   tree_method: "gpu_hist"      # or "hist" if GPU memory is limited
   # tree_method: "hist"      # or "hist" if GPU memory is limited
   max_bin: 128                 # smaller bins → lower memory
+  lookback: 30
 
 fitness:
   rmse_weight: 0.4

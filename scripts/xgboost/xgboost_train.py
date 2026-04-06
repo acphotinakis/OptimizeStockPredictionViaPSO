@@ -17,21 +17,12 @@ from src.utils.config_loader import load_config
 from src.models.xgboost_model import (
     XGBoostModel,
     XGBoostTuner,
-    load_windows,
     load_feature_names,
 )
-from src.evaluation import all_statistical_metrics, Backtester
-from src.evaluation.metrics import rmse as rmse_fn
+from src.evaluation import all_statistical_metrics
 from src.utils.config_loader import Config
 from helpers import (
     extract_hyperparameters,
-    load_artefacts,
-    filter_valid_kwargs,
-    load_existing_backtest,
-    load_existing_results,
-    load_model,
-    load_prices,
-    load_optimal_threshold,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +30,21 @@ logger = logging.getLogger(__name__)
 from src.utils.config_loader import Config, load_config
 from consts import *
 
+
+import psutil
+import os
+
+
+def log_memory_usage(label: str):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    logger.info(f"[{label}] Memory: {mem_info.rss / 1024**3:.2f} GB")
+
+
+# Call at key points:
+log_memory_usage("After loading data")
+log_memory_usage("After windowing")
+log_memory_usage("After training")
 
 # ======================================================================
 # Training routines
@@ -123,7 +129,7 @@ def train_tune(
         final_params = {
             **best_params,
             "n_estimators": final_n_est,
-            "early_stopping_rounds": 9999,  # effectively no early stopping
+            "early_stopping_rounds": 50,  # effectively no early stopping
         }
         final_model = XGBoostModel(**final_params)
 
@@ -162,12 +168,21 @@ def run_train(args, features_dir, results_dir, ticker, tag):
 
     logger.info("Loading features from %s", ticker_dir)
 
-    X_train_flat = np.load(ticker_dir / "X_train.npy")
-    y_train = np.load(ticker_dir / "y_train.npy")
-    X_val_flat = np.load(ticker_dir / "X_val.npy")
-    y_val = np.load(ticker_dir / "y_val.npy")
+    # Use memory mapping for large files
+    X_train_flat = np.load(ticker_dir / "X_train.npy", mmap_mode="r")
+    y_train = np.load(ticker_dir / "y_train.npy", mmap_mode="r")
+    X_val_flat = np.load(ticker_dir / "X_val.npy", mmap_mode="r")
+    y_val = np.load(ticker_dir / "y_val.npy", mmap_mode="r")
+
+    # Copy to writable arrays only when needed
+    X_train_flat = np.array(X_train_flat)
+    y_train = np.array(y_train)
+    X_val_flat = np.array(X_val_flat)
+    y_val = np.array(y_val)
 
     feature_names = load_feature_names(features_dir, ticker)
+
+    log_memory_usage("After loading data")
 
     # ---------------------------
     # Raw arrays
@@ -187,7 +202,7 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     # ---------------------------
     # Window setup
     # ---------------------------
-    max_lookback = cfg.xgboost.max_bin
+    max_lookback = getattr(cfg.xgboost, "lookback", 30)
 
     session_starts_train = np.zeros(len(X_train_flat), dtype=bool)
     session_starts_val = np.zeros(len(X_val_flat), dtype=bool)
@@ -222,6 +237,8 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     )
     logger.info("  feature_names: %d", len(feature_names) if feature_names else 0)
 
+    log_memory_usage("After windowing")
+
     # ---------------------------
     # Train
     # ---------------------------
@@ -245,6 +262,8 @@ def run_train(args, features_dir, results_dir, ticker, tag):
 
     elapsed = time.time() - t0
     logger.info(f"Training complete in {elapsed:.1f}s")
+
+    log_memory_usage("After training")
 
     # ---------------------------
     # Validation quick check

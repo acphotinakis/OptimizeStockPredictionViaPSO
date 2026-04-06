@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import xgboost as xgb
 import numpy as np
-from src.utils.config_loader import Config, load_config
+from src.utils.config_loader import Config
 from pathlib import Path
 import pickle
 
@@ -37,11 +37,12 @@ logger = logging.getLogger(__name__)
 
 # Default hyperparameter set — mirrors experiment_plan.md §5.3
 _DEFAULT_PARAMS: Dict[str, Any] = {
-    "objective": "multi:softprob",
-    # "num_class": 3,
+    "objective": "reg:squarederror",
+    "num_class": 3,
     "n_estimators": 200,
     "max_depth": 4,
-    "learning_rate": 1e-5,
+    "lookback": 30,
+    "learning_rate": 0.01,
     "subsample": 0.7,
     "colsample_bytree": 0.6,
     "colsample_bylevel": 1.0,
@@ -156,6 +157,29 @@ class XGBoostModel:
         n_jobs: Number of parallel threads (-1 = all available).
     """
 
+    def _setup_gpu_memory(self) -> None:
+        """Configure GPU memory management if using GPU training."""
+        if self._xgb_params.get("tree_method") != "gpu_hist":
+            return
+
+        try:
+            import cupy as cp
+
+            logger.info(cp.__version__)
+            logger.info(cp.cuda.runtime.getDeviceCount())
+            logger.info(cp.cuda.runtime.runtimeGetVersion())
+
+            # Set memory pool
+            pool = cp.cuda.MemoryPool()
+            cp.cuda.set_allocator(pool.malloc)
+            logger.info("GPU memory pool configured")
+        except ImportError:
+            logger.warning("cupy not available, falling back to CPU")
+            self._xgb_params["tree_method"] = "hist"
+        except Exception as e:
+            logger.warning(f"GPU setup failed: {e}, falling back to CPU")
+            self._xgb_params["tree_method"] = "hist"
+
     def __init__(
         self,
         cfg: Optional[Config] = None,
@@ -191,6 +215,8 @@ class XGBoostModel:
         self._best_iteration: int = 0
         self._feature_names: List[str] = []
         self.history: Dict[str, List[float]] = {"train_rmse": [], "val_rmse": []}
+
+        self._setup_gpu_memory()
 
     # ------------------------------------------------------------------
     # Core interface — mirrors LSTMTrainer
@@ -255,15 +281,15 @@ class XGBoostModel:
         }
 
         # Only pass eval_names if actually supported
-        if self._supports_eval_names():
-            fit_kwargs["eval_names"] = eval_names
+        # if self._supports_eval_names():
+        #     fit_kwargs["eval_names"] = eval_names
 
-        try:
-            self._model.fit(**fit_kwargs)
-        except TypeError:
-            # Fallback: remove eval_names if runtime rejects it
-            fit_kwargs.pop("eval_names", None)
-            self._model.fit(**fit_kwargs)
+        self._model.fit(**fit_kwargs)
+        # try:
+        # except TypeError:
+        #     # Fallback: remove eval_names if runtime rejects it
+        #     fit_kwargs.pop("eval_names", None)
+        #     self._model.fit(**fit_kwargs)
 
         self._best_iteration = int(getattr(self._model, "best_iteration", 0))
 
