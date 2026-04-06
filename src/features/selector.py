@@ -146,6 +146,32 @@ class FeatureSelector:
             tree_method = "hist"
             gpu_available = False
 
+        # Check for NaN/inf in labels
+        nan_mask = np.isnan(y) | np.isinf(y)
+        if nan_mask.any():
+            n_invalid = nan_mask.sum()
+            logger.warning("Found %d NaN/inf values in labels (%.2f%%), removing them", 
+                          n_invalid, 100 * n_invalid / len(y))
+            valid_mask = ~nan_mask
+            X = X[valid_mask]
+            y = y[valid_mask]
+        
+        # Check for NaN/inf in features
+        nan_mask_X = np.isnan(X) | np.isinf(X)
+        if nan_mask_X.any():
+            n_invalid = nan_mask_X.any(axis=1).sum()
+            logger.warning("Found %d rows with NaN/inf in features (%.2f%%), removing them", 
+                          n_invalid, 100 * n_invalid / len(X))
+            valid_mask = ~nan_mask_X.any(axis=1)
+            X = X[valid_mask]
+            y = y[valid_mask]
+        
+        if len(X) == 0:
+            logger.error("No valid samples remaining after removing NaN/inf")
+            raise ValueError("All samples contain NaN/inf values")
+        
+        logger.info("Using %d valid samples for feature selection", len(X))
+        
         model = xgb.XGBRegressor(
             n_estimators=300,
             max_depth=5,

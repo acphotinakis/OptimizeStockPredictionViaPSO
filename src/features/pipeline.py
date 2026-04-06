@@ -205,7 +205,17 @@ class FeaturePipeline:
         combined = pd.concat([combined, lag_df], axis=1)
         combined = combined.fillna(0.0).replace([np.inf, -np.inf], 0.0)
 
+        # Clean target variable: remove NaN and inf
+        valid_mask = ~r.isna() & ~np.isinf(r)
+        if not valid_mask.all():
+            n_invalid = (~valid_mask).sum()
+            logger.warning("Removing %d rows with NaN/inf in target variable (%.2f%%)", 
+                          n_invalid, 100 * n_invalid / len(r))
+            combined = combined[valid_mask]
+            r = r[valid_mask]
+        
         feature_names = list(combined.columns)
+        # Phase 1: Data Quantization - use float32 throughout
         X = combined.values.astype(np.float32)
         y = r.values.astype(np.float32)
 

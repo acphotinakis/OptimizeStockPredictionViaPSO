@@ -24,11 +24,13 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.models.lstm_model import LSTMModel, LSTMTrainer
+from src.models.quantized_lstm import QuantizedLSTMModel
 from src.evaluation.backtester import Backtester
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 from src.utils.seed import set_all_seeds
+from src.utils.memory_profiler import MemoryProfiler
 
 logger = logging.getLogger(__name__)
 
@@ -115,18 +117,26 @@ def main():
     y_combined = np.concatenate([y_train_w, y_val_w], axis=0)
     
     input_size = X_train.shape[2]
+    use_checkpointing = cfg.lstm.get("use_checkpointing", False)
     model = LSTMModel(
         input_size=input_size,
         num_layers=best_params["num_layers"],
         hidden_units=best_params["hidden_units"],
         dropout=best_params["dropout"],
+        use_checkpointing=use_checkpointing,
     )
+    
+    use_amp = cfg.lstm.get("use_amp", True)
+    accumulation_steps = cfg.lstm.get("accumulation_steps", 1)
+    
     trainer = LSTMTrainer(
         model=model,
         lr=best_params["learning_rate"],
         max_epochs=cfg.lstm.max_epochs,
         patience=cfg.lstm.early_stopping_patience,
         batch_size=cfg.lstm.batch_size,
+        use_amp=use_amp,
+        accumulation_steps=accumulation_steps,
     )
     
     # Use a small validation split from combined data for early stopping
@@ -140,7 +150,15 @@ def main():
 
     # Generate predictions on test set
     logger.info("Generating predictions on test set...")
-    y_pred = trainer.predict(X_test)
+    
+    # Phase 2: Quantize if requested
+    if args.quantize:
+        logger.info("Quantizing model for backtesting inference...")
+        quantized_wrapper = QuantizedLSTMModel(model)
+        quantized_wrapper.quantize()
+        y_pred = quantized_wrapper.predict(X_test)
+    else:
+        y_pred = trainer.predict(X_test)
 
     # Load price data for backtesting
     logger.info("Loading price data...")

@@ -22,6 +22,31 @@ logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
+
+def downcast_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """Reduce memory by downcasting numeric types.
+    
+    Converts float64 → float32 (50% memory savings, 7 decimal precision)
+    Converts int64 → int32 (50% memory savings, max value 2.1B)
+    
+    Args:
+        df: DataFrame with OHLCV columns.
+    
+    Returns:
+        DataFrame with downcasted types.
+    """
+    if 'open' in df.columns:
+        df['open'] = df['open'].astype('float32')
+    if 'high' in df.columns:
+        df['high'] = df['high'].astype('float32')
+    if 'low' in df.columns:
+        df['low'] = df['low'].astype('float32')
+    if 'close' in df.columns:
+        df['close'] = df['close'].astype('float32')
+    if 'volume' in df.columns:
+        df['volume'] = df['volume'].astype('int32')
+    return df
+
 load_dotenv()
 
 
@@ -140,6 +165,11 @@ class AlpacaIngestor:
             df.index = pd.to_datetime(df.index, utc=True)
             df.index.name = "timestamp"
             df["ticker"] = ticker
+            
+            # Downcast to reduce memory usage (Phase 1: Data Quantization)
+            df = downcast_ohlcv(df)
+            logger.debug("Downcasted %s to float32/int32", ticker)
+            
             return df
 
         except Exception as e:

@@ -97,6 +97,12 @@ def main():
     logger.info("=" * 60)
     logger.info("Model Evaluation: %s", args.ticker)
     logger.info("=" * 60)
+    
+    if args.quantize:
+        logger.info("✓ Quantization enabled (int8)")
+    if args.profile_memory:
+        logger.info("✓ Memory profiling enabled")
+        MemoryProfiler.log_memory("Initial")
 
     # Load PSO results
     pso_file = Path(args.pso_results) / f"pso_results_{args.ticker}.json"
@@ -138,23 +144,50 @@ def main():
     logger.info("1. IPSO-Optimized LSTM")
     logger.info("=" * 60)
     
+    use_checkpointing = cfg.lstm.get("use_checkpointing", False)
     ipso_model = LSTMModel(
         input_size=input_size,
         num_layers=best_params["num_layers"],
         hidden_units=best_params["hidden_units"],
         dropout=best_params["dropout"],
+        use_checkpointing=use_checkpointing,
     )
+    
+    use_amp = cfg.lstm.get("use_amp", True)
+    accumulation_steps = cfg.lstm.get("accumulation_steps", 1)
+    
     ipso_trainer = LSTMTrainer(
         model=ipso_model,
         lr=best_params["learning_rate"],
         max_epochs=cfg.lstm.max_epochs,
         patience=cfg.lstm.early_stopping_patience,
         batch_size=cfg.lstm.batch_size,
+        use_amp=use_amp,
+        accumulation_steps=accumulation_steps,
     )
     
-    y_pred_ipso, metrics_ipso = train_and_evaluate_model(
-        "IPSO-LSTM", ipso_trainer, X_train, y_train_w, X_val, y_val_w, X_test, y_test_w
-    )
+    if args.profile_memory:
+        with MemoryMonitor("Training IPSO-LSTM"):
+            y_pred_ipso, metrics_ipso = train_and_evaluate_model(
+                "IPSO-LSTM", ipso_trainer, X_train, y_train_w, X_val, y_val_w, X_test, y_test_w
+            )
+    else:
+        y_pred_ipso, metrics_ipso = train_and_evaluate_model(
+            "IPSO-LSTM", ipso_trainer, X_train, y_train_w, X_val, y_val_w, X_test, y_test_w
+        )
+    
+    # Phase 2: Quantize if requested
+    if args.quantize:
+        logger.info("Quantizing IPSO-LSTM model...")
+        quantized_wrapper = QuantizedLSTMModel(ipso_model)
+        quantized_wrapper.quantize()
+        y_pred_ipso = quantized_wrapper.predict(X_test)
+        
+        # Save quantized model
+        quantized_path = output_dir / f"quantized_ipso_lstm_{args.ticker}.pt"
+        quantized_wrapper.save(str(quantized_path))
+        logger.info("Saved quantized model to %s", quantized_path)
+    
     results["IPSO-LSTM"] = metrics_ipso
 
     # 2. Vanilla LSTM

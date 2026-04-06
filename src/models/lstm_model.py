@@ -34,12 +34,14 @@ class LSTMModel(nn.Module):
         hidden_units: int,
         dropout: float,
         output_size: int = 1,
+        use_checkpointing: bool = False,
     ) -> None:
         super().__init__()
         self.input_size = input_size
         self.num_layers = num_layers
         self.hidden_units = hidden_units
         self.dropout_rate = dropout
+        self.use_checkpointing = use_checkpointing
 
         # Stacked LSTM — dropout applied between layers (not after last)
         self.lstm = nn.LSTM(
@@ -80,7 +82,13 @@ class LSTMModel(nn.Module):
         Returns:
             out: [batch, 1]
         """
-        lstm_out, _ = self.lstm(x)  # [B, T, H]
+        # Phase 3: Gradient checkpointing to save memory during training
+        if self.use_checkpointing and self.training:
+            from torch.utils.checkpoint import checkpoint
+            lstm_out, _ = checkpoint(self.lstm, x, use_reentrant=False)
+        else:
+            lstm_out, _ = self.lstm(x)  # [B, T, H]
+        
         last_hidden = lstm_out[:, -1, :]  # many-to-one: last timestep
         out = self.dropout(last_hidden)
         out = self.fc(out)  # [B, 1]
@@ -130,6 +138,8 @@ class LSTMTrainer:
         batch_size: int = 256,
         device: Optional[str] = None,
         grad_clip: float = 1.0,
+        use_amp: bool = True,
+        accumulation_steps: int = 1,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -140,11 +150,24 @@ class LSTMTrainer:
         self.patience = patience
         self.batch_size = batch_size
         self.grad_clip = grad_clip
+        
+        # Phase 3: Mixed precision training
+        self.use_amp = use_amp and torch.cuda.is_available()
+        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
+        
+        # Phase 3: Gradient accumulation
+        self.accumulation_steps = accumulation_steps
 
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
         self.criterion = nn.MSELoss()
         self._best_state: Optional[dict] = None
         self.history: Dict[str, list] = {"train_loss": [], "val_loss": []}
+        
+        if self.use_amp:
+            logger.debug("Mixed precision training enabled (FP16)")
+        if self.accumulation_steps > 1:
+            logger.debug("Gradient accumulation: %d steps (effective batch=%d)", 
+                        self.accumulation_steps, self.batch_size * self.accumulation_steps)
 
     # ------------------------------------------------------------------
 
@@ -170,9 +193,13 @@ class LSTMTrainer:
             torch.FloatTensor(X_train),
             torch.FloatTensor(y_train).unsqueeze(-1),
         )
+        
+        # Adjust batch size for gradient accumulation
+        physical_batch_size = self.batch_size // self.accumulation_steps
+        
         train_dl = DataLoader(
             train_ds,
-            batch_size=self.batch_size,
+            batch_size=physical_batch_size,
             shuffle=True,
             generator=torch.Generator().manual_seed(42),
         )
@@ -188,15 +215,45 @@ class LSTMTrainer:
             # ---- Training ----
             self.model.train()
             epoch_loss = 0.0
-            for x_b, y_b in train_dl:
+            
+            for batch_idx, (x_b, y_b) in enumerate(train_dl):
                 x_b, y_b = x_b.to(self.device), y_b.to(self.device)
-                self.optimizer.zero_grad()
-                pred = self.model(x_b)
-                loss = self.criterion(pred, y_b)
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                self.optimizer.step()
-                epoch_loss += loss.item() * len(x_b)
+                
+                # Phase 3: Mixed precision training
+                if self.use_amp:
+                    with torch.cuda.amp.autocast():
+                        pred = self.model(x_b)
+                        loss = self.criterion(pred, y_b)
+                    
+                    # Normalize loss for gradient accumulation
+                    loss = loss / self.accumulation_steps
+                    
+                    # Scaled backward pass
+                    self.scaler.scale(loss).backward()
+                    
+                    # Update weights every N steps
+                    if (batch_idx + 1) % self.accumulation_steps == 0:
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        self.optimizer.zero_grad()
+                else:
+                    pred = self.model(x_b)
+                    loss = self.criterion(pred, y_b)
+                    
+                    # Normalize loss for gradient accumulation
+                    loss = loss / self.accumulation_steps
+                    loss.backward()
+                    
+                    # Update weights every N steps
+                    if (batch_idx + 1) % self.accumulation_steps == 0:
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                
+                epoch_loss += loss.item() * len(x_b) * self.accumulation_steps
+            
             avg_train = epoch_loss / len(train_ds)
 
             # ---- Validation ----

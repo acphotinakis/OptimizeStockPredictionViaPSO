@@ -29,30 +29,48 @@ from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 from src.utils.seed import set_all_seeds
+from src.utils.memory_profiler import MemoryProfiler, MemoryMonitor
+from src.utils.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
 
-def model_builder(params: dict, X_train, y_train, X_val, y_val):
+def model_builder(params: dict, X_train, y_train, X_val, y_val, cfg=None, args=None):
     """Build and train an LSTM model with given hyperparameters.
     
     Returns validation predictions for fitness evaluation.
     """
     input_size = X_train.shape[2]
     
+    # Phase 3: Apply memory optimizations
+    use_checkpointing = cfg.lstm.get("use_checkpointing", False) if cfg else False
+    if args and args.no_checkpointing:
+        use_checkpointing = False
+    
     model = LSTMModel(
         input_size=input_size,
         num_layers=params["num_layers"],
         hidden_units=params["hidden_units"],
         dropout=params["dropout"],
+        use_checkpointing=use_checkpointing,
     )
+    
+    # Phase 3: Apply training optimizations
+    use_amp = cfg.lstm.get("use_amp", True) if cfg else True
+    if args and args.no_amp:
+        use_amp = False
+    
+    accumulation_steps = cfg.lstm.get("accumulation_steps", 1) if cfg else 1
+    batch_size = cfg.lstm.get("batch_size", 256) if cfg else 256
     
     trainer = LSTMTrainer(
         model=model,
         lr=params["learning_rate"],
-        max_epochs=100,
-        patience=10,
-        batch_size=256,
+        max_epochs=cfg.lstm.max_epochs if cfg else 100,
+        patience=cfg.lstm.early_stopping_patience if cfg else 10,
+        batch_size=batch_size,
+        use_amp=use_amp,
+        accumulation_steps=accumulation_steps,
     )
     
     trainer.fit(X_train, y_train, X_val, y_val)
@@ -93,17 +111,57 @@ def main():
         default=None,
         help="Random seed (overrides config)",
     )
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Use memory-optimized settings (smaller batch, AMP, checkpointing)",
+    )
+    parser.add_argument(
+        "--profile-memory",
+        action="store_true",
+        help="Enable detailed memory profiling",
+    )
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Disable mixed precision training",
+    )
+    parser.add_argument(
+        "--no-checkpointing",
+        action="store_true",
+        help="Disable gradient checkpointing",
+    )
     args = parser.parse_args()
 
-    # Load config
-    cfg = load_config(args.config)
+    # Load config (use memory-optimized if --low-memory flag set)
+    if args.low_memory and "memory_optimized" not in args.config:
+        logger.info("--low-memory flag set, using memory_optimized.yaml")
+        cfg = load_config("config/memory_optimized.yaml")
+    else:
+        cfg = load_config(args.config)
+    
     seed = args.seed if args.seed is not None else cfg.pso.seed
     set_all_seeds(seed)
     
     setup_logger(log_file=f"logs/03_run_pso_{args.ticker}.log", level="INFO")
+    
+    # Memory profiling setup
+    if args.profile_memory:
+        logger.info("Memory profiling enabled")
+        MemoryProfiler.log_memory("Initial")
     logger.info("=" * 60)
     logger.info("IPSO Hyperparameter Optimization: %s", args.ticker)
     logger.info("=" * 60)
+    
+    # Log memory optimizations
+    if hasattr(cfg.lstm, 'use_amp') and cfg.lstm.use_amp and not args.no_amp:
+        logger.info("✓ Mixed precision training enabled (FP16)")
+    if hasattr(cfg.lstm, 'use_checkpointing') and cfg.lstm.use_checkpointing and not args.no_checkpointing:
+        logger.info("✓ Gradient checkpointing enabled")
+    if hasattr(cfg.lstm, 'accumulation_steps') and cfg.lstm.accumulation_steps > 1:
+        logger.info("✓ Gradient accumulation: %d steps (effective batch=%d)",
+                   cfg.lstm.accumulation_steps,
+                   cfg.lstm.batch_size * cfg.lstm.accumulation_steps)
 
     # Load feature data
     ticker_dir = Path(args.features_dir) / args.ticker
@@ -111,12 +169,21 @@ def main():
         raise FileNotFoundError(f"Feature directory not found: {ticker_dir}")
 
     logger.info("Loading features from %s", ticker_dir)
-    X_train_flat = np.load(ticker_dir / "X_train.npy")
-    y_train = np.load(ticker_dir / "y_train.npy")
-    X_val_flat = np.load(ticker_dir / "X_val.npy")
-    y_val = np.load(ticker_dir / "y_val.npy")
+    
+    if args.profile_memory:
+        with MemoryMonitor("Loading feature data"):
+            X_train_flat = np.load(ticker_dir / "X_train.npy")
+            y_train = np.load(ticker_dir / "y_train.npy")
+            X_val_flat = np.load(ticker_dir / "X_val.npy")
+            y_val = np.load(ticker_dir / "y_val.npy")
+    else:
+        X_train_flat = np.load(ticker_dir / "X_train.npy")
+        y_train = np.load(ticker_dir / "y_train.npy")
+        X_val_flat = np.load(ticker_dir / "X_val.npy")
+        y_val = np.load(ticker_dir / "y_val.npy")
 
     logger.info("Train: %s, Val: %s", X_train_flat.shape, X_val_flat.shape)
+    logger.info("Data types: X_train=%s, y_train=%s", X_train_flat.dtype, y_train.dtype)
 
     # Build sliding windows for maximum lookback
     max_lookback = max(cfg.lstm.lookback.choices)
@@ -149,11 +216,15 @@ def main():
     logger.info("  Iterations: %d", cfg.pso.n_iterations)
     logger.info("  Seed: %d", seed)
 
+    # Wrap model_builder to pass config and args
+    def model_builder_wrapper(params, X_train, y_train, X_val, y_val):
+        return model_builder(params, X_train, y_train, X_val, y_val, cfg, args)
+    
     optimizer = IPSO(
         n_particles=cfg.pso.n_particles,
         n_iterations=cfg.pso.n_iterations,
         fitness_fn=fitness_fn,
-        model_builder=model_builder,
+        model_builder=model_builder_wrapper,
         w_min=cfg.pso.w_min,
         w_max=cfg.pso.w_max,
         c1=cfg.pso.c1,
@@ -164,9 +235,18 @@ def main():
 
     # Run optimization
     logger.info("Starting IPSO optimization...")
-    best_params, best_fitness = optimizer.run(
-        X_train_windows, y_train_windows, X_val_windows, y_val_windows
-    )
+    
+    if args.profile_memory:
+        MemoryProfiler.reset_peak_memory()
+        with MemoryMonitor("IPSO optimization"):
+            best_params, best_fitness = optimizer.run(
+                X_train_windows, y_train_windows, X_val_windows, y_val_windows
+            )
+        MemoryManager.log_memory_stats("Final")
+    else:
+        best_params, best_fitness = optimizer.run(
+            X_train_windows, y_train_windows, X_val_windows, y_val_windows
+        )
 
     logger.info("=" * 60)
     logger.info("Optimization complete!")

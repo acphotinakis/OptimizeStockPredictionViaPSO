@@ -196,6 +196,11 @@ class StandardPSO:
         y_val: np.ndarray,
     ) -> float:
         """Build model, train, predict on val, return composite fitness."""
+        # Phase 3: Clear GPU cache before each particle evaluation
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         params = particle.decode()
         lookback = params["lookback"]
 
@@ -207,7 +212,13 @@ class StandardPSO:
             raise RuntimeError("model_builder must be set before calling run().")
 
         y_pred = self.model_builder(params, X_tr, y_train, X_vl, y_val)
-        return self.fitness_fn(y_val, y_pred)
+        fitness = self.fitness_fn(y_val, y_pred)
+        
+        # Phase 3: Clear GPU cache after evaluation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        return fitness
 
     def _evaluate_parallel(self, X_train, y_train, X_val, y_val) -> None:
         """Evaluate particles in parallel using ProcessPoolExecutor."""
