@@ -75,6 +75,7 @@ def main():
     # Check GPU availability
     try:
         import torch
+
         gpu_available = torch.cuda.is_available()
         if gpu_available:
             gpu_name = torch.cuda.get_device_name(0)
@@ -101,6 +102,8 @@ def main():
     df_aligned = pd.read_parquet(args.input)
     logger.info("Loaded data shape: %s", df_aligned.shape)
 
+    logger.info(f"Columns in aligned data: {df_aligned.columns.tolist()}")
+
     # Split into train/val/test
     splitter = DataSplitter(
         train_end=cfg.data.train_end,
@@ -109,8 +112,12 @@ def main():
 
     # Split the aligned data
     df_train_all, df_val_all, df_test_all = splitter.split(df_aligned)
-    logger.info("Split complete - Train: %d, Val: %d, Test: %d", 
-                len(df_train_all), len(df_val_all), len(df_test_all))
+    logger.info(
+        "Split complete - Train: %d, Val: %d, Test: %d",
+        len(df_train_all),
+        len(df_val_all),
+        len(df_test_all),
+    )
 
     # Convert MultiIndex DataFrames to dict of single-ticker DataFrames
     def extract_ticker_dfs(df_multi):
@@ -125,7 +132,30 @@ def main():
     dfs_train = extract_ticker_dfs(df_train_all)
     dfs_val = extract_ticker_dfs(df_val_all)
     dfs_test = extract_ticker_dfs(df_test_all)
-    
+
+    logger.info(f"Columns of Train DataFrames: {list(dfs_train.keys())}")
+    logger.info(f"Columns of Val DataFrames: {list(dfs_val.keys())}")
+    logger.info(f"Columns of Test DataFrames: {list(dfs_test.keys())}")
+
+    # print the first 5 rows of each dataframe for the first ticker
+    for ticker in tickers[:1]:  # Just the first ticker for brevity
+        if ticker in dfs_train:
+            logger.info(
+                f"First 5 rows of Train DataFrame for {ticker}:\n{dfs_train[ticker].head()}"
+            )
+        if ticker in dfs_val:
+            logger.info(
+                f"First 5 rows of Val DataFrame for {ticker}:\n{dfs_val[ticker].head()}"
+            )
+        if ticker in dfs_test:
+            logger.info(
+                f"First 5 rows of Test DataFrame for {ticker}:\n{dfs_test[ticker].head()}"
+            )
+
+    import sys
+
+    sys.exit(0)
+
     logger.info("Extracted %d tickers for feature engineering", len(dfs_train))
 
     # Build features for each ticker
@@ -195,5 +225,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
