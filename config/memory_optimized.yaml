@@ -48,6 +48,27 @@ lstm:
   use_amp: true  # Mixed precision training (FP16)
   use_checkpointing: true  # Gradient checkpointing
 
+
+# --- XGBoost (Memory-Safe) ---
+xgboost:
+  objective: "multi:softprob"
+  num_class: 3
+  n_estimators: 200            # smaller model
+  max_depth: 4                 # shallower trees
+  learning_rate: 0.05
+  subsample: 0.7               # reduce rows per tree
+  colsample_bytree: 0.6        # reduce features per tree
+  min_child_weight: 5          # avoid tiny leaf nodes
+  gamma: 0.1                   # require gain to split
+  reg_alpha: 0.0
+  reg_lambda: 1.0
+  early_stopping_rounds: 50
+  use_optuna: true
+  optuna_trials: 20            # fewer HPO trials
+  tree_method: "gpu_hist"      # or "hist" if GPU memory is limited
+  # tree_method: "hist"      # or "hist" if GPU memory is limited
+  max_bin: 128                 # smaller bins → lower memory
+
 fitness:
   rmse_weight: 0.4
   sharpe_weight: 0.4
