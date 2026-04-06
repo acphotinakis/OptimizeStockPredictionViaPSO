@@ -121,11 +121,129 @@ class DataCleaner:
             logger.debug("OHLC consistency: dropped %d invalid bars", dropped)
         return df[mask]
 
+    # def _reindex_and_fill(self, df: pd.DataFrame) -> pd.DataFrame:
+    #     """Reindex to a complete 1-min session grid; forward-fill short gaps."""
+    #     # Build complete minute grid for every trading day in the data
+    #     days = df.index.normalize().unique()
+    #     pieces = []
+    #     for day in days:
+    #         day_et = day.tz_convert("America/New_York")
+    #         start = day_et.replace(
+    #             hour=int(SESSION_START.split(":")[0]),
+    #             minute=int(SESSION_START.split(":")[1]),
+    #             second=0,
+    #         )
+    #         end = day_et.replace(
+    #             hour=int(SESSION_END.split(":")[0]),
+    #             minute=int(SESSION_END.split(":")[1]),
+    #             second=0,
+    #         )
+    #         idx = pd.date_range(start, end, freq="1min")
+    #         pieces.append(idx)
+
+    #     if not pieces:
+    #         return df
+
+    #     full_index = pieces[0].append(pieces[1:]).tz_convert("UTC")
+    #     df_re = df.reindex(full_index)
+
+    #     # Identify gap lengths
+    #     is_missing = df_re["close"].isna().astype(int)
+    #     run_id = (is_missing != is_missing.shift()).cumsum()
+    #     gap_lengths = is_missing.groupby(run_id).transform("sum")
+    #     df_re["gap_flag"] = is_missing.astype(bool)
+
+    #     # Forward-fill short gaps only
+    #     short_gap_mask = (is_missing == 1) & (gap_lengths <= self.max_gap_fill)
+    #     df_re[short_gap_mask] = df_re[short_gap_mask].fillna(method="ffill")
+
+    #     # Drop rows still missing (long gaps) — keep gap_flag as metadata
+    #     df_re = df_re[df_re["close"].notna()]
+
+    #     # Flag bars that immediately follow a long gap
+    #     df_re["post_long_gap"] = False
+    #     long_gap_ends = df_re.index[
+    #         df_re["gap_flag"] & (gap_lengths > self.max_gap_fill)
+    #     ]
+    #     for gap_end in long_gap_ends:
+    #         try:
+    #             next_idx = df_re.index[df_re.index.get_loc(gap_end) + 1]
+    #             df_re.at[next_idx, "post_long_gap"] = True
+    #         except (IndexError, KeyError):
+    #             pass
+
+    #     return df_re
+
+    # def _reindex_and_fill(self, df: pd.DataFrame) -> pd.DataFrame:
+    #     """Reindex to a complete 1-min session grid; forward-fill short gaps."""
+    #     if df.empty:
+    #         return df
+
+    #     # Build complete minute grid for each trading day
+    #     days = df.index.normalize().unique()
+    #     full_index = []
+    #     for day in days:
+    #         day_et = day.tz_convert("America/New_York")
+    #         start = day_et.replace(
+    #             hour=int(SESSION_START.split(":")[0]),
+    #             minute=int(SESSION_START.split(":")[1]),
+    #             second=0,
+    #         )
+    #         end = day_et.replace(
+    #             hour=int(SESSION_END.split(":")[0]),
+    #             minute=int(SESSION_END.split(":")[1]),
+    #             second=0,
+    #         )
+    #         full_index.extend(pd.date_range(start, end, freq="1min"))
+    #     full_index = pd.DatetimeIndex(full_index).tz_convert("UTC")
+
+    #     # Reindex to full session grid
+    #     df_re = df.reindex(full_index)
+
+    #     # Identify missing bars
+    #     is_missing = df_re["close"].isna().astype(int)
+    #     run_id = (is_missing != is_missing.shift()).cumsum()
+    #     gap_lengths = is_missing.groupby(run_id).transform("sum")
+
+    #     # Save long-gap mask BEFORE dropping missing rows
+    #     long_gap_mask = (is_missing == 1) & (gap_lengths > self.max_gap_fill)
+
+    #     # Forward-fill short gaps only
+    #     short_gap_mask = (is_missing == 1) & (gap_lengths <= self.max_gap_fill)
+    #     df_re.loc[short_gap_mask, ["open", "high", "low", "close", "volume"]] = (
+    #         df_re.loc[
+    #             short_gap_mask, ["open", "high", "low", "close", "volume"]
+    #         ].ffill()
+    #     )
+
+    #     # Add gap flag
+    #     df_re["gap_flag"] = is_missing.astype(bool)
+
+    #     # Drop remaining missing rows (long gaps)
+    #     df_re = df_re[df_re["close"].notna()]
+
+    #     # Flag bars immediately after a long gap
+    #     df_re["post_long_gap"] = False
+
+    #     print(f"DF Reindex Shape: {df_re.shape}")
+
+    #     for gap_end in df_re.index[long_gap_mask]:
+    #         try:
+    #             next_idx = df_re.index[df_re.index.get_loc(gap_end) + 1]
+    #             df_re.at[next_idx, "post_long_gap"] = True
+    #         except (IndexError, KeyError):
+    #             pass
+
+    #     return df_re
+
     def _reindex_and_fill(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reindex to a complete 1-min session grid; forward-fill short gaps."""
-        # Build complete minute grid for every trading day in the data
+        if df.empty:
+            return df
+
+        # Build complete minute grid for each trading day
         days = df.index.normalize().unique()
-        pieces = []
+        full_index = []
         for day in days:
             day_et = day.tz_convert("America/New_York")
             start = day_et.replace(
@@ -138,39 +256,47 @@ class DataCleaner:
                 minute=int(SESSION_END.split(":")[1]),
                 second=0,
             )
-            idx = pd.date_range(start, end, freq="1min")
-            pieces.append(idx)
+            full_index.extend(pd.date_range(start, end, freq="1min"))
+        full_index = pd.DatetimeIndex(full_index).tz_convert("UTC")
 
-        if not pieces:
-            return df
-
-        full_index = pieces[0].append(pieces[1:]).tz_convert("UTC")
+        # Reindex to full session grid
         df_re = df.reindex(full_index)
 
-        # Identify gap lengths
+        # Identify missing bars
         is_missing = df_re["close"].isna().astype(int)
         run_id = (is_missing != is_missing.shift()).cumsum()
         gap_lengths = is_missing.groupby(run_id).transform("sum")
-        df_re["gap_flag"] = is_missing.astype(bool)
 
         # Forward-fill short gaps only
         short_gap_mask = (is_missing == 1) & (gap_lengths <= self.max_gap_fill)
-        df_re[short_gap_mask] = df_re[short_gap_mask].fillna(method="ffill")
+        df_re.loc[short_gap_mask, ["open", "high", "low", "close", "volume"]] = (
+            df_re.loc[
+                short_gap_mask, ["open", "high", "low", "close", "volume"]
+            ].ffill()
+        )
 
-        # Drop rows still missing (long gaps) — keep gap_flag as metadata
+        # Add gap flag
+        df_re["gap_flag"] = is_missing.astype(bool)
+
+        # Identify long gaps AFTER forward-fill (still missing)
+        long_gap_mask = (df_re["close"].isna()) & (gap_lengths > self.max_gap_fill)
+
+        # Drop remaining missing rows (long gaps)
         df_re = df_re[df_re["close"].notna()]
 
-        # Flag bars that immediately follow a long gap
+        # Flag bars immediately after a long gap
         df_re["post_long_gap"] = False
-        long_gap_ends = df_re.index[
-            df_re["gap_flag"] & (gap_lengths > self.max_gap_fill)
-        ]
-        for gap_end in long_gap_ends:
+        # long_gap_mask must align with df_re.index BEFORE dropping NA
+        long_gap_indices = full_index[long_gap_mask]
+        for gap_end in long_gap_indices:
             try:
-                next_idx = df_re.index[df_re.index.get_loc(gap_end) + 1]
-                df_re.at[next_idx, "post_long_gap"] = True
-            except (IndexError, KeyError):
-                pass
+                # Only flag if next index still exists in df_re
+                next_idx_pos = df_re.index.get_loc(gap_end) + 1
+                if next_idx_pos < len(df_re):
+                    next_idx = df_re.index[next_idx_pos]
+                    df_re.at[next_idx, "post_long_gap"] = True
+            except KeyError:
+                continue
 
         return df_re
 
@@ -199,6 +325,20 @@ class DataCleaner:
             logger.debug("Outlier clipping: %d bars clipped", clipped)
         return df
 
+    # @staticmethod
+    # def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
+    #     """Add log_return, session_minute, session_start flag."""
+    #     df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
+
+    #     et_index = df.index.tz_convert("America/New_York")
+    #     session_open_time = pd.Timestamp(SESSION_START).time()
+    #     session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
+    #     df["session_minute"] = (
+    #         et_index.hour * 60 + et_index.minute - session_open_minutes
+    #     ).clip(lower=0)
+    #     df["session_start"] = (df["session_minute"] == 0).astype(bool)
+    #     return df
+
     @staticmethod
     def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
         """Add log_return, session_minute, session_start flag."""
@@ -207,8 +347,12 @@ class DataCleaner:
         et_index = df.index.tz_convert("America/New_York")
         session_open_time = pd.Timestamp(SESSION_START).time()
         session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
-        df["session_minute"] = (
-            et_index.hour * 60 + et_index.minute - session_open_minutes
-        ).clip(lower=0)
+
+        # Convert to Series to allow clip
+        session_minutes = pd.Series(
+            et_index.hour * 60 + et_index.minute - session_open_minutes, index=df.index
+        )
+        df["session_minute"] = session_minutes.clip(lower=0)
+
         df["session_start"] = (df["session_minute"] == 0).astype(bool)
         return df

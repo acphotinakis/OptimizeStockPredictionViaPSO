@@ -11,6 +11,7 @@ import logging
 from typing import Dict, Optional
 
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -82,21 +83,37 @@ class TickerAligner:
             len(master_index),
         )
 
-        aligned: Dict[str, pd.DataFrame] = {}
+        # aligned: Dict[str, pd.DataFrame] = {}
+        # for ticker, df in dfs.items():
+        #     # Keep only requested fields that exist
+        #     available = [f for f in fields if f in df.columns]
+        #     df_sub = (
+        #         df[available].reindex(master_index).ffill(limit=self.max_ffill_bars)
+        #     )
+        #     aligned[ticker] = df_sub
+        aligned_parts = []
         for ticker, df in dfs.items():
-            # Keep only requested fields that exist
             available = [f for f in fields if f in df.columns]
             df_sub = (
                 df[available].reindex(master_index).ffill(limit=self.max_ffill_bars)
             )
-            aligned[ticker] = df_sub
+            # Optionally convert to float32 to save memory
+            df_sub = df_sub.astype(np.float32, errors="ignore")
+            # df_sub.columns = pd.MultiIndex.from_product([[ticker], df_sub.columns])
+            df_sub.columns = pd.MultiIndex.from_product(
+                [[ticker], df_sub.columns], names=["ticker", "field"]
+            )
+
+            aligned_parts.append(df_sub)
+
+        result = pd.concat(aligned_parts, axis=1)
 
         # Stack into MultiIndex column DataFrame
-        result = pd.concat(aligned, axis=1)
-        result.columns = pd.MultiIndex.from_tuples(
-            [(ticker, col) for ticker in aligned for col in aligned[ticker].columns],
-            names=["ticker", "field"],
-        )
+        # result = pd.concat(aligned, axis=1)
+        # result.columns = pd.MultiIndex.from_tuples(
+        #     [(ticker, col) for ticker in aligned for col in aligned[ticker].columns],
+        #     names=["ticker", "field"],
+        # )
 
         # Drop timestamps where too many tickers have NaN close
         if "close" in fields:

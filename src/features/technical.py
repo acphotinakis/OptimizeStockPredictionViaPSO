@@ -144,7 +144,8 @@ def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["dmi_plus"] = plus_di
     out["dmi_minus"] = minus_di
 
-    return out.fillna(method="ffill").fillna(0.0)
+    # return out.fillna(method="ffill").fillna(0.0)
+    return out.ffill().fillna(0.0)
 
 
 def _parabolic_sar(
