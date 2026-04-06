@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""
+scripts/03_run_pso.py
+
+Runs IPSO hyperparameter optimization for a given ticker.
+Outputs best hyperparameters and fitness history to results/.
+
+Usage:
+    python scripts/03_run_pso.py --ticker AAPL --config config/default_config.yaml
+"""
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.optimizer.ipso import IPSO
+from src.optimizer.fitness import CompositeFitness
+from src.models.lstm_model import LSTMModel, LSTMTrainer
+from src.data.splitter import build_windows
+from src.utils.logger import setup_logger
+from src.utils.config_loader import load_config
+from src.utils.seed import set_all_seeds
+
+logger = logging.getLogger(__name__)
+
+
+def model_builder(params: dict, X_train, y_train, X_val, y_val):
+    """Build and train an LSTM model with given hyperparameters.
+    
+    Returns validation predictions for fitness evaluation.
+    """
+    input_size = X_train.shape[2]
+    
+    model = LSTMModel(
+        input_size=input_size,
+        num_layers=params["num_layers"],
+        hidden_units=params["hidden_units"],
+        dropout=params["dropout"],
+    )
+    
+    trainer = LSTMTrainer(
+        model=model,
+        lr=params["learning_rate"],
+        max_epochs=100,
+        patience=10,
+        batch_size=256,
+    )
+    
+    trainer.fit(X_train, y_train, X_val, y_val)
+    y_pred = trainer.predict(X_val)
+    
+    return y_pred
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run IPSO hyperparameter optimization")
+    parser.add_argument(
+        "--ticker",
+        type=str,
+        required=True,
+        help="Ticker symbol to optimize",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/default_config.yaml",
+        help="Path to config file",
+    )
+    parser.add_argument(
+        "--features-dir",
+        type=str,
+        default="data/features",
+        help="Directory containing feature matrices",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="results",
+        help="Output directory for results",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed (overrides config)",
+    )
+    args = parser.parse_args()
+
+    # Load config
+    cfg = load_config(args.config)
+    seed = args.seed if args.seed is not None else cfg.pso.seed
+    set_all_seeds(seed)
+    
+    setup_logger(log_file=f"logs/03_run_pso_{args.ticker}.log", level="INFO")
+    logger.info("=" * 60)
+    logger.info("IPSO Hyperparameter Optimization: %s", args.ticker)
+    logger.info("=" * 60)
+
+    # Load feature data
+    ticker_dir = Path(args.features_dir) / args.ticker
+    if not ticker_dir.exists():
+        raise FileNotFoundError(f"Feature directory not found: {ticker_dir}")
+
+    logger.info("Loading features from %s", ticker_dir)
+    X_train_flat = np.load(ticker_dir / "X_train.npy")
+    y_train = np.load(ticker_dir / "y_train.npy")
+    X_val_flat = np.load(ticker_dir / "X_val.npy")
+    y_val = np.load(ticker_dir / "y_val.npy")
+
+    logger.info("Train: %s, Val: %s", X_train_flat.shape, X_val_flat.shape)
+
+    # Build sliding windows for maximum lookback
+    max_lookback = max(cfg.lstm.lookback.choices)
+    session_starts_train = np.zeros(len(X_train_flat), dtype=bool)
+    session_starts_val = np.zeros(len(X_val_flat), dtype=bool)
+    
+    X_train_windows, y_train_windows = build_windows(
+        X_train_flat, y_train, session_starts_train, max_lookback
+    )
+    X_val_windows, y_val_windows = build_windows(
+        X_val_flat, y_val, session_starts_val, max_lookback
+    )
+    
+    logger.info("Windows - Train: %s, Val: %s", X_train_windows.shape, X_val_windows.shape)
+
+    # Initialize fitness function
+    fitness_fn = CompositeFitness(
+        weights={
+            "rmse": cfg.fitness.rmse_weight,
+            "sharpe": cfg.fitness.sharpe_weight,
+            "mdd": cfg.fitness.drawdown_weight,
+        },
+        signal_threshold=cfg.fitness.signal_threshold,
+        transaction_cost=cfg.fitness.transaction_cost,
+    )
+
+    # Initialize IPSO
+    logger.info("Initializing IPSO optimizer...")
+    logger.info("  Particles: %d", cfg.pso.n_particles)
+    logger.info("  Iterations: %d", cfg.pso.n_iterations)
+    logger.info("  Seed: %d", seed)
+
+    optimizer = IPSO(
+        n_particles=cfg.pso.n_particles,
+        n_iterations=cfg.pso.n_iterations,
+        fitness_fn=fitness_fn,
+        model_builder=model_builder,
+        w_min=cfg.pso.w_min,
+        w_max=cfg.pso.w_max,
+        c1=cfg.pso.c1,
+        c2=cfg.pso.c2,
+        seed=seed,
+        checkpoint_dir=Path(args.output_dir) / "checkpoints" / args.ticker,
+    )
+
+    # Run optimization
+    logger.info("Starting IPSO optimization...")
+    best_params, best_fitness = optimizer.run(
+        X_train_windows, y_train_windows, X_val_windows, y_val_windows
+    )
+
+    logger.info("=" * 60)
+    logger.info("Optimization complete!")
+    logger.info("Best fitness: %.6f", best_fitness)
+    logger.info("Best hyperparameters:")
+    for key, value in best_params.items():
+        logger.info("  %s: %s", key, value)
+
+    # Save results
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = {
+        "ticker": args.ticker,
+        "best_params": best_params,
+        "best_fitness": float(best_fitness),
+        "fitness_history": [float(f) for f in optimizer.fitness_history],
+        "diversity_history": [float(d) for d in optimizer.diversity_history],
+        "config": {
+            "n_particles": cfg.pso.n_particles,
+            "n_iterations": cfg.pso.n_iterations,
+            "seed": seed,
+        },
+    }
+
+    output_file = output_dir / f"pso_results_{args.ticker}.json"
+    with open(output_file, "w") as f:
+        json.dump(results, f, indent=2)
+    
+    logger.info("Results saved to %s", output_file)
+
+
+if __name__ == "__main__":
+    main()

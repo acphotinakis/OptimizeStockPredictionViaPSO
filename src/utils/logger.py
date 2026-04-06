@@ -1,28 +1,47 @@
 """
 src/utils/logger.py
-Centralised logging setup using loguru.
+Centralised logging setup using standard logging library.
 """
 
+import logging
 import sys
 from pathlib import Path
-from loguru import logger
 
 
 def setup_logger(log_file: str | Path | None = None, level: str = "INFO") -> None:
-    """Configure loguru for the project.
+    """Configure logging for the project.
 
     Args:
         log_file: Optional path to write logs to disk.
         level: Log level string (DEBUG, INFO, WARNING, ERROR).
     """
-    logger.remove()
-    logger.add(
-        sys.stderr,
-        level=level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    log_level = getattr(logging, level.upper(), logging.INFO)
+    
+    # Root logger configuration
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    
+    # Clear existing handlers
+    root_logger.handlers.clear()
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_format = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
+    console_handler.setFormatter(console_format)
+    root_logger.addHandler(console_handler)
+    
+    # File handler (if specified)
     if log_file is not None:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        logger.add(log_file, level=level, rotation="10 MB", retention="7 days")
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(log_level)
+        file_format = logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        file_handler.setFormatter(file_format)
+        root_logger.addHandler(file_handler)

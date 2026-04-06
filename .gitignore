@@ -1,79 +1,66 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Virtual environments
-.venv/
-env/
 venv/
-.venv/
+env/
+ENV/
+.venv
 
-# Poetry
-poetry.lock
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
-# Logs
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Data
+data/raw/
+data/processed/
+data/features/
+
+# Results
+results/
 logs/
 *.log
 
-# Data files
-data/raw/
-data/interim/
-data/processed/
-data/results/
-data/plots/
-
-docs/ignore/
-
-tests/
-
-# Model artifacts
-models/checkpoints/
-models/scalers/
-models/pso_best/
-
-# Reports and figures
-reports/results/
-reports/figures/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Python environment variables
+# Environment
 .env
-.env.local
-.env.*.local
 
-# IDEs and editors
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
+# Model checkpoints
+*.pth
+*.pt
+*.pkl
+*.h5
 
-# Pytest cache
-.pytest_cache/
+# Plots
+*.png
+*.jpg
+*.pdf
 
-# Mypy cache
-.mypy_cache/
-
-# Coverage
-htmlcov/
-.coverage
-
-# Temporary files
-*.tmp
-*.swp
-*.bak
-
-
-
-docs/backups/**
-docs/development/**
-docs/research/**
+# OS
+Thumbs.db

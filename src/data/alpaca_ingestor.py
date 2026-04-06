@@ -12,10 +12,17 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Optional
-
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.enums import Adjustment, DataFeed
+from alpaca.data.timeframe import TimeFrame
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class AlpacaIngestor:
@@ -35,28 +42,39 @@ class AlpacaIngestor:
         api_secret: Optional[str] = None,
         base_url: str = "https://paper-api.alpaca.markets",
     ) -> None:
-        self.api_key = api_key or os.environ.get("ALPACA_API_KEY", "")
-        self.api_secret = api_secret or os.environ.get("ALPACA_API_SECRET", "")
-        self.base_url = base_url
-        self._api = None  # Lazy-loaded
+        # self.api_key = api_key or os.environ.get("ALPACA_API_KEY", "")
+        # self.api_secret = api_secret or os.environ.get("ALPACA_API_SECRET", "")
+        self.api_key = api_key or os.getenv("ALPACA_API_KEY", "")
+        self.api_secret = api_secret or os.getenv("APCA_API_SECRET_KEY", "")
+        print(f"Retrieved API Key from environment: {self.api_key != ''}")
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        print(f"Using API Key: {self.api_key}")
+        print(f"Using API Secret: {self.api_secret[:4]}...{self.api_secret[-4:]}")
 
-    def _get_api(self):
-        """Lazy-load the alpaca_trade_api client."""
-        if self._api is None:
-            try:
-                import alpaca_trade_api as tradeapi
-            except ImportError as e:
-                raise ImportError(
-                    "alpaca-trade-api not installed. Run: pip install alpaca-trade-api"
-                ) from e
-            self._api = tradeapi.REST(
-                self.api_key, self.api_secret, self.base_url, api_version="v2"
+        # Load credentials from .env for security
+        api_key = os.getenv("ALPACA_API_KEY")
+        secret_key = os.getenv("ALPACA_SECRET_KEY")
+        print("Retrieved Alpaca API credentials from environment")
+
+        if not api_key or not secret_key:
+            print(
+                "Alpaca API credentials missing. Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are in .env."
             )
-        return self._api
+            raise EnvironmentError("Missing Alpaca API credentials.")
+
+        # Initialize the historical data client
+        self.client = StockHistoricalDataClient(api_key, secret_key)
+        print("Initialized Alpaca StockHistoricalDataClient")
+
+        # Map configuration strings to alpaca-py TimeFrame objects
+        self.timeframe_map = {
+            "1Min": TimeFrame.Minute,
+            "1Hour": TimeFrame.Hour,
+            "1Day": TimeFrame.Day,
+        }
+        print(f"TimeFrame mapping set: {self.timeframe_map}")
+
+        self.base_url = base_url
 
     # ------------------------------------------------------------------
     # Public interface
@@ -65,10 +83,11 @@ class AlpacaIngestor:
     def download_bars(
         self,
         ticker: str,
-        start: str = "2019-01-02",
-        end: str = "2024-01-01",
+        start: str = "2021-04-05",
+        end: str = "2026-04-05",
         timeframe: str = "1Min",
-        adjustment: str = "split",
+        adjustment: str = "all",
+        data_feed: str = "sip",
     ) -> pd.DataFrame:
         """Download 1-minute OHLCV bars for a single ticker.
 
@@ -84,34 +103,48 @@ class AlpacaIngestor:
             [open, high, low, close, volume, ticker].
             Empty DataFrame on failure.
         """
+
+        from datetime import datetime, timezone
+
+        start_dt = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
+
+        request_params = StockBarsRequest(
+            symbol_or_symbols=ticker,
+            timeframe=self.timeframe_map.get(timeframe, TimeFrame.Minute),
+            start=start_dt,
+            end=end_dt,
+            adjustment=Adjustment(adjustment),
+            feed=DataFeed(data_feed),
+        )
+
         try:
-            from alpaca_trade_api.rest import TimeFrame  # noqa: F401
-        except ImportError:
-            pass
+            bars = self.client.get_stock_bars(request_params)
+            df = bars.df
+            print(f"Downloaded {len(df)} bars for {ticker} from {start} to {end}")
+            if df.empty:
+                print(f"No data returned for {ticker}")
+                return pd.DataFrame()
 
-        api = self._get_api()
-        try:
-            bars = api.get_bars(
-                ticker,
-                timeframe,
-                start=start,
-                end=end,
-                adjustment=adjustment,
-                feed="sip",
-            ).df
-        except Exception as exc:
-            logger.error("Failed to download %s: %s", ticker, exc)
+            # Flatten MultiIndex
+            if isinstance(df.index, pd.MultiIndex):
+                df = df.xs(ticker, level=0)
+
+            # Ensure timezone correctness
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC")
+            df.index = df.index.tz_convert("US/Eastern")
+            df.index = df.index.round("1min")
+
+            df = df[["open", "high", "low", "close", "volume"]].copy()
+            df.index = pd.to_datetime(df.index, utc=True)
+            df.index.name = "timestamp"
+            df["ticker"] = ticker
+            return df
+
+        except Exception as e:
+            print(f"Error fetching data for {ticker}: {str(e)}")
             return pd.DataFrame()
-
-        if bars.empty:
-            logger.warning("No data returned for %s", ticker)
-            return pd.DataFrame()
-
-        bars = bars[["open", "high", "low", "close", "volume"]].copy()
-        bars.index = pd.to_datetime(bars.index, utc=True)
-        bars.index.name = "timestamp"
-        bars["ticker"] = ticker
-        return bars
 
     def download_universe(
         self,
