@@ -145,22 +145,24 @@ class FeaturePipeline:
         tech = compute_technical_features(df_target)
         stat = compute_statistical_features(df_target)
         vol = compute_volume_features(df_target)
-        cross = compute_cross_ticker_features(
-            self.target_ticker,
-            dfs,
-            peer_tickers=None if fit else self._peer_tickers,
-        )
-
+        
         if fit:
-            # Store peer tickers for val/test consistency
-            from .cross_ticker import compute_cross_ticker_features as _ct
-            import re
-
-            self._peer_tickers = [
-                c.replace("peer_corr_", "")
-                for c in cross.columns
-                if c.startswith("peer_corr_")
-            ]
+            # Compute cross-ticker features and store peer tickers
+            cross, peer_tickers = compute_cross_ticker_features(
+                self.target_ticker,
+                dfs,
+                peer_tickers=None,
+                return_peer_tickers=True,
+            )
+            self._peer_tickers = peer_tickers
+        else:
+            # Use stored peer tickers
+            cross = compute_cross_ticker_features(
+                self.target_ticker,
+                dfs,
+                peer_tickers=self._peer_tickers,
+                return_peer_tickers=False,
+            )
 
         # --- Price/return base features ---
         base = pd.DataFrame(index=df_target.index)

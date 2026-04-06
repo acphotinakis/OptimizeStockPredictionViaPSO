@@ -21,7 +21,8 @@ def compute_cross_ticker_features(
     dfs: Dict[str, pd.DataFrame],
     peer_tickers: List[str] | None = None,
     rolling_window: int = 60,
-) -> pd.DataFrame:
+    return_peer_tickers: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, List[str]]:
     """Compute 15 cross-ticker and market-level features.
 
     Args:
@@ -29,9 +30,11 @@ def compute_cross_ticker_features(
         dfs: Dict mapping ticker → cleaned DataFrame (with 'log_return', 'close', 'volume').
         peer_tickers: Top correlated peers (up to 3); computed from training data if None.
         rolling_window: Rolling window in minutes for correlation/beta.
+        return_peer_tickers: If True, return (features, peer_tickers) tuple.
 
     Returns:
         DataFrame of cross-ticker feature columns on the target ticker's index.
+        If return_peer_tickers=True, returns (DataFrame, List[str]) tuple.
     """
     if target_ticker not in dfs:
         raise KeyError(f"Target ticker {target_ticker} not in dfs.")
@@ -122,6 +125,7 @@ def compute_cross_ticker_features(
     out["universe_mean_ret"] = all_returns.mean(axis=1)
 
     # ---- Peer correlations (top-3 most correlated) -------------------------
+    computed_peer_tickers = None
     if peer_tickers is None:
         others = [t for t in dfs if t != target_ticker]
         if len(others) > 0:
@@ -130,14 +134,24 @@ def compute_cross_ticker_features(
                 r_other = dfs[t]["log_return"].reindex(df_target.index).fillna(0.0)
                 corrs[t] = float(r_target.corr(r_other))
             peer_tickers = sorted(corrs, key=lambda x: abs(corrs[x]), reverse=True)[:3]
+            computed_peer_tickers = peer_tickers  # Store for return
         else:
             peer_tickers = []
+            computed_peer_tickers = []
 
     for rank, peer in enumerate(peer_tickers[:3], 1):
-        r_peer = dfs[peer]["log_return"].reindex(df_target.index).fillna(0.0)
-        out[f"peer_corr_{rank}"] = r_target.rolling(60, min_periods=10).corr(r_peer)
+        if peer in dfs:
+            r_peer = dfs[peer]["log_return"].reindex(df_target.index).fillna(0.0)
+            out[f"peer_corr_{peer}"] = r_target.rolling(60, min_periods=10).corr(r_peer)
+        else:
+            out[f"peer_corr_{rank}"] = 0.0
 
+    # Fill missing peer columns with zeros
     for rank in range(len(peer_tickers[:3]) + 1, 4):
         out[f"peer_corr_{rank}"] = 0.0
 
-    return out.fillna(0.0)
+    result = out.fillna(0.0)
+    
+    if return_peer_tickers:
+        return result, (computed_peer_tickers if computed_peer_tickers is not None else peer_tickers)
+    return result
