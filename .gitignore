@@ -72,7 +72,6 @@ htmlcov/
 *.swp
 *.bak
 
-data/
 
 
 docs/backups/**
