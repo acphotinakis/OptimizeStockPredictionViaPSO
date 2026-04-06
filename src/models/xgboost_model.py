@@ -26,16 +26,19 @@ import logging
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
+import pandas as pd
 import xgboost as xgb
 import numpy as np
 from src.utils.config_loader import Config, load_config
+from pathlib import Path
+import pickle
 
 logger = logging.getLogger(__name__)
 
 # Default hyperparameter set — mirrors experiment_plan.md §5.3
 _DEFAULT_PARAMS: Dict[str, Any] = {
     "objective": "multi:softprob",
-    "num_class": 3,
+    # "num_class": 3,
     "n_estimators": 200,
     "max_depth": 4,
     "learning_rate": 1e-5,
@@ -58,6 +61,68 @@ _DEFAULT_EARLY_STOPPING_ROUNDS = 50
 
 # Lookback window for sequence flattening (overridden by constructor)
 _DEFAULT_LOOKBACK = 30
+
+
+# ======================================================================
+# Helpers
+# ======================================================================
+
+
+def load_windows(features_dir: Path, ticker: str):
+    """Load pre-built numpy arrays from script 02."""
+    prefix = features_dir / ticker
+
+    file_map = {
+        "X_train": prefix / "X_train.npy",
+        "X_val": prefix / "X_val.npy",
+        "X_test": prefix / "X_test.npy",
+        "y_train": prefix / "y_train.npy",
+        "y_val": prefix / "y_val.npy",
+        "y_test": prefix / "y_test.npy",
+    }
+
+    arrays = {}
+
+    for key, path in file_map.items():
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Missing {path}. Run script 02 first:\n"
+                f"  python scripts/02_build_features.py --target {ticker}"
+            )
+        arrays[key] = np.load(path)
+
+    return (
+        arrays["X_train"],
+        arrays["y_train"],
+        arrays["X_val"],
+        arrays["y_val"],
+        arrays["X_test"],
+        arrays["y_test"],
+    )
+
+
+def load_feature_names(features_dir: Path, ticker: str) -> list:
+    """Load feature names from metadata.pkl for a given ticker."""
+    path = features_dir / ticker / "metadata.pkl"
+
+    if not path.exists():
+        raise FileNotFoundError(f"Metadata file not found: {path}")
+
+    try:
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read or parse {path}: {e}")
+
+    if "feature_names" not in data:
+        raise KeyError(f"'feature_names' key missing in {path}")
+
+    feature_names = data["feature_names"]
+
+    if not isinstance(feature_names, list):
+        raise TypeError(f"'feature_names' in {path} is not a list")
+
+    return feature_names
 
 
 class XGBoostModel:
@@ -122,7 +187,6 @@ class XGBoostModel:
             **self._xgb_params,
         }
 
-        # self._model = None  # type: Optional[xgb.XGBRegressor]
         self._model: Optional[xgb.XGBRegressor] = None
         self._best_iteration: int = 0
         self._feature_names: List[str] = []
@@ -151,6 +215,17 @@ class XGBoostModel:
             Training history dict with 'train_rmse' and 'val_rmse' lists
             (one entry per boosting round that was actually evaluated).
         """
+        # Validate inputs
+        if len(X_train) != len(y_train):
+            raise ValueError(
+                f"X_train and y_train length mismatch: {len(X_train)} vs {len(y_train)}"
+            )
+        if len(X_val) != len(y_val):
+            raise ValueError(
+                f"X_val and y_val length mismatch: {len(X_val)} vs {len(y_val)}"
+            )
+        if X_train.ndim != 3:
+            raise ValueError(f"X_train must be 3D [N, T, F], got shape {X_train.shape}")
         X_tr_flat = self._flatten(X_train)
         X_vl_flat = self._flatten(X_val)
 
@@ -165,13 +240,30 @@ class XGBoostModel:
 
         assert self._model is not None, "XGBoost model not initialized."
 
-        self._model.fit(
-            X_tr_flat,
-            y_train,
-            eval_set=eval_set,
-            eval_names=eval_names if self._supports_eval_names() else None,
-            verbose=False,
-        )
+        # self._model.fit(
+        #     X_tr_flat,
+        #     y_train,
+        #     eval_set=eval_set,
+        #     eval_names=eval_names if self._supports_eval_names() else None,
+        #     verbose=False,
+        # )
+        fit_kwargs = {
+            "X": X_tr_flat,
+            "y": y_train,
+            "eval_set": eval_set,
+            "verbose": False,
+        }
+
+        # Only pass eval_names if actually supported
+        if self._supports_eval_names():
+            fit_kwargs["eval_names"] = eval_names
+
+        try:
+            self._model.fit(**fit_kwargs)
+        except TypeError:
+            # Fallback: remove eval_names if runtime rejects it
+            fit_kwargs.pop("eval_names", None)
+            self._model.fit(**fit_kwargs)
 
         self._best_iteration = int(getattr(self._model, "best_iteration", 0))
 
@@ -240,12 +332,26 @@ class XGBoostModel:
         n_flat = self._model.n_features_in_
         importances = np.zeros(n_flat, dtype=np.float32)
         for feat_name, score in scores_dict.items():
-            # Feature names are 'f0', 'f1', ... when no names are set
+            # # Feature names are 'f0', 'f1', ... when no names are set
+            # try:
+            #     idx = int(feat_name.lstrip("f"))
+            #     importances[idx] = float(score)
+            # except (ValueError, IndexError):
+            #     pass
             try:
-                idx = int(feat_name.lstrip("f"))
-                importances[idx] = float(score)
-            except (ValueError, IndexError):
-                pass
+                # XGBoost uses 'f{idx}' format for unnamed features
+                if feat_name.startswith("f") and feat_name[1:].isdigit():
+                    idx = int(feat_name[1:])
+                    if 0 <= idx < n_flat:
+                        importances[idx] = float(score)
+                    else:
+                        logger.warning(
+                            "Feature index %d out of range [0, %d)", idx, n_flat
+                        )
+                else:
+                    logger.debug("Skipping non-standard feature name: %s", feat_name)
+            except (ValueError, IndexError) as e:
+                logger.warning("Failed to parse feature name '%s': %s", feat_name, e)
         return importances
 
     def get_per_original_feature_importances(
@@ -297,14 +403,9 @@ class XGBoostModel:
         Returns:
             self
         """
-        try:
-            import xgboost as xgb
-        except ImportError as exc:
-            raise ImportError("xgboost not installed.") from exc
         self._model = xgb.XGBRegressor(**self._xgb_params)
         assert self._model is not None
         self._model.load_model(path)
-
         logger.info("XGBoost model loaded from %s", path)
         return self
 
@@ -339,8 +440,14 @@ class XGBoostModel:
 
             major = int(xgb.__version__.split(".")[0])
             return major >= 2
-        except Exception:
+        except (AttributeError, ValueError, IndexError) as e:
+            logger.debug("Failed to parse xgboost version: %s", e)
             return False
+
+    @property
+    def best_iteration(self) -> int:
+        """Return the best iteration from training."""
+        return self._best_iteration
 
 
 # ======================================================================
@@ -386,6 +493,12 @@ class XGBoostTuner:
         self._rng = np.random.default_rng(seed)
         self.results_: List[Dict[str, Any]] = []
 
+    def get_results_df(self) -> pd.DataFrame:
+        """Return tuning results as a pandas DataFrame for analysis."""
+        if not self.results_:
+            raise RuntimeError("No tuning results available. Call fit() first.")
+        return pd.DataFrame(self.results_).sort_values("val_rmse")
+
     def fit(
         self,
         X_train: np.ndarray,
@@ -406,6 +519,18 @@ class XGBoostTuner:
         Returns:
             (best_model, best_hyperparams_dict)
         """
+        # Validate inputs
+        if len(X_train) != len(y_train):
+            raise ValueError(
+                f"X_train and y_train length mismatch: {len(X_train)} vs {len(y_train)}"
+            )
+        if len(X_val) != len(y_val):
+            raise ValueError(
+                f"X_val and y_val length mismatch: {len(X_val)} vs {len(y_val)}"
+            )
+        if X_train.ndim != 3:
+            raise ValueError(f"X_train must be 3D [N, T, F], got shape {X_train.shape}")
+
         best_val_rmse = float("inf")
         best_model: Optional[XGBoostModel] = None
         best_params: Dict[str, Any] = {}
@@ -448,3 +573,51 @@ class XGBoostTuner:
             raise RuntimeError("No successful trials in XGBoostTuner.fit().")
 
         return best_model, best_params
+
+    def _run_single_trial(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_val: np.ndarray,
+        y_val: np.ndarray,
+        lookback: int = 30,
+        trial_idx: Optional[int] = None,
+    ) -> Tuple["XGBoostModel", Dict[str, Any]]:
+        """
+        Run a single random hyperparameter trial and store the result.
+
+        Args:
+            X_train, y_train, X_val, y_val: Data arrays.
+            lookback: Lookback window to pass to XGBoostModel.
+            trial_idx: Optional trial index, used for random_state seeding.
+
+        Returns:
+            (model, sampled_hyperparams)
+        """
+        trial_number = trial_idx if trial_idx is not None else len(self.results_)
+        sampled = {k: self._rng.choice(v) for k, v in self.param_grid.items()}
+        sampled["random_state"] = self.seed + trial_number
+
+        logger.info(
+            "XGBoostTuner trial %d/%d: %s",
+            trial_number + 1,
+            self.n_trials,
+            sampled,
+        )
+
+        model = XGBoostModel(lookback=lookback, **sampled)
+        model.fit(X_train, y_train, X_val, y_val)
+
+        # Compute validation RMSE
+        if model.history["val_rmse"]:
+            val_rmse = min(model.history["val_rmse"])
+        else:
+            from src.evaluation.metrics import rmse as rmse_fn
+
+            val_rmse = rmse_fn(y_val, model.predict(X_val))
+
+        trial_result = {"trial": trial_number + 1, "val_rmse": val_rmse, **sampled}
+        self.results_.append(trial_result)
+        logger.info("  val_rmse=%.6f", val_rmse)
+
+        return model, {**sampled, "lookback": lookback}
