@@ -1,0 +1,80 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+env/
+venv/
+.venv/
+
+# Poetry
+poetry.lock
+
+# Logs
+logs/
+*.log
+
+# Data files
+data/raw/
+data/interim/
+data/processed/
+data/results/
+data/plots/
+
+docs/ignore/
+
+tests/
+
+# Model artifacts
+models/checkpoints/
+models/scalers/
+models/pso_best/
+
+# Reports and figures
+reports/results/
+reports/figures/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python environment variables
+.env
+.env.local
+.env.*.local
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Pytest cache
+.pytest_cache/
+
+# Mypy cache
+.mypy_cache/
+
+# Coverage
+htmlcov/
+.coverage
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+
+data/
+
+
+docs/backups/**
+docs/development/**
+docs/research/**
