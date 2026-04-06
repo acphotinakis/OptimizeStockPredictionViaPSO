@@ -11,7 +11,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
+import torch
 import numpy as np
 
 from .particle import LB, UB, Particle
@@ -178,6 +178,8 @@ class StandardPSO:
         iteration: int,
     ) -> None:
         """Evaluate every particle and update pbest / gbest."""
+        logger.info(f"Evaludating swarms...")
+        logger.info(f"number of works = {self.n_workers}")
         if self.n_workers > 1:
             self._evaluate_parallel(X_train, y_train, X_val, y_val)
         else:
@@ -185,6 +187,7 @@ class StandardPSO:
                 fitness = self._evaluate_particle(
                     particle, X_train, y_train, X_val, y_val
                 )
+                logger.info(f"Updating weights")
                 self._update_bests(particle, fitness)
 
     def _evaluate_particle(
@@ -197,10 +200,9 @@ class StandardPSO:
     ) -> float:
         """Build model, train, predict on val, return composite fitness."""
         # Phase 3: Clear GPU cache before each particle evaluation
-        import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
+
         params = particle.decode()
         lookback = params["lookback"]
 
@@ -213,11 +215,11 @@ class StandardPSO:
 
         y_pred = self.model_builder(params, X_tr, y_train, X_vl, y_val)
         fitness = self.fitness_fn(y_val, y_pred)
-        
+
         # Phase 3: Clear GPU cache after evaluation
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
+
         return fitness
 
     def _evaluate_parallel(self, X_train, y_train, X_val, y_val) -> None:

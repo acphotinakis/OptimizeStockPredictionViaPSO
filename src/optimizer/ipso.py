@@ -103,9 +103,11 @@ class IPSO(StandardPSO):
         """
         self.fitness_fn.reset()
         self._initialise_swarm()
+        logger.info(f"Initialized Swarm")
         self._evaluate_all(X_train, y_train, X_val, y_val, iteration=0)
 
         for t in range(1, self.T + 1):
+            logger.info(f"Running {t} iteration")
             w = self._inertia(t)
             for particle in self._swarm:
                 self._update_particle_with_t(particle, w, t)

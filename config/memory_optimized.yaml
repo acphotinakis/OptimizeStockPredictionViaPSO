@@ -40,7 +40,8 @@ lstm:
   
   # Training settings - MEMORY OPTIMIZED
   max_epochs: 80  # Reduced from 100
-  batch_size: 64  # Reduced from 256 (4x less memory)
+  # batch_size: 64  # Reduced from 256 (4x less memory)
+  batch_size: 32  # Reduced from 256 (4x less memory)
   accumulation_steps: 4  # Effective batch = 256
   early_stopping_patience: 10
   grad_clip: 1.0

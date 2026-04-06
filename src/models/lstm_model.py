@@ -157,7 +157,7 @@ class LSTMTrainer:
 
         # Phase 3: Mixed precision training
         self.use_amp = use_amp and torch.cuda.is_available()
-        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
+        self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
 
         # Phase 3: Gradient accumulation
         self.accumulation_steps = accumulation_steps
@@ -228,7 +228,7 @@ class LSTMTrainer:
 
                 # Phase 3: Mixed precision training
                 if self.use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast(device_type="cuda"):
                         pred = self.model(x_b)
                         loss = self.criterion(pred, y_b)
 
