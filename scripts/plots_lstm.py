@@ -136,8 +136,9 @@ def plot_lstm_pnl(
         )
 
         # Add final PnL annotation
-        final_pnl = pnl_stats["total_pnl"]
-        final_return = results_dict["pnl_stats"]["total_return"]
+        final_pnl = equity[-1] - initial_capital
+        final_return = (equity[-1] / initial_capital - 1) if initial_capital > 0 else 0.0
+        
         axes[ax_idx].annotate(
             f"Final PnL: ${final_pnl:,.2f} ({final_return:+.2%})",
             xy=(len(equity) - 1, equity[-1]),
@@ -146,14 +147,18 @@ def plot_lstm_pnl(
             fontweight="bold",
             bbox=dict(
                 boxstyle="round,pad=0.5",
-                facecolor="yellow" if final_pnl > 0 else "lightcoral",
+                facecolor="lightgreen" if final_pnl > 0 else "lightcoral",
                 alpha=0.7,
             ),
             arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
         )
 
+        # Get Sharpe and Max DD from pnl_stats (handles both key formats)
+        sharpe = pnl_stats.get('sharpe_ratio', pnl_stats.get('sharpe', 0.0))
+        max_dd = pnl_stats.get('max_drawdown', 0.0)
+        
         axes[ax_idx].set_title(
-            f"{ticker} Equity Curve | Sharpe: {pnl_stats['sharpe_ratio']:.3f} | Max DD: {pnl_stats['max_drawdown']:.2%}",
+            f"{ticker} Equity Curve | Sharpe: {sharpe:.3f} | Max DD: {max_dd:.2%}",
             fontsize=14,
             fontweight="bold",
         )
