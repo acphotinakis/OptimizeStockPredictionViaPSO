@@ -211,8 +211,16 @@ class LSTMTrainer:
             generator=torch.Generator().manual_seed(42),
         )
 
-        X_val_t = torch.FloatTensor(X_val).to(self.device)
-        y_val_t = torch.FloatTensor(y_val).unsqueeze(-1).to(self.device)
+        # Create validation DataLoader to avoid OOM
+        val_ds = TensorDataset(
+            torch.FloatTensor(X_val),
+            torch.FloatTensor(y_val).unsqueeze(-1),
+        )
+        val_dl = DataLoader(
+            val_ds,
+            batch_size=physical_batch_size,
+            shuffle=False,
+        )
 
         best_val_loss = float("inf")
         patience_counter = 0
@@ -269,9 +277,14 @@ class LSTMTrainer:
 
             # ---- Validation ----
             self.model.eval()
+            val_loss = 0.0
             with torch.no_grad():
-                val_pred = self.model(X_val_t)
-                val_loss = self.criterion(val_pred, y_val_t).item()
+                for x_val_b, y_val_b in val_dl:
+                    x_val_b = x_val_b.to(self.device)
+                    y_val_b = y_val_b.to(self.device)
+                    val_pred_b = self.model(x_val_b)
+                    val_loss += self.criterion(val_pred_b, y_val_b).item() * len(x_val_b)
+            val_loss = val_loss / len(val_ds)
 
             self.history["train_loss"].append(avg_train)
             self.history["val_loss"].append(val_loss)

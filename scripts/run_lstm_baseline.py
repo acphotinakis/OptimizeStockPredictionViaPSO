@@ -81,6 +81,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-epochs", type=int, default=None)
     parser.add_argument("--patience", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--device", type=str, default=None, 
+                       help="Device to use (cpu/cuda). Auto-detect if not specified.")
     
     # Validation-specific arguments
     parser.add_argument("--wfv-fold-size", type=int, default=252)
@@ -223,8 +225,10 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     logger.info("Hyperparameters: %s", hyperparams)
     
     # Initialize model
+    device = args.device if args.device is not None else None
     model = VanillaLSTM(
         input_size=X_train_flat.shape[1],
+        device=device,
         **hyperparams
     )
     
