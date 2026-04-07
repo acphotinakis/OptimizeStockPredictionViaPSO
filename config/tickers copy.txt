@@ -1,0 +1,74 @@
+# 51-ticker universe for PSO-LSTM stock prediction
+# 50 equities + SPY benchmark
+# Organized by sector
+
+# Technology (10)
+AAPL
+MSFT
+GOOGL
+NVDA
+META
+TSLA
+INTC
+AMD
+CRM
+ADBE
+
+# Financials (8)
+JPM
+BAC
+WFC
+GS
+MS
+C
+BLK
+SCHW
+
+# Healthcare (8)
+JNJ
+UNH
+PFE
+ABBV
+TMO
+MRK
+LLY
+ABT
+
+# Consumer (8)
+AMZN
+WMT
+HD
+MCD
+NKE
+SBUX
+TGT
+COST
+
+# Industrials (6)
+BA
+CAT
+GE
+UPS
+HON
+LMT
+
+# Energy (4)
+XOM
+CVX
+COP
+SLB
+
+# Communication (3)
+DIS
+NFLX
+CMCSA
+
+# Materials (2)
+LIN
+APD
+
+# Utilities (1)
+NEE
+
+# Benchmark ETF
+SPY
