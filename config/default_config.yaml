@@ -49,6 +49,7 @@ lstm_baseline:
   max_epochs: 100
   patience: 10
   batch_size: 256
+  use_checkpointing: True
   
   # Training settings
   grad_clip: 1.0

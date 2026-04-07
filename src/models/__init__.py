@@ -1,4 +1,4 @@
-from .lstm_model import LSTMModel, LSTMTrainer
+from .lstm.lstm_model import LSTMModel, LSTMTrainer
 from .baselines import PersistenceModel, XGBoostBaseline, VanillaLSTM
 from .xgboost.xgboost_model import XGBoostModel, XGBoostTuner
 

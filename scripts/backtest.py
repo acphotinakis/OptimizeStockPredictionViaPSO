@@ -23,8 +23,8 @@ import matplotlib.pyplot as plt
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.lstm_model import LSTMModel, LSTMTrainer
-from src.models.quantized_lstm import QuantizedLSTMModel
+from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
+from src.models.lstm.quantized_lstm import QuantizedLSTMModel
 from src.evaluation.backtester import Backtester
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger

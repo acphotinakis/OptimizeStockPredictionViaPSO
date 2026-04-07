@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 
-from .lstm_model import LSTMModel, LSTMTrainer
+from .lstm.lstm_model import LSTMModel, LSTMTrainer
 
 
 # ======================================================================

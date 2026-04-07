@@ -18,14 +18,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.models.quantized_lstm import QuantizedLSTMModel
+from src.models.lstm.quantized_lstm import QuantizedLSTMModel
 from src.utils.memory_profiler import MemoryMonitor, MemoryProfiler
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.lstm_model import LSTMModel, LSTMTrainer
+from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
 from src.models.baselines import PersistenceModel, VanillaLSTM, XGBoostBaseline
 from src.evaluation.metrics import all_statistical_metrics
 from src.data.splitter import build_windows

@@ -23,7 +23,7 @@ sys.path.insert(0, str(project_root))
 
 from src.optimizer.ipso import IPSO
 from src.optimizer.fitness import CompositeFitness
-from src.models.lstm_model import LSTMModel, LSTMTrainer
+from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config

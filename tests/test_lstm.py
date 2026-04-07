@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.models.lstm_model import LSTMModel, LSTMTrainer
+from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
 from src.models.baselines import PersistenceModel, VanillaLSTM, XGBoostBaseline
 
 
