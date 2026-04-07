@@ -175,7 +175,7 @@ class Backtester:
 
                 # Stop-loss: if unrealised drawdown exceeds limit, force flat next bar
                 trade_dd = (entry_equity - equity[t + 1]) / (entry_equity + 1e-10)
-                if trade_dd > self.stop_loss:
+                if trade_dd > self.stop_loss and t + 1 < N:
                     signals[t + 1] = 0  # Override next bar's signal
             else:
                 equity[t + 1] = equity[t]

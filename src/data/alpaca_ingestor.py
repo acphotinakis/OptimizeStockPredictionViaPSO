@@ -67,29 +67,21 @@ class AlpacaIngestor:
         api_secret: Optional[str] = None,
         base_url: str = "https://paper-api.alpaca.markets",
     ) -> None:
-        # self.api_key = api_key or os.environ.get("ALPACA_API_KEY", "")
-        # self.api_secret = api_secret or os.environ.get("ALPACA_API_SECRET", "")
-        self.api_key = api_key or os.getenv("ALPACA_API_KEY", "")
-        self.api_secret = api_secret or os.getenv("APCA_API_SECRET_KEY", "")
-        print(f"Retrieved API Key from environment: {self.api_key != ''}")
-
-        print(f"Using API Key: {self.api_key}")
-        print(f"Using API Secret: {self.api_secret[:4]}...{self.api_secret[-4:]}")
-
-        # Load credentials from .env for security
-        api_key = os.getenv("ALPACA_API_KEY")
-        secret_key = os.getenv("ALPACA_SECRET_KEY")
-        print("Retrieved Alpaca API credentials from environment")
+        # Load credentials from environment (use consistent naming)
+        api_key = api_key or os.getenv("ALPACA_API_KEY")
+        secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY")
+        
+        logger.debug("Alpaca API credentials loaded from environment")
 
         if not api_key or not secret_key:
-            print(
+            logger.error(
                 "Alpaca API credentials missing. Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are in .env."
             )
             raise EnvironmentError("Missing Alpaca API credentials.")
 
         # Initialize the historical data client
         self.client = StockHistoricalDataClient(api_key, secret_key)
-        print("Initialized Alpaca StockHistoricalDataClient")
+        logger.info("Initialized Alpaca StockHistoricalDataClient")
 
         # Map configuration strings to alpaca-py TimeFrame objects
         self.timeframe_map = {
@@ -97,7 +89,7 @@ class AlpacaIngestor:
             "1Hour": TimeFrame.Hour,
             "1Day": TimeFrame.Day,
         }
-        print(f"TimeFrame mapping set: {self.timeframe_map}")
+        logger.debug("TimeFrame mapping initialized")
 
         self.base_url = base_url
 

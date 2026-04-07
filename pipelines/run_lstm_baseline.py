@@ -379,7 +379,7 @@ def run_val(args, features_dir, results_dir, ticker, tag):
 
     # Initialize model and load weights
     model = VanillaLSTM(input_size=X_val_flat.shape[1])
-    model._trainer.model.load_state_dict(torch.load(model_path))
+    model._trainer.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
 
     # Walk-forward validation
     fold_size = args.wfv_fold_size
@@ -478,7 +478,7 @@ def run_test(args, features_dir, results_dir, ticker, tag):
 
     # Load model
     model = VanillaLSTM(input_size=X_test_flat.shape[1])
-    model._trainer.model.load_state_dict(torch.load(model_path))
+    model._trainer.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
 
     # Predictions
     y_pred_test = model.predict(X_test_windows)

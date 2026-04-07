@@ -120,8 +120,6 @@ class LSTMModel(nn.Module):
 # Trainer
 # ======================================================================
 
-logger = logging.getLogger(__name__)
-
 
 class LSTMTrainer:
     """Manages training, early stopping, gradient accumulation, and checkpointing for LSTMModel."""
@@ -137,6 +135,7 @@ class LSTMTrainer:
         grad_clip: float = 1.0,
         use_amp: bool = True,
         accumulation_steps: int = 1,
+        seed: int = 42,
     ) -> None:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
@@ -147,8 +146,11 @@ class LSTMTrainer:
         self.grad_clip = grad_clip
         self.use_amp = use_amp and torch.cuda.is_available()
         self.accumulation_steps = accumulation_steps
+        self.seed = seed
 
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=lr, weight_decay=1e-5
+        )
         self.criterion = nn.MSELoss()
         self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
         self._best_state: Optional[dict] = None
@@ -185,7 +187,7 @@ class LSTMTrainer:
             train_ds,
             batch_size=effective_batch,
             shuffle=True,
-            generator=torch.Generator().manual_seed(42),
+            generator=torch.Generator().manual_seed(self.seed),
         )
         val_dl = DataLoader(val_ds, batch_size=effective_batch, shuffle=False)
 
@@ -214,6 +216,14 @@ class LSTMTrainer:
                     pred = self.model(x_b)
                     loss = self.criterion(pred, y_b)
                     loss = loss / self.accumulation_steps
+
+                    # Check for NaN/Inf in loss
+                    if not torch.isfinite(loss):
+                        logger.error(f"Non-finite loss detected: {loss.item()}")
+                        raise ValueError(
+                            f"Training failed: non-finite loss {loss.item()}"
+                        )
+
                     loss.backward()
 
                 # Update weights every accumulation_steps
@@ -231,6 +241,18 @@ class LSTMTrainer:
                 epoch_loss += (
                     loss.item() * len(x_b) * self.accumulation_steps
                 )  # restore true batch contribution
+
+            # Apply final partial accumulation step if needed
+            if (batch_idx + 1) % self.accumulation_steps != 0:
+                if self.use_amp:
+                    self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                if self.use_amp:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
+                self.optimizer.zero_grad()
 
             avg_train_loss = epoch_loss / len(train_ds)
 

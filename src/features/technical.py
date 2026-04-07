@@ -112,7 +112,8 @@ def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["ichi_tenkan"] = (H.rolling(9).max() + L.rolling(9).min()) / 2
     out["ichi_kijun"] = (H.rolling(26).max() + L.rolling(26).min()) / 2
     out["ichi_senkou_a"] = (out["ichi_tenkan"] + out["ichi_kijun"]) / 2
-    out["ichi_chikou"] = C.shift(-26)  # Lagging span
+    # REMOVED ichi_chikou: was using shift(-26) which creates look-ahead bias
+    # Chikou span shows close shifted 26 bars back for chart display, not a predictive feature
 
     # ---- Parabolic SAR (vectorised approximation) --------------------------
     psar, psar_sig = _parabolic_sar(H, L, C)

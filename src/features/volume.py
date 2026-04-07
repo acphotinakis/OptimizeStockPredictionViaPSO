@@ -91,6 +91,13 @@ def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
     out["tod_cos"] = np.cos(2 * np.pi * tod)
 
     # ---- Day-of-Week cyclical encoding ------------------------------------
+    # Ensure index is timezone-aware before converting
+    if df.index.tz is None:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("Index is timezone-naive; localizing to UTC before ET conversion")
+        df.index = df.index.tz_localize("UTC")
+    
     et_index = df.index.tz_convert("America/New_York")
     dow = et_index.dayofweek.values.astype(float)  # Mon=0 … Fri=4
     out["dow_sin"] = np.sin(2 * np.pi * dow / TRADING_DAYS)

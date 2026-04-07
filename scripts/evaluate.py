@@ -90,7 +90,21 @@ def main():
         default="results/evaluation",
         help="Output directory for evaluation results",
     )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Enable int8 quantization for models",
+    )
+    parser.add_argument(
+        "--profile-memory",
+        action="store_true",
+        help="Enable memory profiling during evaluation",
+    )
     args = parser.parse_args()
+
+    # Create output directory early
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load config
     cfg = load_config(args.config)
@@ -105,6 +119,7 @@ def main():
         logger.info("✓ Quantization enabled (int8)")
     if args.profile_memory:
         logger.info("✓ Memory profiling enabled")
+        from src.utils.memory_profiler import MemoryProfiler
         MemoryProfiler.log_memory("Initial")
 
     # Load PSO results
@@ -227,9 +242,6 @@ def main():
     results["Persistence"] = metrics_persist
 
     # Save results
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     output_file = output_dir / f"evaluation_{args.ticker}.json"
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)

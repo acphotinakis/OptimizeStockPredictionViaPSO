@@ -48,19 +48,21 @@ def compute_cross_ticker_features(
     # ---- SPY features -------------------------------------------------------
     if "SPY" in dfs and target_ticker != "SPY":
         r_spy = dfs["SPY"]["log_return"].reindex(df_target.index).fillna(0.0)
-        C_spy = dfs["SPY"]["close"].reindex(df_target.index).ffill().bfill()
+        # Only forward fill (no bfill which would use future data)
+        C_spy = dfs["SPY"]["close"].reindex(df_target.index).ffill()
+        # Remaining NaN (leading gaps) will be handled by fillna(0.0) at end
 
-        # Rolling beta to SPY
+        # Rolling beta to SPY (use rolling_window parameter in name)
         cov = r_target.rolling(rolling_window, min_periods=10).cov(r_spy)
         var_spy = r_spy.rolling(rolling_window, min_periods=10).var() + 1e-10
-        out["beta_spy_60"] = cov / var_spy
+        out[f"beta_spy_{rolling_window}"] = cov / var_spy
 
         # Rolling Pearson correlations
         out["corr_spy_20"] = r_target.rolling(20, min_periods=5).corr(r_spy)
-        out["corr_spy_60"] = r_target.rolling(60, min_periods=10).corr(r_spy)
+        out[f"corr_spy_{rolling_window}"] = r_target.rolling(rolling_window, min_periods=10).corr(r_spy)
 
         # Residual (alpha) return
-        out["alpha_spy"] = r_target - out["beta_spy_60"] * r_spy
+        out["alpha_spy"] = r_target - out[f"beta_spy_{rolling_window}"] * r_spy
 
         # Relative strength vs SPY (20-bar window)
         ret_20_target = C_target / C_target.shift(20) - 1
@@ -131,8 +133,15 @@ def compute_cross_ticker_features(
     out["universe_mean_ret"] = all_returns.mean(axis=1)
 
     # ---- Peer correlations (top-3 most correlated) -------------------------
+    # WARNING: peer_tickers should be pre-selected on TRAINING data only to avoid look-ahead bias
+    # If None is passed here, we compute on the full series which includes validation/test data
     computed_peer_tickers = None
     if peer_tickers is None:
+        logger.warning(
+            f"peer_tickers is None for {target_ticker}. Computing correlations on FULL series "
+            "which may include validation/test data. This creates LOOK-AHEAD BIAS. "
+            "Peers should be selected on training data only and passed explicitly."
+        )
         others = [t for t in dfs if t != target_ticker]
         if len(others) > 0:
             corrs = {}
@@ -141,6 +150,7 @@ def compute_cross_ticker_features(
                 corrs[t] = float(r_target.corr(r_other))
             peer_tickers = sorted(corrs, key=lambda x: abs(corrs[x]), reverse=True)[:3]
             computed_peer_tickers = peer_tickers  # Store for return
+            logger.warning(f"Auto-selected peers for {target_ticker} on FULL data: {peer_tickers}")
         else:
             peer_tickers = []
             computed_peer_tickers = []

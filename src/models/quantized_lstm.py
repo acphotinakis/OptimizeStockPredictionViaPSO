@@ -125,8 +125,12 @@ class QuantizedLSTMModel:
         """Load quantized model from disk."""
         if not self._is_quantized:
             self.quantize()
-        self.quantized_model.load_state_dict(torch.load(path))
-        logger.info("Loaded quantized model from %s", path)
+        try:
+            self.quantized_model.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
+            logger.info("Loaded quantized model from %s", path)
+        except Exception as e:
+            logger.error(f"Failed to load quantized model from {path}: {e}")
+            raise
 
 
 class QATLSTMTrainer:

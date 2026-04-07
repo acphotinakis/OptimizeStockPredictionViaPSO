@@ -23,18 +23,29 @@ OUTLIER_ZSCORE_THRESHOLD = 5  # Clip returns beyond ±5σ
 OUTLIER_ROLLING_WINDOW = 60  # Rolling window (bars) for z-score computation
 
 
-def generate_cleaning_report(stats):
+    def generate_cleaning_report(stats):
+    from datetime import timezone
+    
+    # Handle empty stats
+    if stats["rows_initial"] == 0:
+        pct_rows_removed = 0.0
+    else:
+        pct_rows_removed = (stats["rows_initial"] - stats["rows_final"]) / stats["rows_initial"]
+    
+    if stats["expected_bars"] == 0:
+        coverage_ratio = 0.0
+    else:
+        coverage_ratio = stats["rows_final"] / stats["expected_bars"]
 
     report = {
         "metadata": {
             "start_date": str(stats["metadata"]["start_date"]),
             "end_date": str(stats["metadata"]["end_date"]),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         },
         "integrity": {
             "rows_removed_total": stats["rows_initial"] - stats["rows_final"],
-            "pct_rows_removed": (stats["rows_initial"] - stats["rows_final"])
-            / stats["rows_initial"],
+            "pct_rows_removed": pct_rows_removed,
         },
         "input_metrics": {
             "row_count": stats["rows_initial"],
@@ -57,7 +68,7 @@ def generate_cleaning_report(stats):
         "density": {
             "expected_bars": stats["expected_bars"],
             "actual_bars": stats["rows_final"],
-            "coverage_ratio": stats["rows_final"] / stats["expected_bars"],
+            "coverage_ratio": coverage_ratio,
         },
     }
 
@@ -127,9 +138,15 @@ class DataCleaner:
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
-        self._init_stats(df)
+        self._init_stats()
 
         self.stats["rows_initial"] = len(df)
+        
+        # Handle empty DataFrame early
+        if len(df) == 0:
+            logger.warning("Empty DataFrame provided to clean(); returning as-is")
+            self.stats["rows_final"] = 0
+            return df
 
         df = self._ensure_utc(df)
         df = self._remove_duplicates(df)
@@ -188,11 +205,11 @@ class DataCleaner:
 
     def _session_filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """Keep only bars within NYSE regular trading hours (ET)."""
-        df_et = df.copy()
-        df_et.index = df.index.tz_convert("America/New_York")
+        # Build mask without copying full DataFrame
+        et_index = df.index.tz_convert("America/New_York")
 
-        mask = (df_et.index.time >= self.session_start) & (
-            df_et.index.time <= self.session_end
+        mask = (et_index.time >= self.session_start) & (
+            et_index.time <= self.session_end
         )
 
         before = len(df)
@@ -348,15 +365,17 @@ class DataCleaner:
 
         df["outlier_flag"] = outlier_mask
 
-        # Reconstruct close prices from clipped returns
-        for idx in df.index[outlier_mask]:
-            loc = df.index.get_loc(idx)
-            if loc == 0:
-                continue
-            prev_close = df["close"].iloc[loc - 1]
-            sign = np.sign(r.iloc[loc])
-            clipped_r = sign * self.outlier_z * rolling_std.iloc[loc]
-            df.at[idx, "close"] = prev_close * np.exp(clipped_r)
+        # Reconstruct close prices from clipped returns (vectorized)
+        outlier_locs = df.index.get_indexer_for(df.index[outlier_mask])
+        outlier_locs = outlier_locs[outlier_locs > 0]  # Skip first bar
+        
+        if len(outlier_locs) > 0:
+            outlier_idx = df.index[outlier_locs]
+            prev_idx = df.index[outlier_locs - 1]
+            prev_close = df.loc[prev_idx, "close"].values
+            signs = np.sign(r.iloc[outlier_locs].values)
+            clipped_r = signs * self.outlier_z * rolling_std.iloc[outlier_locs].values
+            df.loc[outlier_idx, "close"] = prev_close * np.exp(clipped_r)
 
         clipped = outlier_mask.sum()
         if clipped:

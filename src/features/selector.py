@@ -181,6 +181,9 @@ class FeatureSelector:
 
         logger.info("Using %d valid samples for feature selection", len(X))
 
+        # Set device based on CUDA availability
+        device = "cuda" if gpu_available else "cpu"
+        
         model = xgb.XGBRegressor(
             n_estimators=300,
             max_depth=5,
@@ -188,7 +191,7 @@ class FeatureSelector:
             subsample=0.8,
             colsample_bytree=0.8,
             tree_method=tree_method,
-            device="cuda",
+            device=device,
             random_state=42,
             verbosity=0,
             n_jobs=-1 if not gpu_available else 1,  # Use all CPUs if no GPU
