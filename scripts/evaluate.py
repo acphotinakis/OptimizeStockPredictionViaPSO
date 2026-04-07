@@ -18,7 +18,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.utils.memory_profiler import MemoryMonitor
+from src.models.quantized_lstm import QuantizedLSTMModel
+from src.utils.memory_profiler import MemoryMonitor, MemoryProfiler
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent

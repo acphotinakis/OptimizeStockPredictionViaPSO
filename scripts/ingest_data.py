@@ -16,13 +16,16 @@ import logging
 import sys
 from pathlib import Path
 import pandas as pd
+import uuid
+
+from src.database.cleaning_tracker import CleaningTracker
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.data.alpaca_ingestor import AlpacaIngestor
-from src.data.cleaner import DataCleaner
+from src.data.cleaner import DataCleaner, generate_cleaning_report
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 
@@ -65,6 +68,10 @@ def main():
         session_start=cfg.data.session_start,
         session_end=cfg.data.session_end,
     )
+    cleaner.reset_stats()
+
+    tracker = CleaningTracker()
+    tracker._init_db()
 
     raw_dir = Path("data/raw")
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +90,15 @@ def main():
         logger.error("SPY raw data not found at %s", spy_path)
         return
 
-    df_spy = cleaner.clean(ingestor.load_bars(spy_path))
+    df_spy_raw = ingestor.load_bars(spy_path)
+    df_spy = cleaner.clean(df_spy_raw)
+    report = generate_cleaning_report(cleaner.stats)
+
+    tracker.log_cleaning_run(
+        ticker="SPY",
+        report=report,
+    )
+
     df_spy = df_spy[["open", "high", "low", "close", "volume"]].copy()
     df_spy.index = pd.to_datetime(df_spy.index)
 
@@ -103,22 +118,28 @@ def main():
         if ticker == "SPY":
             continue
 
+        cleaner.reset_stats()
+
         raw_path = raw_dir / f"{ticker}.parquet"
         if not raw_path.exists():
             logger.warning("Skipping %s (no raw data)", ticker)
             continue
 
-        df_ticker = cleaner.clean(ingestor.load_bars(raw_path))
+        cleaner.reset_stats()
+        df_ticker_raw = ingestor.load_bars(raw_path)
+        df_ticker = cleaner.clean(df_ticker_raw)
         df_ticker.index = pd.to_datetime(df_ticker.index)
 
         # Align to SPY timestamps using reindex + fill gaps
         df_ticker_aligned = df_ticker.reindex(df_spy.index)
-        # df_ticker_aligned.ffill(inplace=True)
-        # df_ticker_aligned.bfill(inplace=True)
         numeric_cols = df_ticker_aligned.select_dtypes(include="number").columns
         df_ticker_aligned[numeric_cols] = (
             df_ticker_aligned[numeric_cols].ffill().bfill()
         )
+
+        # Generate cleaning report and log it
+        report_ticker = generate_cleaning_report(cleaner.stats)
+        tracker.log_cleaning_run(ticker=ticker, report=report_ticker)
 
         # Save individual ticker
         ticker_file = output_path / f"{ticker}.parquet"
@@ -131,7 +152,7 @@ def main():
         )
 
         # Append to combined Parquet if requested
-        if args.save_combined and 1 == 2:
+        if args.save_combined:
             # Add ticker prefix to columns to avoid collisions
             df_ticker_prefixed = df_ticker_aligned.add_prefix(f"{ticker}_")
             df_ticker_prefixed.reset_index(inplace=True)

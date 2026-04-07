@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -119,23 +120,15 @@ class LSTMModel(nn.Module):
 # Trainer
 # ======================================================================
 
+logger = logging.getLogger(__name__)
+
 
 class LSTMTrainer:
-    """Manages training, early stopping, and checkpointing for LSTMModel.
-
-    Args:
-        model: LSTMModel instance.
-        lr: Adam learning rate.
-        max_epochs: Hard epoch cap.
-        patience: Early stopping patience (validation loss).
-        batch_size: Mini-batch size.
-        device: Torch device ("cuda" or "cpu").
-        grad_clip: Max gradient L2 norm.
-    """
+    """Manages training, early stopping, gradient accumulation, and checkpointing for LSTMModel."""
 
     def __init__(
         self,
-        model: LSTMModel,
+        model: nn.Module,
         lr: float,
         max_epochs: int = 100,
         patience: int = 10,
@@ -145,25 +138,19 @@ class LSTMTrainer:
         use_amp: bool = True,
         accumulation_steps: int = 1,
     ) -> None:
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
-        self.model = model.to(device)
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = model.to(self.device)
         self.lr = lr
         self.max_epochs = max_epochs
         self.patience = patience
         self.batch_size = batch_size
         self.grad_clip = grad_clip
-
-        # Phase 3: Mixed precision training
         self.use_amp = use_amp and torch.cuda.is_available()
-        self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
-
-        # Phase 3: Gradient accumulation
         self.accumulation_steps = accumulation_steps
 
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
         self.criterion = nn.MSELoss()
+        self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
         self._best_state: Optional[dict] = None
         self.history: Dict[str, list] = {"train_loss": [], "val_loss": []}
 
@@ -176,8 +163,6 @@ class LSTMTrainer:
                 self.batch_size * self.accumulation_steps,
             )
 
-    # ------------------------------------------------------------------
-
     def fit(
         self,
         X_train: np.ndarray,
@@ -185,108 +170,81 @@ class LSTMTrainer:
         X_val: np.ndarray,
         y_val: np.ndarray,
     ) -> Dict[str, list]:
-        """Train the model with early stopping.
+        """Train the model with early stopping."""
 
-        Args:
-            X_train: [N_train, T, F]
-            y_train: [N_train]
-            X_val:   [N_val, T, F]
-            y_val:   [N_val]
-
-        Returns:
-            Training history dict with 'train_loss' and 'val_loss' lists.
-        """
+        # TensorDatasets and DataLoaders
         train_ds = TensorDataset(
-            torch.FloatTensor(X_train),
-            torch.FloatTensor(y_train).unsqueeze(-1),
+            torch.FloatTensor(X_train), torch.FloatTensor(y_train).unsqueeze(-1)
+        )
+        val_ds = TensorDataset(
+            torch.FloatTensor(X_val), torch.FloatTensor(y_val).unsqueeze(-1)
         )
 
-        # Adjust batch size for gradient accumulation
-        physical_batch_size = self.batch_size // self.accumulation_steps
-
+        effective_batch = self.batch_size // self.accumulation_steps
         train_dl = DataLoader(
             train_ds,
-            batch_size=physical_batch_size,
+            batch_size=effective_batch,
             shuffle=True,
             generator=torch.Generator().manual_seed(42),
         )
-
-        # Create validation DataLoader to avoid OOM
-        val_ds = TensorDataset(
-            torch.FloatTensor(X_val),
-            torch.FloatTensor(y_val).unsqueeze(-1),
-        )
-        val_dl = DataLoader(
-            val_ds,
-            batch_size=physical_batch_size,
-            shuffle=False,
-        )
+        val_dl = DataLoader(val_ds, batch_size=effective_batch, shuffle=False)
 
         best_val_loss = float("inf")
         patience_counter = 0
         self.history = {"train_loss": [], "val_loss": []}
 
-        for epoch in range(self.max_epochs):
-            # ---- Training ----
+        for epoch in tqdm(range(self.max_epochs), desc="Epochs", unit="epoch"):
             self.model.train()
             epoch_loss = 0.0
 
-            for batch_idx, (x_b, y_b) in enumerate(train_dl):
+            # Batch-level progress bar
+            for batch_idx, (x_b, y_b) in enumerate(
+                tqdm(train_dl, desc=f"Epoch {epoch+1}", leave=False, unit="batch")
+            ):
                 x_b, y_b = x_b.to(self.device), y_b.to(self.device)
 
-                # Phase 3: Mixed precision training
+                # Forward + backward
                 if self.use_amp:
-                    with torch.amp.autocast(device_type="cuda"):
+                    with torch.amp.autocast_mode.autocast(device_type="cuda"):
                         pred = self.model(x_b)
                         loss = self.criterion(pred, y_b)
-
-                    # Normalize loss for gradient accumulation
                     loss = loss / self.accumulation_steps
-
-                    # Scaled backward pass
                     self.scaler.scale(loss).backward()
-
-                    # Update weights every N steps
-                    if (batch_idx + 1) % self.accumulation_steps == 0:
-                        self.scaler.unscale_(self.optimizer)
-                        nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.grad_clip
-                        )
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                        self.optimizer.zero_grad()
                 else:
                     pred = self.model(x_b)
                     loss = self.criterion(pred, y_b)
-
-                    # Normalize loss for gradient accumulation
                     loss = loss / self.accumulation_steps
                     loss.backward()
 
-                    # Update weights every N steps
-                    if (batch_idx + 1) % self.accumulation_steps == 0:
-                        nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.grad_clip
-                        )
+                # Update weights every accumulation_steps
+                if (batch_idx + 1) % self.accumulation_steps == 0:
+                    if self.use_amp:
+                        self.scaler.unscale_(self.optimizer)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                    if self.use_amp:
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
                         self.optimizer.step()
-                        self.optimizer.zero_grad()
+                    self.optimizer.zero_grad()
 
-                epoch_loss += loss.item() * len(x_b) * self.accumulation_steps
+                epoch_loss += (
+                    loss.item() * len(x_b) * self.accumulation_steps
+                )  # restore true batch contribution
 
-            avg_train = epoch_loss / len(train_ds)
+            avg_train_loss = epoch_loss / len(train_ds)
 
             # ---- Validation ----
             self.model.eval()
             val_loss = 0.0
             with torch.no_grad():
                 for x_val_b, y_val_b in val_dl:
-                    x_val_b = x_val_b.to(self.device)
-                    y_val_b = y_val_b.to(self.device)
-                    val_pred_b = self.model(x_val_b)
-                    val_loss += self.criterion(val_pred_b, y_val_b).item() * len(x_val_b)
-            val_loss = val_loss / len(val_ds)
+                    x_val_b, y_val_b = x_val_b.to(self.device), y_val_b.to(self.device)
+                    val_pred = self.model(x_val_b)
+                    val_loss += self.criterion(val_pred, y_val_b).item() * len(x_val_b)
+            val_loss /= len(val_ds)
 
-            self.history["train_loss"].append(avg_train)
+            self.history["train_loss"].append(avg_train_loss)
             self.history["val_loss"].append(val_loss)
 
             # ---- Early stopping ----
@@ -299,6 +257,7 @@ class LSTMTrainer:
             else:
                 patience_counter += 1
                 if patience_counter >= self.patience:
+                    logger.info(f"Early stopping at epoch {epoch+1}")
                     break
 
         # Restore best weights
@@ -306,8 +265,23 @@ class LSTMTrainer:
             self.model.load_state_dict(
                 {k: v.to(self.device) for k, v in self._best_state.items()}
             )
+
         return self.history
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict on a numpy array."""
-        return self.model.predict(X, device=self.device)
+    def predict(self, X: np.ndarray, batch_size: int = 256) -> np.ndarray:
+        self.model.eval()
+        preds = []
+        with torch.no_grad():
+            for i in range(0, len(X), batch_size):
+                X_batch = torch.FloatTensor(X[i : i + batch_size]).to(self.device)
+                pred_batch = self.model(X_batch).cpu().numpy()
+                preds.append(pred_batch)
+        return np.vstack(preds)
+
+    # def predict(self, X: np.ndarray) -> np.ndarray:
+    #     """Predict on a numpy array."""
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         X_t = torch.FloatTensor(X).to(self.device)
+    #         pred = self.model(X_t).cpu().numpy()
+    #     return pred

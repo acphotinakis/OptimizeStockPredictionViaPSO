@@ -109,6 +109,8 @@ def auc_ternary(
 
 def all_statistical_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """Compute all statistical metrics and return as a dict."""
+    y_true = y_true.ravel()
+    y_pred = y_pred.ravel()
     return {
         "rmse": rmse(y_true, y_pred),
         "mae": mae(y_true, y_pred),

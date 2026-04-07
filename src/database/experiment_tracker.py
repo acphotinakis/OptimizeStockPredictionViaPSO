@@ -15,7 +15,7 @@ import numpy as np
 class ExperimentTracker:
     """Track experiments across all model types with SQLite backend."""
 
-    def __init__(self, db_path: Path = Path("results/experiments.db")):
+    def __init__(self, db_path: Path = Path("results/database/experiments.db")):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
