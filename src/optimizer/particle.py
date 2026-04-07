@@ -4,12 +4,12 @@ src/optimizer/particle.py
 Particle encoding and decoding for the 5-dimensional LSTM hyperparameter
 search space defined in pso_mathematical_spec.md.
 
-Continuous encoding → decoded hyperparameters:
-  dim 0: num_layers    [1.0, 4.99] → int  {1,2,3,4}
-  dim 1: hidden_units  [32, 512]   → int  multiple of 32
-  dim 2: dropout       [0.0, 0.5]  → float
-  dim 3: log_lr        [ln1e-5, ln1e-1] → float exp(x)
-  dim 4: lookback_idx  [0, 3.99]   → int  index into {10,30,60,120}
+Continuous encoding --> decoded hyperparameters:
+  dim 0: num_layers    [1.0, 4.99] --> int  {1,2,3,4}
+  dim 1: hidden_units  [32, 512]   --> int  multiple of 32
+  dim 2: dropout       [0.0, 0.5]  --> float
+  dim 3: log_lr        [ln1e-5, ln1e-1] --> float exp(x)
+  dim 4: lookback_idx  [0, 3.99]   --> int  index into {10,30,60,120}
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def decode(position: np.ndarray) -> Dict[str, Any]:
                         learning_rate, lookback.
     """
     x = np.clip(position, LB, UB)
-    num_layers = int(x[0])  # floor → {1,2,3,4}
+    num_layers = int(x[0])  # floor --> {1,2,3,4}
     hidden_raw = int(round(x[1] / 32.0)) * 32  # round to nearest 32
     hidden_units = int(np.clip(hidden_raw, 32, 512))
     dropout = float(x[2])

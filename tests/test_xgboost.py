@@ -121,7 +121,7 @@ class TestFlattening:
         # Unique values at each timestep
         X = np.zeros((1, 10, 2), dtype=np.float32)
         for t in range(10):
-            X[0, t, :] = float(t)  # timestep t → value t
+            X[0, t, :] = float(t)  # timestep t --> value t
         flat = m._flatten(X)  # shape (1, 5*2)
         # The last 5 timesteps are indices 5..9
         expected = np.array([[5, 5, 6, 6, 7, 7, 8, 8, 9, 9]], dtype=np.float32)
@@ -177,7 +177,7 @@ class TestFitPredict:
         assert np.isfinite(preds).all(), "Predictions contain NaN or Inf"
 
     def test_fit_is_deterministic(self, split_windows):
-        """Same seed → identical predictions."""
+        """Same seed --> identical predictions."""
         X_tr, y_tr, X_vl, y_vl, X_te, y_te = split_windows
         m1 = XGBoostModel(lookback=20, n_estimators=30, random_state=7)
         m2 = XGBoostModel(lookback=20, n_estimators=30, random_state=7)

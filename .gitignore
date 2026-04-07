@@ -67,3 +67,12 @@ Thumbs.db
 
 
 backup/
+
+debug_unzip
+project_archive.zip
+
+# .agent_skills
+
+.agent_skills
+
+.gemini

@@ -27,8 +27,8 @@ class WalkForwardValidator:
     Args:
         fold_size_bars: Number of bars per test fold (default: 1 month ≈ 21×390).
         min_train_bars: Minimum training bars before first fold.
-        retrain_fn: Callable(X_train, y_train, X_val, y_val) → fitted model.
-        predict_fn:  Callable(model, X) → y_pred array.
+        retrain_fn: Callable(X_train, y_train, X_val, y_val) --> fitted model.
+        predict_fn:  Callable(model, X) --> y_pred array.
     """
 
     def __init__(

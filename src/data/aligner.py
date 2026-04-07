@@ -8,8 +8,8 @@ index derived from SPY (the most liquid, complete ticker).
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
-
+from typing import Dict, List, Optional
+from pathlib import Path
 import pandas as pd
 import numpy as np
 
@@ -42,18 +42,17 @@ class TickerAligner:
     def align(
         self,
         dfs: Dict[str, pd.DataFrame],
-        fields: Optional[list] = None,
+        fields: Optional[List] = None,
     ) -> pd.DataFrame:
         """Align all DataFrames to the master index.
 
         Args:
-            dfs: Mapping of ticker → cleaned DataFrame with DatetimeIndex.
+            dfs: Mapping of ticker --> cleaned DataFrame with DatetimeIndex.
             fields: Which columns to keep per ticker.
                 Defaults to [open, high, low, close, volume, log_return, session_start].
 
         Returns:
             MultiIndex DataFrame: rows = timestamps, columns = (ticker, field).
-            Timestamps where too many tickers have NaN are dropped.
         """
         if fields is None:
             fields = [
@@ -93,6 +92,14 @@ class TickerAligner:
         #     aligned[ticker] = df_sub
         aligned_parts = []
         for ticker, df in dfs.items():
+            # Ensure index is DatetimeIndex in UTC
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index, utc=True)
+            elif df.index.tz is None:
+                df.index = df.index.tz_localize("UTC")
+            else:
+                df.index = df.index.tz_convert("UTC")
+
             available = [f for f in fields if f in df.columns]
             df_sub = (
                 df[available].reindex(master_index).ffill(limit=self.max_ffill_bars)
@@ -131,3 +138,23 @@ class TickerAligner:
 
         logger.info("Alignment complete: %d timestamps × %d columns", *result.shape)
         return result
+
+    def save_aligned_tickers(
+        self, aligned_df: pd.DataFrame, output_dir: str | Path
+    ) -> None:
+        """
+        Save each ticker's aligned DataFrame to its own CSV file.
+
+        Args:
+            aligned_df: MultiIndex DataFrame from TickerAligner.align().
+            output_dir: Directory to save per-ticker CSVs.
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Loop over tickers in the first level of the MultiIndex columns
+        for ticker in aligned_df.columns.get_level_values("ticker").unique():
+            ticker_df = aligned_df[ticker].copy()
+            file_path = output_dir / f"{ticker}_aligned.csv"
+            ticker_df.to_csv(file_path, index=True)
+            logger.info(f"Saved {ticker} --> {file_path}")

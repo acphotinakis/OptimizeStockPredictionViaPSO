@@ -462,7 +462,7 @@ class XGBoostTuner:
 
     Args:
         n_trials: Number of random hyperparameter combinations to try.
-        param_grid: Dict mapping parameter name → list of candidate values.
+        param_grid: Dict mapping parameter name --> list of candidate values.
             If None, a sensible default grid is used.
         seed: Random seed for reproducibility.
     """

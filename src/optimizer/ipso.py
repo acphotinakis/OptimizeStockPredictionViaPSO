@@ -10,8 +10,8 @@ Two enhancements over standard PSO:
 
 2. Adaptive mutation factor:
        μ_mf^t = 0.7 + 0.3 · (t / T_max)          ∈ (0.7, 1]
-   When ξ ~ U(0,1) > μ_mf  →  particle mutates (random reinit).
-   Mutation probability decays from 30 % → 0 % over iterations.
+   When ξ ~ U(0,1) > μ_mf  -->  particle mutates (random reinit).
+   Mutation probability decays from 30 % --> 0 % over iterations.
 """
 
 from __future__ import annotations

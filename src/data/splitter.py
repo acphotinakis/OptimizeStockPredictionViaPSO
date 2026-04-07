@@ -120,7 +120,7 @@ def build_windows(
     lookback: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Build sliding-window (lookback, F) → next-bar-return pairs, fully vectorized.
+    Build sliding-window (lookback, F) --> next-bar-return pairs, fully vectorized.
     Excludes windows that cross a session boundary.
 
     Args:

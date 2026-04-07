@@ -27,7 +27,7 @@ def compute_cross_ticker_features(
 
     Args:
         target_ticker: The ticker whose features we are building.
-        dfs: Dict mapping ticker → cleaned DataFrame (with 'log_return', 'close', 'volume').
+        dfs: Dict mapping ticker --> cleaned DataFrame (with 'log_return', 'close', 'volume').
         peer_tickers: Top correlated peers (up to 3); computed from training data if None.
         rolling_window: Rolling window in minutes for correlation/beta.
         return_peer_tickers: If True, return (features, peer_tickers) tuple.
@@ -59,7 +59,9 @@ def compute_cross_ticker_features(
 
         # Rolling Pearson correlations
         out["corr_spy_20"] = r_target.rolling(20, min_periods=5).corr(r_spy)
-        out[f"corr_spy_{rolling_window}"] = r_target.rolling(rolling_window, min_periods=10).corr(r_spy)
+        out[f"corr_spy_{rolling_window}"] = r_target.rolling(
+            rolling_window, min_periods=10
+        ).corr(r_spy)
 
         # Residual (alpha) return
         out["alpha_spy"] = r_target - out[f"beta_spy_{rolling_window}"] * r_spy
@@ -110,7 +112,7 @@ def compute_cross_ticker_features(
             )
         else:
             logger.warning("SPY not in dfs; SPY-based features will be zero.")
-        
+
         for col in [
             "beta_spy_60",
             "corr_spy_20",
@@ -150,7 +152,9 @@ def compute_cross_ticker_features(
                 corrs[t] = float(r_target.corr(r_other))
             peer_tickers = sorted(corrs, key=lambda x: abs(corrs[x]), reverse=True)[:3]
             computed_peer_tickers = peer_tickers  # Store for return
-            logger.warning(f"Auto-selected peers for {target_ticker} on FULL data: {peer_tickers}")
+            logger.warning(
+                f"Auto-selected peers for {target_ticker} on FULL data: {peer_tickers}"
+            )
         else:
             peer_tickers = []
             computed_peer_tickers = []

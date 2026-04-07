@@ -11,7 +11,7 @@ from typing import Dict
 
 import numpy as np
 
-ANNUALISE_1MIN = np.sqrt(252 * 390)  # 1-minute bars → annual
+ANNUALISE_1MIN = np.sqrt(252 * 390)  # 1-minute bars --> annual
 
 
 # ======================================================================

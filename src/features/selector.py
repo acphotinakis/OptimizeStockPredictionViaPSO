@@ -63,17 +63,17 @@ class FeatureSelector:
         X = X[:, mask_var]
         names = [n for n, m in zip(names, mask_var) if m]
         logger.info(
-            "Variance threshold: %d → %d features", len(feature_names), len(names)
+            "Variance threshold: %d --> %d features", len(feature_names), len(names)
         )
 
         # Stage 2: Pearson correlation deduplication
         names, keep_mask = self._deduplicate_correlated(X, names)
         X = X[:, keep_mask]
-        logger.info("Correlation dedup: → %d features", len(names))
+        logger.info("Correlation dedup: --> %d features", len(names))
 
         # Stage 3: XGBoost importance
         names = self._xgb_importance_filter(X, y, names)
-        logger.info("XGBoost importance filter: → %d features", len(names))
+        logger.info("XGBoost importance filter: --> %d features", len(names))
 
         self.selected_features_ = names
         return self
@@ -183,7 +183,7 @@ class FeatureSelector:
 
         # Set device based on CUDA availability
         device = "cuda" if gpu_available else "cpu"
-        
+
         model = xgb.XGBRegressor(
             n_estimators=300,
             max_depth=5,

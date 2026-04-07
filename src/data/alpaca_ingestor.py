@@ -17,35 +17,9 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.timeframe import TimeFrame
 import pandas as pd
-
-logger = logging.getLogger(__name__)
-
 from dotenv import load_dotenv
 
-
-def downcast_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
-    """Reduce memory by downcasting numeric types.
-    
-    Converts float64 → float32 (50% memory savings, 7 decimal precision)
-    Converts int64 → int32 (50% memory savings, max value 2.1B)
-    
-    Args:
-        df: DataFrame with OHLCV columns.
-    
-    Returns:
-        DataFrame with downcasted types.
-    """
-    if 'open' in df.columns:
-        df['open'] = df['open'].astype('float32')
-    if 'high' in df.columns:
-        df['high'] = df['high'].astype('float32')
-    if 'low' in df.columns:
-        df['low'] = df['low'].astype('float32')
-    if 'close' in df.columns:
-        df['close'] = df['close'].astype('float32')
-    if 'volume' in df.columns:
-        df['volume'] = df['volume'].astype('int32')
-    return df
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -70,7 +44,7 @@ class AlpacaIngestor:
         # Load credentials from environment (use consistent naming)
         api_key = api_key or os.getenv("ALPACA_API_KEY")
         secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY")
-        
+
         logger.debug("Alpaca API credentials loaded from environment")
 
         if not api_key or not secret_key:
@@ -137,31 +111,42 @@ class AlpacaIngestor:
 
         try:
             bars = self.client.get_stock_bars(request_params)
-            df = bars.df
-            print(f"Downloaded {len(df)} bars for {ticker} from {start} to {end}")
+            df: pd.DataFrame = bars.df
+
+            logger.info(f"Downloaded {len(df)} bars for {ticker} from {start} to {end}")
             if df.empty:
-                print(f"No data returned for {ticker}")
+                logger.info(f"No data returned for {ticker}")
                 return pd.DataFrame()
+            else:
+                logger.info(f"Df head: {df.head}")
 
             # Flatten MultiIndex
-            if isinstance(df.index, pd.MultiIndex):
-                df = df.xs(ticker, level=0)
+            # if isinstance(df.index, pd.MultiIndex):
+            #     df = df.xs(ticker, level=0)
 
-            # Ensure timezone correctness
+            assert isinstance(df.index, pd.DatetimeIndex), "Expected DatetimeIndex"
+
+            # Ensure timezone correctness for storage in UTC
             if df.index.tz is None:
-                df.index = df.index.tz_localize("UTC")
-            df.index = df.index.tz_convert("US/Eastern")
-            df.index = df.index.round("1min")
+                df.index = df.index.tz_localize(
+                    "UTC"
+                )  # Localize naive timestamps to UTC
+            else:
+                df.index = df.index.tz_convert("UTC")  # Convert any tz-aware to UTC
+
+            df.index = df.index.round("1min")  # Optional rounding
+            df.index.name = "timestamp"
 
             df = df[["open", "high", "low", "close", "volume"]].copy()
-            df.index = pd.to_datetime(df.index, utc=True)
-            df.index.name = "timestamp"
             df["ticker"] = ticker
-            
+
+            logger.info(f"Index of data (UTC): {df.index}")
+            logger.info(f"Index dtype: {df.index.dtype}")
+
             # Downcast to reduce memory usage (Phase 1: Data Quantization)
-            df = downcast_ohlcv(df)
+            df = self.downcast_ohlcv(df)
             logger.debug("Downcasted %s to float32/int32", ticker)
-            
+
             return df
 
         except Exception as e:
@@ -206,8 +191,7 @@ class AlpacaIngestor:
 
             time.sleep(self.RATE_LIMIT_SLEEP)
 
-    @staticmethod
-    def load_bars(path: str | Path) -> pd.DataFrame:
+    def load_bars(self, path: str | Path) -> pd.DataFrame:
         """Load a previously saved Parquet file.
 
         Args:
@@ -217,6 +201,30 @@ class AlpacaIngestor:
             DataFrame with DatetimeIndex (UTC).
         """
         df = pd.read_parquet(path)
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index, utc=True)
+        # if not isinstance(df.index, pd.DatetimeIndex):
+        #     df.index = pd.to_datetime(df.index, utc=True)
+        return df
+
+    def downcast_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Reduce memory by downcasting numeric types.
+
+        Converts float64 --> float32 (50% memory savings, 7 decimal precision)
+        Converts int64 --> int32 (50% memory savings, max value 2.1B)
+
+        Args:
+            df: DataFrame with OHLCV columns.
+
+        Returns:
+            DataFrame with downcasted types.
+        """
+        if "open" in df.columns:
+            df["open"] = df["open"].astype("float32")
+        if "high" in df.columns:
+            df["high"] = df["high"].astype("float32")
+        if "low" in df.columns:
+            df["low"] = df["low"].astype("float32")
+        if "close" in df.columns:
+            df["close"] = df["close"].astype("float32")
+        if "volume" in df.columns:
+            df["volume"] = df["volume"].astype("int32")
         return df

@@ -15,29 +15,51 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Dict
+
+from src.data.aligner import TickerAligner
 
 # Add project root to Python path FIRST
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import pandas as pd
-import uuid
-
-from src.database.cleaning_tracker import CleaningTracker
-
 from src.data.alpaca_ingestor import AlpacaIngestor
-from src.data.cleaner import DataCleaner, generate_cleaning_report
+from src.data.cleaner import DataCleaner
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
 
+def save_parquet(output_path: Path, ticker: str, df: pd.DataFrame):
+    # Save individual ticker
+    ticker_file = output_path / f"{ticker}.parquet"
+    df.to_parquet(ticker_file)
+    logger.info(
+        "Saved aligned %s (%d rows) to %s",
+        ticker,
+        len(df),
+        ticker_file,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest, clean, and align OHLCV data")
+    parser.add_argument(
+        "--mode",
+        choices=["ingest", "clean", "align"],
+        required=True,
+        help="Execution mode: train, val, or test",
+    )
     parser.add_argument("--config", type=str, default="config/default_config.yaml")
     parser.add_argument("--tickers", type=str, default="config/tickers.txt")
-    parser.add_argument("--output", type=str, default="data/processed")
+    # for raw outputs
+    parser.add_argument("--raw-output", type=str, default="data/raw")
+    # for cleaned outputs
+    parser.add_argument("--cleaned-output", type=str, default="data/cleaned")
+    # for aligned outputs
+    parser.add_argument("--processed-output", type=str, default="data/processed")
     parser.add_argument(
         "--skip-existing",
         action="store_true",
@@ -56,116 +78,123 @@ def main():
 
     logger.info("Arguments: %s", args)
 
-    # Read tickers
+    start_date = cfg.data.start_date
+    end_date = cfg.data.end_date
+
+    raw_dir = Path(args.raw_output)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    cleaned_path = Path(args.cleaned_output)
+    cleaned_path.mkdir(parents=True, exist_ok=True)
+
+    processed_path = Path(args.processed_output)
+    processed_path.mkdir(parents=True, exist_ok=True)
+
+    alpaca_ingestor = AlpacaIngestor()
+    cleaner = DataCleaner(
+        session_start=cfg.data.session_start,
+        session_end=cfg.data.session_end,
+    )
+    ticker_aligner = TickerAligner(
+        benchmark_ticker=cfg.data.benchmark_ticker,
+        max_missing_fraction=cfg.data.max_filling_fraction,
+        max_ffill_bars=cfg.data.max_ffill_bars,
+    )
+
     with open(args.tickers) as f:
         tickers = [
             line.strip() for line in f if line.strip() and not line.startswith("#")
         ]
     logger.info("Loaded %d tickers from %s", len(tickers), args.tickers)
 
-    # Initialize ingestor and cleaner
-    ingestor = AlpacaIngestor()
-    cleaner = DataCleaner(
-        session_start=cfg.data.session_start,
-        session_end=cfg.data.session_end,
-    )
-    cleaner.reset_stats()
+    if args.mode == "ingest":
+        """
+        The function below:
+            -   handles multiindex
+            -   ensures timezone correctness
+            -   ensures only ["open", "high", "low", "close", "volume"] are columns
+            -   Downcast to reduce memory usage (Phase 1: Data Quantization)
+            -   Saves the final parquet to file
+        """
+        # Download the stock data
+        alpaca_ingestor.download_universe(
+            tickers,
+            args.raw_output,
+            start=start_date,
+            end=end_date,
+            skip_existing=args.skip_existing,
+        )
+    elif args.mode == "clean":
+        if "SPY" not in tickers:
+            logger.error("Ticker list must include SPY for alignment")
+            return
 
-    tracker = CleaningTracker()
-    tracker._init_db()
+        spy_path = raw_dir / "SPY.parquet"
+        if not spy_path.exists():
+            logger.error("SPY raw data not found at %s", spy_path)
+            return
 
-    raw_dir = Path("data/raw")
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    output_path = Path(args.output)
-    output_path.mkdir(parents=True, exist_ok=True)
+        df_spy_raw = alpaca_ingestor.load_bars(spy_path)
+        df_spy = cleaner.clean(df_spy_raw)
+        for ticker in tickers:
+            if ticker == "SPY":
+                continue
 
-    # -------------------------------
-    # 1. Load & clean SPY as benchmark
-    # -------------------------------
-    if "SPY" not in tickers:
-        logger.error("Ticker list must include SPY for alignment")
-        return
+            raw_path = raw_dir / f"{ticker}.parquet"
+            if not raw_path.exists():
+                logger.warning("Skipping %s (no raw data)", ticker)
+                raise ValueError(
+                    f"Raw data for {ticker} doesn't exist. Ensure ingestion for it first."
+                )
 
-    spy_path = raw_dir / "SPY.parquet"
-    if not spy_path.exists():
-        logger.error("SPY raw data not found at %s", spy_path)
-        return
+            df_ticker_raw = alpaca_ingestor.load_bars(raw_path)
+            df_ticker = cleaner.clean(df_ticker_raw)
+            df_ticker.index = pd.to_datetime(df_ticker.index)
+            logger.info(f"Ticker Index in Ingest = {df_ticker.index}")
 
-    df_spy_raw = ingestor.load_bars(spy_path)
-    df_spy = cleaner.clean(df_spy_raw)
-    report = generate_cleaning_report(cleaner.stats)
+            # Save individual ticker
+            ticker_file = cleaned_path / f"{ticker}.parquet"
+            save_parquet(Path(ticker_file), ticker=ticker, df=df_ticker)
+    elif args.mode == "align":
+        spy_path = raw_dir / "SPY.parquet"
 
-    tracker.log_cleaning_run(
-        ticker="SPY",
-        report=report,
-    )
+        if not spy_path.exists():
+            logger.error("SPY raw data not found at %s", spy_path)
+            return
 
-    df_spy = df_spy[["open", "high", "low", "close", "volume"]].copy()
-    df_spy.index = pd.to_datetime(df_spy.index)
+        df_spy_raw = alpaca_ingestor.load_bars(spy_path)
+        df_spy = cleaner.clean(df_spy_raw)
 
-    # Save SPY individually
-    df_spy.to_parquet(output_path / "SPY.parquet")
-    logger.info("Saved SPY aligned data (%d rows)", len(df_spy))
+        fields_list = df_spy.columns.to_list()
+        logger.info(f"Fields: {fields_list}")
 
-    # Initialize combined Parquet if requested
-    combined_file = output_path / "aligned_universe.parquet"
-    if args.save_combined and combined_file.exists():
-        combined_file.unlink()  # overwrite existing
+        dfs: Dict[str, pd.DataFrame] = []
 
-    # -------------------------------
-    # 2. Process other tickers one at a time
-    # -------------------------------
-    for ticker in tickers:
-        if ticker == "SPY":
-            continue
+        for ticker in tickers:
+            if ticker == "SPY":
+                continue
 
-        cleaner.reset_stats()
+            df_cleaned_path = cleaned_path / f"{ticker}.parquet"
+            if not df_cleaned_path.exists():
+                logger.warning("Skipping %s (no cleaned data)", ticker)
+                raise ValueError(
+                    f"Cleaned data for {ticker} doesn't exist. Ensure cleaner for it first."
+                )
 
-        raw_path = raw_dir / f"{ticker}.parquet"
-        if not raw_path.exists():
-            logger.warning("Skipping %s (no raw data)", ticker)
-            continue
+            df_cleaned = alpaca_ingestor.load_bars(df_cleaned_path)
+            logger.info(f"Ticker Index in Align = {df_cleaned.index}")
 
-        cleaner.reset_stats()
-        df_ticker_raw = ingestor.load_bars(raw_path)
-        df_ticker = cleaner.clean(df_ticker_raw)
-        df_ticker.index = pd.to_datetime(df_ticker.index)
+            dfs[ticker] = df_cleaned
 
-        # Align to SPY timestamps using reindex + fill gaps
-        df_ticker_aligned = df_ticker.reindex(df_spy.index)
-        numeric_cols = df_ticker_aligned.select_dtypes(include="number").columns
-        df_ticker_aligned[numeric_cols] = (
-            df_ticker_aligned[numeric_cols].ffill().bfill()
+        aligned_dfs = ticker_aligner.align(dfs=dfs, fields=fields_list)
+        ticker_aligner.save_aligned_tickers(
+            aligned_df=aligned_dfs, output_dir=args.processed_output
         )
 
-        # Generate cleaning report and log it
-        report_ticker = generate_cleaning_report(cleaner.stats)
-        tracker.log_cleaning_run(ticker=ticker, report=report_ticker)
-
-        # Save individual ticker
-        ticker_file = output_path / f"{ticker}.parquet"
-        df_ticker_aligned.to_parquet(ticker_file)
-        logger.info(
-            "Saved aligned %s (%d rows) to %s",
-            ticker,
-            len(df_ticker_aligned),
-            ticker_file,
+    else:
+        raise ValueError(
+            "Mode not properly selected. Select either 'ingest', 'clean', 'align'"
         )
-
-        # Append to combined Parquet if requested
-        if args.save_combined:
-            # Add ticker prefix to columns to avoid collisions
-            df_ticker_prefixed = df_ticker_aligned.add_prefix(f"{ticker}_")
-            df_ticker_prefixed.reset_index(inplace=True)
-            if not combined_file.exists():
-                df_ticker_prefixed.to_parquet(combined_file, index=False)
-            else:
-                # Append in row-wise mode is not possible in Parquet; combine in chunks
-                df_existing = pd.read_parquet(combined_file)
-                df_combined = pd.concat([df_existing, df_ticker_prefixed], axis=1)
-                df_combined.to_parquet(combined_file, index=False)
-
-    logger.info("Data ingestion and alignment complete!")
 
 
 if __name__ == "__main__":

@@ -139,7 +139,7 @@ class CompositeFitness:
         norm_sharpe = self._normalise(sharpe, self._sharpe_min, self._sharpe_max)
         norm_mdd = self._normalise(mdd, self._mdd_min, self._mdd_max)
 
-        # Sharpe: higher is better → invert for minimisation
+        # Sharpe: higher is better --> invert for minimisation
         fitness = (
             self.weights["rmse"] * norm_rmse
             + self.weights["sharpe"] * (1.0 - norm_sharpe)

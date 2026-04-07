@@ -79,7 +79,7 @@ class FeaturePipeline:
         self._fitted = True
 
         logger.info(
-            "Pipeline fit: %d raw → %d selected features (target=%s)",
+            "Pipeline fit: %d raw --> %d selected features (target=%s)",
             len(names),
             len(sel_names),
             self.target_ticker,
@@ -377,7 +377,7 @@ class FeaturePipeline:
 #         """Build features for the training set and fit the selector.
 
 #         Args:
-#             dfs_train: Dict ticker → cleaned train DataFrame.
+#             dfs_train: Dict ticker --> cleaned train DataFrame.
 
 #         Returns:
 #             (X_selected, y, selected_feature_names)
@@ -390,7 +390,7 @@ class FeaturePipeline:
 #         self._feature_names_selected = sel_names
 #         self._fitted = True
 #         logger.info(
-#             "Pipeline fit: %d raw → %d selected features (target=%s)",
+#             "Pipeline fit: %d raw --> %d selected features (target=%s)",
 #             len(names),
 #             len(sel_names),
 #             self.target_ticker,
@@ -404,7 +404,7 @@ class FeaturePipeline:
 #         """Apply fitted pipeline to val/test data.
 
 #         Args:
-#             dfs: Dict ticker → cleaned DataFrame (val or test split).
+#             dfs: Dict ticker --> cleaned DataFrame (val or test split).
 
 #         Returns:
 #             (X_selected, y)

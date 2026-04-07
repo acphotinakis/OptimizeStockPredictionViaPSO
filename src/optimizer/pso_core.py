@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class StandardPSO:
     """Standard Particle Swarm Optimization with linear inertia decay.
 
-    Minimises a fitness function F: R^5 → R that requires
+    Minimises a fitness function F: R^5 --> R that requires
     building and evaluating an LSTM model for each particle.
 
     Args:
