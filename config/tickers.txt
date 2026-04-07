@@ -5,9 +5,6 @@
 # Technology (5)
 AAPL
 MSFT
-GOOGL
-NVDA
-TSLA
 
 # Benchmark ETF
 SPY

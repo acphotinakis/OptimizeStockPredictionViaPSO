@@ -16,14 +16,14 @@ import logging
 import sys
 from pathlib import Path
 from typing import Dict
+import pandas as pd
 
-from src.data.aligner import TickerAligner
 
 # Add project root to Python path FIRST
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-import pandas as pd
+from src.data.aligner import TickerAligner
 from src.data.alpaca_ingestor import AlpacaIngestor
 from src.data.cleaner import DataCleaner
 from src.utils.logger import setup_logger
@@ -34,13 +34,19 @@ logger = logging.getLogger(__name__)
 
 def save_parquet(output_path: Path, ticker: str, df: pd.DataFrame):
     # Save individual ticker
-    ticker_file = output_path / f"{ticker}.parquet"
-    df.to_parquet(ticker_file)
+    df.to_parquet(
+        output_path,
+        engine="pyarrow",  # fastest + most compatible
+        compression="zstd",  # best compression ratio + speed tradeoff
+        index=True,
+    )
     logger.info(
-        "Saved aligned %s (%d rows) to %s",
+        "Saved aligned %s (%d rows) to %s (%d rows, %d cols)",
         ticker,
         len(df),
-        ticker_file,
+        output_path,
+        df.shape[0],
+        df.shape[1],
     )
 
 
@@ -48,7 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description="Ingest, clean, and align OHLCV data")
     parser.add_argument(
         "--mode",
-        choices=["ingest", "clean", "align"],
+        choices=["ingest", "clean", "align", "stats"],
         required=True,
         help="Execution mode: train, val, or test",
     )
@@ -90,6 +96,9 @@ def main():
     processed_path = Path(args.processed_output)
     processed_path.mkdir(parents=True, exist_ok=True)
 
+    pipelines_path = Path("data/pipelines/ingestion")
+    pipelines_path.mkdir(parents=True, exist_ok=True)
+
     alpaca_ingestor = AlpacaIngestor()
     cleaner = DataCleaner(
         session_start=cfg.data.session_start,
@@ -97,7 +106,7 @@ def main():
     )
     ticker_aligner = TickerAligner(
         benchmark_ticker=cfg.data.benchmark_ticker,
-        max_missing_fraction=cfg.data.max_filling_fraction,
+        max_missing_fraction=cfg.data.max_missing_fraction,
         max_ffill_bars=cfg.data.max_ffill_bars,
     )
 
@@ -149,8 +158,8 @@ def main():
 
             df_ticker_raw = alpaca_ingestor.load_bars(raw_path)
             df_ticker = cleaner.clean(df_ticker_raw)
-            df_ticker.index = pd.to_datetime(df_ticker.index)
-            logger.info(f"Ticker Index in Ingest = {df_ticker.index}")
+            # df_ticker.index = pd.to_datetime(df_ticker.index)
+            logger.info(f"Ticker Index in clean = {df_ticker.index}")
 
             # Save individual ticker
             ticker_file = cleaned_path / f"{ticker}.parquet"
@@ -168,7 +177,7 @@ def main():
         fields_list = df_spy.columns.to_list()
         logger.info(f"Fields: {fields_list}")
 
-        dfs: Dict[str, pd.DataFrame] = []
+        dfs: Dict[str, pd.DataFrame] = {}
 
         for ticker in tickers:
             if ticker == "SPY":
@@ -190,6 +199,41 @@ def main():
         ticker_aligner.save_aligned_tickers(
             aligned_df=aligned_dfs, output_dir=args.processed_output
         )
+
+        # ==========================================================
+        # Compact summary across all tickers
+        # ==========================================================
+        from prettytable import PrettyTable
+
+        # ==========================================================
+        # Pretty Summary Table
+        # ==========================================================
+        table = PrettyTable()
+        table.field_names = ["Ticker", "Rows", "Cols", "Start", "End", "Missing %"]
+
+        for ticker, df in aligned_dfs.items():
+            if isinstance(df, pd.Series):
+                df = df.to_frame(name=df.name or ticker)
+
+            missing_frac = df.isna().mean().mean()
+            df.index = df.index.tz_convert("America/New_York")
+
+            table.add_row(
+                [
+                    ticker,
+                    len(df),
+                    len(df.columns),
+                    str(df.index.min()),
+                    str(df.index.max()),
+                    f"{missing_frac:.4%}",
+                ]
+            )
+
+        # Optional formatting tweaks
+        table.align = "r"
+        table.align["Ticker"] = "l"
+
+        logger.info("\n%s", table)
 
     else:
         raise ValueError(

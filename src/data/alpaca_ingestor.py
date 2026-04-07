@@ -118,11 +118,16 @@ class AlpacaIngestor:
                 logger.info(f"No data returned for {ticker}")
                 return pd.DataFrame()
             else:
-                logger.info(f"Df head: {df.head}")
+                logger.info(f"Df head:\n{df.head()}")
 
             # Flatten MultiIndex
             # if isinstance(df.index, pd.MultiIndex):
             #     df = df.xs(ticker, level=0)
+
+            # Flatten MultiIndex if present
+            if isinstance(df.index, pd.MultiIndex):
+                if "symbol" in df.index.names:
+                    df = df.xs(ticker, level="symbol")
 
             assert isinstance(df.index, pd.DatetimeIndex), "Expected DatetimeIndex"
 

@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 from datetime import datetime
 
@@ -226,92 +227,74 @@ class DataCleaner:
         return df_re
 
     def _clip_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Detect and clip extreme returns (> ±outlier_z rolling σ).
-        Steps:
-            1. Compute 1-bar log returns
-            2. Compute rolling mean and std
-            3. Compute rolling z-score
-            4. Flag outliers
-            5. Clip returns beyond ±outlier_z and reconstruct close prices
-            6. Log stats at each stage
-        """
         if df.empty:
             logger.info("DataFrame empty, skipping outlier clipping.")
             return df
 
         logger.info(
-            "Starting outlier clipping with rolling window=%d, z-threshold=%.2f",
+            "Starting outlier clipping | window=%d | z=%.2f",
             self.outlier_window,
             self.outlier_z,
         )
 
-        # 1. Compute log returns
+        # ------------------------------------------------------------------
+        # 1. Log returns (pandas Series)
+        # ------------------------------------------------------------------
         r = np.log(df["close"] / df["close"].shift(1))
-        logger.info("Computed %d log returns", r.notna().sum())
+        logger.info("Computed %d valid log returns", r.notna().sum())
 
-        import numpy as np
-        from numpy.lib.stride_tricks import sliding_window_view
+        # ------------------------------------------------------------------
+        # 2. Rolling stats (pandas, simpler + stable)
+        # ------------------------------------------------------------------
+        rolling_mean = r.rolling(self.outlier_window, min_periods=10).mean()
+        rolling_std = r.rolling(self.outlier_window, min_periods=10).std()
 
-        # 1. Compute log returns
-        r = np.log(df["close"] / df["close"].shift(1)).tolist()
-        logger.info("Computed %d log returns", np.count_nonzero(~np.isnan(r)))
-
-        # 2. Rolling statistics (vectorized using numpy)
-        window_size = self.outlier_window
-        if len(r) < window_size:
-            logger.warning(
-                "Data shorter than rolling window (%d bars), skipping rolling stats",
-                window_size,
-            )
-            rolling_mean = np.full_like(r, np.nan)
-            rolling_std = np.full_like(r, np.nan)
-        else:
-            # sliding_window_view automatically creates overlapping windows
-            windows = sliding_window_view(r, window_shape=window_size)
-
-            # Compute mean/std along the last axis (the window axis)
-            rolling_mean = np.concatenate(
-                [np.full(window_size - 1, np.nan), windows.mean(axis=1)]
-            )
-            rolling_std = np.concatenate(
-                [np.full(window_size - 1, np.nan), windows.std(axis=1, ddof=0)]
-            )
-
-        logger.info("Computed rolling mean and std for %d bars", len(rolling_mean))
-
+        logger.info("Computed rolling mean/std")
+        logger.info(
+            "Rolling stats → mean(avg): %.6f | std(avg): %.6f | mean(min/max): [%.6f, %.6f] | std(min/max): [%.6f, %.6f]",
+            np.nanmean(rolling_mean),
+            np.nanmean(rolling_std),
+            np.nanmin(rolling_mean),
+            np.nanmax(rolling_mean),
+            np.nanmin(rolling_std),
+            np.nanmax(rolling_std),
+        )
+        # ------------------------------------------------------------------
         # 3. Z-score
+        # ------------------------------------------------------------------
         z = (r - rolling_mean) / (rolling_std + 1e-10)
 
-        # 4. Flag outliers
+        # ------------------------------------------------------------------
+        # 4. Detect outliers
+        # ------------------------------------------------------------------
         outlier_mask = z.abs() > self.outlier_z
+        num_outliers = int(outlier_mask.sum())
         df["outlier_flag"] = outlier_mask
-        num_outliers = outlier_mask.sum()
-        logger.info("Detected %d outlier bars", num_outliers)
+
+        logger.info("Detected %d outliers", num_outliers)
 
         if num_outliers == 0:
             return df
 
-        # 5. Clip outliers safely
-        outlier_locs = df.index.get_indexer_for(df.index[outlier_mask])
-        # Skip first bar to avoid missing prev_close
-        outlier_locs = outlier_locs[outlier_locs > 0]
+        # ------------------------------------------------------------------
+        # 5. Clip safely
+        # ------------------------------------------------------------------
+        outlier_locs = np.where(outlier_mask.values)[0]
+        outlier_locs = outlier_locs[outlier_locs > 0]  # avoid first index
 
         if len(outlier_locs) == 0:
-            logger.info("No valid outliers to clip after skipping first bar")
+            logger.info("No valid outliers after removing first index")
             return df
 
-        prev_idx = df.index[outlier_locs - 1]
-        outlier_idx = df.index[outlier_locs]
+        prev_close = df["close"].values[outlier_locs - 1]
+        signs = np.sign(r.values[outlier_locs])
+        std_vals = rolling_std.values[outlier_locs]
 
-        prev_close = df.loc[prev_idx, "close"].values
-        signs = np.sign(r.iloc[outlier_locs].values)
-        clipped_r = signs * self.outlier_z * rolling_std.iloc[outlier_locs].values
+        clipped_r = signs * self.outlier_z * std_vals
 
-        # Use .copy() to avoid SettingWithCopyWarning
-        df.loc[outlier_idx, "close"] = (prev_close * np.exp(clipped_r)).copy()
+        df.loc[df.index[outlier_locs], "close"] = prev_close * np.exp(clipped_r)
 
-        logger.info("Clipped %d outlier bars using rolling z-score", len(outlier_locs))
+        logger.info("Clipped %d outliers", len(outlier_locs))
 
         return df
 

@@ -47,7 +47,7 @@ class TickerAligner:
         """Align all DataFrames to the master index.
 
         Args:
-            dfs: Mapping of ticker --> cleaned DataFrame with DatetimeIndex.
+            dfs: Mapping of ticker → cleaned DataFrame with DatetimeIndex.
             fields: Which columns to keep per ticker.
                 Defaults to [open, high, low, close, volume, log_return, session_start].
 
@@ -143,18 +143,39 @@ class TickerAligner:
         self, aligned_df: pd.DataFrame, output_dir: str | Path
     ) -> None:
         """
-        Save each ticker's aligned DataFrame to its own CSV file.
+        Save each ticker's aligned DataFrame to compressed Parquet.
 
         Args:
             aligned_df: MultiIndex DataFrame from TickerAligner.align().
-            output_dir: Directory to save per-ticker CSVs.
+            output_dir: Directory to save per-ticker Parquet files.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Loop over tickers in the first level of the MultiIndex columns
-        for ticker in aligned_df.columns.get_level_values("ticker").unique():
+        tickers = aligned_df.columns.get_level_values("ticker").unique()
+
+        for ticker in tickers:
             ticker_df = aligned_df[ticker].copy()
-            file_path = output_dir / f"{ticker}_aligned.csv"
-            ticker_df.to_csv(file_path, index=True)
-            logger.info(f"Saved {ticker} --> {file_path}")
+
+            # Ensure index stays UTC (critical invariant)
+            if ticker_df.index.tz is None:
+                ticker_df.index = ticker_df.index.tz_localize("UTC")
+            else:
+                ticker_df.index = ticker_df.index.tz_convert("UTC")
+
+            file_path = output_dir / f"{ticker}.parquet"
+
+            ticker_df.to_parquet(
+                file_path,
+                engine="pyarrow",  # fastest + most compatible
+                compression="zstd",  # best compression ratio + speed tradeoff
+                index=True,
+            )
+
+            logger.info(
+                "Saved %s → %s (%d rows, %d cols)",
+                ticker,
+                file_path,
+                ticker_df.shape[0],
+                ticker_df.shape[1],
+            )
