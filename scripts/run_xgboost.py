@@ -8,16 +8,21 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-import numpy as np
 import logging
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.xgboost.xgboost_test import run_test
-from scripts.xgboost.xgboost_val import run_val
-from scripts.xgboost.xgboost_train import run_train
+from src.models.xgboost.consts import (
+    DEFAULT_WFV_FOLD_SIZE,
+    DEFAULT_WFV_FOLDS,
+    FEATURES_DIR,
+    RESULTS_DIR,
+)
+from src.models.xgboost.xgboost_test import run_test
+from src.models.xgboost.xgboost_val import run_val
+from src.models.xgboost.xgboost_train import run_train
 from src.utils import set_all_seeds, setup_logger
-from consts import *
+
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ import pandas as pd
 import mplfinance as mpf
 from pathlib import Path
 from src.features.technical import compute_technical_features
-from ttm_squeeze import beardy_squeeze_pro, plot_beardy_squeeze
+from src.features.ttm_squeeze import beardy_squeeze_pro, plot_beardy_squeeze
 
 
 # -------------------------------------------------

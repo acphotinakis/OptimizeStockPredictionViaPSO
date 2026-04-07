@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.models.xgboost_model import XGBoostModel, XGBoostTuner
+from src.models.xgboost.xgboost_model import XGBoostModel, XGBoostTuner
 from src.evaluation import all_statistical_metrics, all_trading_metrics
 
 

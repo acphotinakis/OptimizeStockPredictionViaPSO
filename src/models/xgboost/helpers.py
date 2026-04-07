@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.models.xgboost_model import XGBoostModel, _DEFAULT_PARAMS
+from src.models.xgboost.xgboost_model import XGBoostModel, _DEFAULT_PARAMS
 from src.utils.config_loader import Config
 
 logger = logging.getLogger(__name__)
@@ -179,3 +179,10 @@ def load_existing_backtest(results_dir: Path, ticker: str, seed: int) -> dict:
         with open(path) as f:
             return json.load(f)
     return {}
+
+
+# ======================================================================
+# Cross-model comparison table helpers
+# ======================================================================
+
+def create_experiement_setup

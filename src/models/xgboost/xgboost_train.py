@@ -14,21 +14,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.data.splitter import build_windows
 from src.utils.config_loader import load_config
-from src.models.xgboost_model import (
+from src.models.xgboost.xgboost_model import (
     XGBoostModel,
     XGBoostTuner,
     load_feature_names,
 )
 from src.evaluation import all_statistical_metrics
 from src.utils.config_loader import Config
-from helpers import (
+from src.models.xgboost.helpers import (
     extract_hyperparameters,
 )
 
 logger = logging.getLogger(__name__)
 
 from src.utils.config_loader import Config, load_config
-from consts import *
+from src.models.xgboost.consts import *
 
 
 import psutil

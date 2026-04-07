@@ -15,14 +15,14 @@ from src.utils.config_loader import load_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from scripts.xgboost.consts import PSEUDO_VAL_FRACTION, PSEUDO_VAL_MIN_SIZE
-from src.models.xgboost_model import (
+from src.models.xgboost.consts import PSEUDO_VAL_FRACTION, PSEUDO_VAL_MIN_SIZE
+from src.models.xgboost.xgboost_model import (
     XGBoostModel,
     load_windows,
     load_feature_names,
 )
 from src.evaluation import all_statistical_metrics
-from helpers import (
+from src.models.xgboost.helpers import (
     load_artefacts,
 )
 

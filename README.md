@@ -78,7 +78,9 @@ pso_lstm_stock/
 │   ├── 02_build_features.py
 │   ├── 03_run_pso.py
 │   ├── 04_evaluate.py
-│   └── 05_backtest.py
+│   ├── 05_backtest.py
+│   ├── run_lstm_baseline.py      # LSTM baseline (no PSO)
+│   └── run_xgboost.py             # XGBoost baseline
 │
 ├── notebooks/
 │   ├── EDA.ipynb
@@ -197,6 +199,34 @@ python scripts/05_backtest.py \
 ```
 
 Runs the walk-forward backtest and outputs performance report to `results/backtest_<ticker>.csv`.
+
+### Alternative: LSTM Baseline (No PSO)
+
+For quick baseline comparisons without PSO optimization:
+
+```bash
+# Train baseline LSTM with fixed hyperparameters
+python scripts/run_lstm_baseline.py \
+    --ticker AAPL \
+    --mode train \
+    --seed 42
+
+# Validate
+python scripts/run_lstm_baseline.py \
+    --ticker AAPL \
+    --mode val \
+    --seed 42
+
+# Test
+python scripts/run_lstm_baseline.py \
+    --ticker AAPL \
+    --mode test \
+    --seed 42
+```
+
+The LSTM baseline uses manually chosen "sensible" hyperparameters (2 layers, 128 hidden units, 0.2 dropout, 0.001 learning rate, 30 lookback) based on literature recommendations. Training completes in ~10-30 minutes vs. 6-12 hours for PSO optimization.
+
+See [LSTM Baseline Usage Guide](docs/guides/LSTM_BASELINE_USAGE.md) for details.
 
 ---
 

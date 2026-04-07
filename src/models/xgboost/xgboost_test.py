@@ -9,11 +9,11 @@ import logging
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.models.xgboost_model import (
+from src.models.xgboost.xgboost_model import (
     load_windows,
 )
 from src.evaluation import all_statistical_metrics, Backtester
-from helpers import (
+from src.models.xgboost.helpers import (
     load_model,
     load_prices,
     load_optimal_threshold,
