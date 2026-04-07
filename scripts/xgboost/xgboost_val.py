@@ -10,6 +10,9 @@ import logging
 from tqdm import tqdm
 from typing import Dict, Optional, Tuple, Any
 
+from src.data.splitter import build_windows
+from src.utils.config_loader import load_config
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.xgboost.consts import PSEUDO_VAL_FRACTION, PSEUDO_VAL_MIN_SIZE
@@ -24,6 +27,15 @@ from helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+import psutil
+import os
+
+
+def log_memory_usage(label: str):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    logger.info(f"[{label}] Memory: {mem_info.rss / 1024**3:.2f} GB")
 
 
 # ======================================================================
@@ -122,19 +134,88 @@ def run_walk_forward_validation(
 
 
 def run_val(args, features_dir, results_dir, ticker, tag):
-    logger.info("\n[VALIDATION] Loading artefacts...")
-    model, meta, _ = load_artefacts(results_dir, ticker, args.mode, args.seed)
+    cfg = load_config(args.config)
 
-    X_train, y_train, X_val, y_val, *_ = load_windows(features_dir, ticker)
+    if cfg is None:
+        raise ValueError("Config is null")
+
+    logger.info("\n[VALIDATION] Loading artefacts...")
+    # Load model trained in 'train' mode, not 'val' mode
+    model, meta, _ = load_artefacts(results_dir, ticker, "train", args.seed)
+
+    # X_train, y_train, X_val, y_val, *_ = load_windows(features_dir, ticker)
+
+    # # feature_names = load_feature_names(features_dir, ticker)
+    # # _, _, F = X_train.shape
+
+    # Load feature data
+    ticker_dir = Path(args.features_dir) / args.ticker
+    if not ticker_dir.exists():
+        raise FileNotFoundError(f"Feature directory not found: {ticker_dir}")
+
+    logger.info("Loading features from %s", ticker_dir)
+
+    # Use memory mapping for large files
+    X_train_flat = np.load(ticker_dir / "X_train.npy", mmap_mode="r")
+    y_train = np.load(ticker_dir / "y_train.npy", mmap_mode="r")
+    X_val_flat = np.load(ticker_dir / "X_val.npy", mmap_mode="r")
+    y_val = np.load(ticker_dir / "y_val.npy", mmap_mode="r")
+
+    # Copy to writable arrays only when needed
+    X_train_flat = np.array(X_train_flat)
+    y_train = np.array(y_train)
+    X_val_flat = np.array(X_val_flat)
+    y_val = np.array(y_val)
 
     feature_names = load_feature_names(features_dir, ticker)
-    _, _, F = X_train.shape
+
+    # Get number of features
+    F = X_train_flat.shape[1] if X_train_flat.ndim > 1 else 1
+
+    log_memory_usage("After loading data")
+
+    # ---------------------------
+    # Raw arrays
+    # ---------------------------
+    logger.info("Raw Shapes:")
+    logger.info("  X_train_flat: %s", X_train_flat.shape)
+    logger.info("  y_train     : %s", y_train.shape)
+    logger.info("  X_val_flat  : %s", X_val_flat.shape)
+    logger.info("  y_val       : %s", y_val.shape)
+
+    logger.info("Dtypes:")
+    logger.info("  X_train_flat: %s", X_train_flat.dtype)
+    logger.info("  y_train     : %s", y_train.dtype)
+    logger.info("  X_val_flat  : %s", X_val_flat.dtype)
+    logger.info("  y_val       : %s", y_val.dtype)
+
+    # ---------------------------
+    # Window setup
+    # ---------------------------
+    max_lookback = getattr(cfg.xgboost, "lookback", 30)
+
+    session_starts_train = np.zeros(len(X_train_flat), dtype=bool)
+    session_starts_val = np.zeros(len(X_val_flat), dtype=bool)
+
+    logger.info("Session masks:")
+    logger.info("  session_starts_train: %s", session_starts_train.shape)
+    logger.info("  session_starts_val  : %s", session_starts_val.shape)
+
+    logger.info("Lookback:")
+    logger.info("  max_lookback: %d", max_lookback)
+
+    # ---------------------------
+    # Windowed arrays
+    # ---------------------------
+    X_val_windows, y_val_windows = build_windows(
+        X_val_flat, y_val, session_starts_val, max_lookback
+    )
 
     # ---------------------------
     # Metrics
     # ---------------------------
-    y_pred_val = model.predict(X_val)
-    val_metrics = all_statistical_metrics(y_val, y_pred_val)
+    y_pred_val = model.predict(X_val_windows)
+    val_metrics = all_statistical_metrics(y_val_windows, y_pred_val)
 
     # ---------------------------
     # Threshold search
@@ -146,7 +227,7 @@ def run_val(args, features_dir, results_dir, ticker, tag):
 
     for theta in thresholds:
         sigs = generate_signals(y_pred_val, theta)
-        sr = sharpe_from_signals(sigs, y_val)
+        sr = sharpe_from_signals(sigs, y_val_windows)
         results.append({"threshold": theta, "sharpe": sr})
 
     best = max(results, key=lambda x: x["sharpe"])

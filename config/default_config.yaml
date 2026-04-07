@@ -42,7 +42,7 @@ lstm:
 # --- XGBoost (Memory-Safe) ---
 xgboost:
   objective: "reg:squarederror"
-  num_class: 3
+  # num_class: 3
   n_estimators: 200            # smaller model
   max_depth: 4                 # shallower trees
   learning_rate: 0.01

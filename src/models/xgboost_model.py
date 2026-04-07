@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Default hyperparameter set — mirrors experiment_plan.md §5.3
 _DEFAULT_PARAMS: Dict[str, Any] = {
     "objective": "reg:squarederror",
-    "num_class": 3,
+    # "num_class": 3,
     "n_estimators": 200,
     "max_depth": 4,
     "lookback": 30,
@@ -256,7 +256,6 @@ class XGBoostModel:
         X_vl_flat = self._flatten(X_val)
 
         eval_set = [(X_tr_flat, y_train), (X_vl_flat, y_val)]
-        eval_names = ["train", "val"]
 
         self._model = xgb.XGBRegressor(
             **self._xgb_params,
@@ -266,13 +265,6 @@ class XGBoostModel:
 
         assert self._model is not None, "XGBoost model not initialized."
 
-        # self._model.fit(
-        #     X_tr_flat,
-        #     y_train,
-        #     eval_set=eval_set,
-        #     eval_names=eval_names if self._supports_eval_names() else None,
-        #     verbose=False,
-        # )
         fit_kwargs = {
             "X": X_tr_flat,
             "y": y_train,
@@ -280,16 +272,7 @@ class XGBoostModel:
             "verbose": False,
         }
 
-        # Only pass eval_names if actually supported
-        # if self._supports_eval_names():
-        #     fit_kwargs["eval_names"] = eval_names
-
         self._model.fit(**fit_kwargs)
-        # try:
-        # except TypeError:
-        #     # Fallback: remove eval_names if runtime rejects it
-        #     fit_kwargs.pop("eval_names", None)
-        #     self._model.fit(**fit_kwargs)
 
         self._best_iteration = int(getattr(self._model, "best_iteration", 0))
 
@@ -457,18 +440,6 @@ class XGBoostModel:
         # Keep the most recent `lookback` timesteps
         sliced = X[:, -self.lookback :, :]  # [N, lookback, F]
         return sliced.reshape(N, -1).astype(np.float32)
-
-    @staticmethod
-    def _supports_eval_names() -> bool:
-        """Check if the installed xgboost version accepts eval_names kwarg."""
-        try:
-            import xgboost as xgb
-
-            major = int(xgb.__version__.split(".")[0])
-            return major >= 2
-        except (AttributeError, ValueError, IndexError) as e:
-            logger.debug("Failed to parse xgboost version: %s", e)
-            return False
 
     @property
     def best_iteration(self) -> int:

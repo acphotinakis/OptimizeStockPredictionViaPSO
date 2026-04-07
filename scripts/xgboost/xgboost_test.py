@@ -29,8 +29,10 @@ logger = logging.getLogger(__name__)
 
 def run_test(args, features_dir, results_dir, ticker, tag):
     logger.info("\n[TEST] Loading model...")
-    model, meta = load_model(results_dir, ticker, args.mode, args.seed)
-    theta = load_optimal_threshold(results_dir, ticker, args.mode, args.seed)
+    # Load model trained in 'train' mode, not 'test' mode
+    model, meta = load_model(results_dir, ticker, "train", args.seed)
+    # Load threshold from 'val' mode (determined during validation)
+    theta = load_optimal_threshold(results_dir, ticker, "val", args.seed)
 
     _, _, _, _, X_test, y_test = load_windows(features_dir, ticker)
 

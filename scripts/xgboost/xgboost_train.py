@@ -41,11 +41,6 @@ def log_memory_usage(label: str):
     logger.info(f"[{label}] Memory: {mem_info.rss / 1024**3:.2f} GB")
 
 
-# Call at key points:
-log_memory_usage("After loading data")
-log_memory_usage("After windowing")
-log_memory_usage("After training")
-
 # ======================================================================
 # Training routines
 # ======================================================================
@@ -269,7 +264,7 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     # Validation quick check
     # ---------------------------
     y_pred_val = model.predict(X_val_windows)
-    val_metrics = all_statistical_metrics(y_val, y_pred_val)
+    val_metrics = all_statistical_metrics(y_val_windows, y_pred_val)
     _print_info_metrics("Validation", val_metrics)
 
     # ---------------------------
@@ -298,6 +293,33 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     np.save(results_dir / f"xgb_importances_{tag}.npy", model.get_feature_importances())
 
     logger.info("Training complete.")
+
+    import matplotlib.pyplot as plt
+
+    # ---------------------------
+    # Create plots directory
+    # ---------------------------
+    plots_dir = results_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---------------------------
+    # Plot predictions vs true
+    # ---------------------------
+    plt.figure(figsize=(16, 6))
+    plt.plot(y_val_windows, label="True", alpha=0.7)
+    plt.plot(y_pred_val, label="Predicted", alpha=0.7)
+    plt.title(f"{ticker} XGBoost Predictions vs True ({tag})")
+    plt.xlabel("Sample index (windowed)")
+    plt.ylabel("Target value")
+    plt.legend()
+    plt.tight_layout()
+
+    # Save the figure
+    plot_path = plots_dir / f"xgb_predictions_{tag}.png"
+    plt.savefig(plot_path, dpi=150)
+    logger.info(f"Prediction plot saved to {plot_path}")
+
+    plt.close()
 
 
 def _print_info_metrics(label: str, m: dict) -> None:
