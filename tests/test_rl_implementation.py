@@ -9,8 +9,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.rl.trading_env import TradingEnv
-from src.rl.ppo_agent import PPOAgent
+from src.models.rl.trading_env import TradingEnv
+from src.models.rl.ppo_agent import PPOAgent
 
 def test_environment():
     """Test trading environment."""

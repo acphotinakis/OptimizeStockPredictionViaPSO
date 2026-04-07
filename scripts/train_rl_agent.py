@@ -28,8 +28,8 @@ import torch
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.rl.trading_env import TradingEnv
-from src.rl.ppo_agent import PPOAgent
+from src.models.rl.trading_env import TradingEnv
+from src.models.rl.ppo_agent import PPOAgent
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 
