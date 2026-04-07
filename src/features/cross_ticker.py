@@ -46,12 +46,8 @@ def compute_cross_ticker_features(
     C_target = df_target["close"]
 
     # ---- SPY features -------------------------------------------------------
-    if "SPY" in dfs:
+    if "SPY" in dfs and target_ticker != "SPY":
         r_spy = dfs["SPY"]["log_return"].reindex(df_target.index).fillna(0.0)
-        # C_spy = (
-        #     dfs["SPY"]["close"].reindex(df_target.index).ffill().fillna(method="bfill")
-        # )
-
         C_spy = dfs["SPY"]["close"].reindex(df_target.index).ffill().bfill()
 
         # Rolling beta to SPY
@@ -104,7 +100,15 @@ def compute_cross_ticker_features(
             r_spy.pow(2).rolling(30, min_periods=5).sum()
         )
     else:
-        logger.warning("SPY not in dfs; SPY-based features will be zero.")
+        if target_ticker == "SPY":
+            logger.info(
+                "Target is SPY; skipping self-referential SPY features. "
+                "Universe features (mkt_breadth, universe_mean_ret, peer_corr) "
+                "will provide context from other tickers."
+            )
+        else:
+            logger.warning("SPY not in dfs; SPY-based features will be zero.")
+        
         for col in [
             "beta_spy_60",
             "corr_spy_20",
