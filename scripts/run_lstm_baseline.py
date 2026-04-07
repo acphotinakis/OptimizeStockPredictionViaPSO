@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import logging
 import sys
@@ -31,6 +32,8 @@ from matplotlib.ticker import FuncFormatter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.plots_lstm import plot_lstm_pnl
+from src.evaluation.metrics import all_statistical_metrics
 from src.models.baselines import VanillaLSTM
 from src.data.splitter import build_windows
 from src.evaluation import all_statistical_metrics
@@ -442,7 +445,12 @@ import pandas as pd
 
 
 def run_test(args, features_dir, results_dir, ticker, tag):
-    """Test mode: final evaluation on test set with signal generation."""
+    """Test mode: final evaluation on test set with signal generation, stop-loss, threshold sweep, and full metrics."""
+    from src.evaluation.metrics import (
+        all_statistical_metrics,
+        all_trading_metrics,
+    )
+
     logger.info("\n[TEST] Final evaluation...")
 
     # Load model
@@ -450,11 +458,11 @@ def run_test(args, features_dir, results_dir, ticker, tag):
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}. Run training first.")
 
-    # Load data
+    # Load test data
     ticker_dir = features_dir / ticker
     X_test_flat, y_test = load_data(ticker_dir, "test")
 
-    # Load params
+    # Load model params
     params_path = (
         results_dir / f"lstm_baseline_params_{ticker}_train_seed{args.seed}.json"
     )
@@ -468,395 +476,169 @@ def run_test(args, features_dir, results_dir, ticker, tag):
         X_test_flat, y_test, session_starts_test, lookback
     )
 
-    # Initialize model and load weights
+    # Load model
     model = VanillaLSTM(input_size=X_test_flat.shape[1])
     model._trainer.model.load_state_dict(torch.load(model_path))
 
-    # Predict
+    # Predictions
     y_pred_test = model.predict(X_test_windows)
+    stat_metrics = all_statistical_metrics(y_test_windows, y_pred_test)
+    _print_info_metrics("Test", stat_metrics)
 
-    # Metrics
-    test_metrics = all_statistical_metrics(y_test_windows, y_pred_test)
-    _print_info_metrics("Test", test_metrics)
+    # Threshold sweep
+    thresholds = np.arange(0.0001, 0.0021, 0.0001)
+    best_metrics = None
+    best_threshold = None
+    best_signals = None
+    best_equity = None
+    best_strategy_returns = None
 
-    # Load OHLCV data for alignment
-    try:
-        # Try to load from processed data
-        ohlcv_path = Path("data/processed") / f"{ticker}.parquet"
-        if ohlcv_path.exists():
-            ohlcv_df = pd.read_parquet(ohlcv_path)
-            logger.info(f"Loaded OHLCV data from {ohlcv_path}")
-        else:
-            # Fallback to raw data
-            ohlcv_path = Path("data/raw") / f"{ticker}.parquet"
-            if ohlcv_path.exists():
-                ohlcv_df = pd.read_parquet(ohlcv_path)
-                logger.info(f"Loaded OHLCV data from {ohlcv_path}")
+    returns = y_test_windows.flatten()
+    initial_capital = args.initial_capital
+
+    for threshold in thresholds:
+        signals = np.where(
+            y_pred_test > threshold, 1, np.where(y_pred_test < -threshold, -1, 0)
+        ).flatten()
+        position = signals.copy()
+        strategy_returns = np.zeros_like(returns)
+        equity_curve = np.zeros_like(returns)
+        equity_curve[0] = initial_capital
+
+        for t in range(len(returns)):
+            strategy_returns[t] = position[t] * returns[t]
+            if t > 0 and position[t] != position[t - 1]:
+                strategy_returns[t] -= args.transaction_cost
+            if t > 0:
+                equity_curve[t] = equity_curve[t - 1] * (1 + strategy_returns[t])
             else:
-                logger.warning(
-                    f"No OHLCV data found for {ticker}, creating minimal DataFrame"
-                )
-                ohlcv_df = None
-    except Exception as e:
-        logger.warning(f"Failed to load OHLCV data: {e}")
-        ohlcv_df = None
+                equity_curve[t] = initial_capital * (1 + strategy_returns[t])
 
-    # Generate trading signals
-    signal_threshold = 0.001  # 0.1% threshold
-    signals = np.where(
-        y_pred_test > signal_threshold,
-        1,
-        np.where(y_pred_test < -signal_threshold, -1, 0),
+            # Stop-loss
+            if t > 0:
+                dd = (equity_curve[t] - equity_curve[t - 1]) / equity_curve[t - 1]
+                if dd < -args.stop_loss:
+                    strategy_returns[t] = 0
+                    position[t] = 0
+                    equity_curve[t] = equity_curve[t - 1]
+
+        # Trading metrics
+        trading_metrics = all_trading_metrics(equity_curve, strategy_returns)
+
+        # Track best Sharpe
+        if best_metrics is None or trading_metrics["sharpe"] > best_metrics["sharpe"]:
+            best_metrics = trading_metrics
+            best_threshold = threshold
+            best_signals = signals.copy()
+            best_equity = equity_curve.copy()
+            best_strategy_returns = strategy_returns.copy()
+
+    logger.info(
+        f"Best threshold: {best_threshold:.5f} | Sharpe: {best_metrics['sharpe']:.3f} | Max DD: {best_metrics['max_drawdown']:.2%}"
     )
 
-    # Create aligned DataFrame
-    if ohlcv_df is not None:
-        # Get test period dates from config
-        cfg = load_config(args.config)
-        test_start = pd.Timestamp(cfg.data.val_end) + pd.Timedelta(days=1)
-
-        # Handle timezone-aware vs timezone-naive comparison
-        if ohlcv_df.index.tz is not None:
-            # OHLCV has timezone, make test_start timezone-aware
-            test_start = test_start.tz_localize(ohlcv_df.index.tz)
-
-        test_ohlcv = ohlcv_df[ohlcv_df.index >= test_start].copy()
-
-        # Align predictions with OHLCV (predictions start after lookback window)
-        # The first prediction corresponds to bar at index = lookback
-        pred_start_idx = lookback
-        pred_end_idx = pred_start_idx + len(y_pred_test)
-
-        if pred_end_idx <= len(test_ohlcv):
-            aligned_dates = test_ohlcv.index[pred_start_idx:pred_end_idx]
-            aligned_ohlcv = test_ohlcv.iloc[pred_start_idx:pred_end_idx].copy()
-
-            aligned_df = pd.DataFrame(
-                {
-                    "date": aligned_dates,
-                    "open": aligned_ohlcv["open"].values,
-                    "high": aligned_ohlcv["high"].values,
-                    "low": aligned_ohlcv["low"].values,
-                    "close": aligned_ohlcv["close"].values,
-                    "volume": aligned_ohlcv["volume"].values,
-                    "actual_return": y_test_windows.flatten(),
-                    "predicted_return": y_pred_test.flatten(),
-                    "signal": signals.flatten(),
-                }
-            )
-        else:
-            logger.warning(
-                "Prediction length exceeds OHLCV data, using minimal alignment"
-            )
-            aligned_df = pd.DataFrame(
-                {
-                    "actual_return": y_test_windows.flatten(),
-                    "predicted_return": y_pred_test.flatten(),
-                    "signal": signals.flatten(),
-                }
-            )
-    else:
-        # No OHLCV data available
-        aligned_df = pd.DataFrame(
-            {
-                "actual_return": y_test_windows.flatten(),
-                "predicted_return": y_pred_test.flatten(),
-                "signal": signals.flatten(),
-            }
-        )
-
-    # Calculate PnL from signals
-    if "close" in aligned_df.columns and len(aligned_df) > 0:
-        # Simple PnL calculation: signal[t] × actual_return[t+1]
-        # This assumes we enter at close[t] and exit at close[t+1]
-        position = signals.flatten()
-        returns = aligned_df["actual_return"].values
-
-        # Strategy returns: position[t] × return[t]
-        strategy_returns = position * returns
-
-        # Apply transaction costs when position changes
-        position_changes = np.diff(position, prepend=0)
-        transaction_costs = np.abs(position_changes) * args.transaction_cost
-        strategy_returns_net = strategy_returns - transaction_costs
-
-        # Cumulative PnL
-        initial_capital = args.initial_capital
-        cumulative_returns = np.cumprod(1 + strategy_returns_net)
-        pnl = initial_capital * (cumulative_returns - 1)
-        equity_curve = initial_capital * cumulative_returns
-
-        # Add to DataFrame
-        aligned_df["strategy_return"] = strategy_returns_net
-        aligned_df["pnl"] = pnl
-        aligned_df["equity"] = equity_curve
-
-        # Calculate trading metrics
-        total_return = equity_curve[-1] / initial_capital - 1
-        n_trades = (np.abs(position_changes) > 0).sum()
-
-        # Sharpe ratio (annualized)
-        if len(strategy_returns_net) > 1:
-            sharpe = (
-                np.mean(strategy_returns_net)
-                / (np.std(strategy_returns_net) + 1e-10)
-                * np.sqrt(252 * 390)
-            )  # 1-min bars
-        else:
-            sharpe = 0.0
-
-        # Max drawdown
-        running_max = np.maximum.accumulate(equity_curve)
-        drawdown = (equity_curve - running_max) / running_max
-        max_dd = np.min(drawdown)
-
-        pnl_stats = {
-            "initial_capital": float(initial_capital),
-            "final_equity": float(equity_curve[-1]),
-            "total_return": float(total_return),
-            "total_pnl": float(pnl[-1]),
-            "sharpe_ratio": float(sharpe),
-            "max_drawdown": float(max_dd),
-            "n_trades": int(n_trades),
-            "avg_trade_return": (
-                float(np.mean(strategy_returns_net[position != 0]))
-                if (position != 0).any()
-                else 0.0
-            ),
-        }
-
-        logger.info("\nPnL Statistics:")
-        logger.info(f"  Initial Capital: ${initial_capital:,.2f}")
-        logger.info(f"  Final Equity: ${equity_curve[-1]:,.2f}")
-        logger.info(f"  Total Return: {total_return:.2%}")
-        logger.info(f"  Total PnL: ${pnl[-1]:,.2f}")
-        logger.info(f"  Sharpe Ratio: {sharpe:.3f}")
-        logger.info(f"  Max Drawdown: {max_dd:.2%}")
-        logger.info(f"  Number of Trades: {n_trades}")
-    else:
-        pnl_stats = None
-        logger.warning("Cannot calculate PnL: OHLCV data not available")
-
     # Save aligned predictions
+    aligned_df = pd.DataFrame(
+        {
+            "actual_return": returns,
+            "predicted_return": y_pred_test.flatten(),
+            "signal": best_signals,
+            "equity": best_equity,
+        }
+    )
     aligned_csv_path = results_dir / f"lstm_aligned_{tag}.csv"
     aligned_df.to_csv(aligned_csv_path, index=False)
     logger.info(f"Saved aligned predictions to {aligned_csv_path}")
 
-    # Calculate signal statistics
-    n_buy_signals = (signals == 1).sum()
-    n_sell_signals = (signals == -1).sum()
-    n_hold_signals = (signals == 0).sum()
+    # Compute per-trade stats
+    n_buy = np.sum(best_signals == 1)
+    n_sell = np.sum(best_signals == -1)
+    n_hold = np.sum(best_signals == 0)
+    total_signals = len(best_signals)
+    pct_buy = n_buy / total_signals * 100
+    pct_sell = n_sell / total_signals * 100
+    pct_hold = n_hold / total_signals * 100
+    trade_returns = best_strategy_returns[best_signals != 0]
+    avg_trade_return = float(np.mean(trade_returns)) if len(trade_returns) > 0 else 0.0
 
-    signal_stats = {
-        "total_predictions": len(signals),
-        "buy_signals": int(n_buy_signals),
-        "sell_signals": int(n_sell_signals),
-        "hold_signals": int(n_hold_signals),
-        "buy_pct": float(n_buy_signals / len(signals)),
-        "sell_pct": float(n_sell_signals / len(signals)),
-        "hold_pct": float(n_hold_signals / len(signals)),
+    # Aggregate results
+    pnl_stats = {
+        "initial_capital": float(initial_capital),
+        "final_equity": float(best_equity[-1]),
+        "total_return": float(best_equity[-1] / initial_capital - 1),
+        "avg_trade_return": avg_trade_return,
+        "buy_trades": n_buy,
+        "sell_trades": n_sell,
+        "hold_signals": n_hold,
+        "pct_buy": pct_buy,
+        "pct_sell": pct_sell,
+        "pct_hold": pct_hold,
     }
 
-    logger.info("\nSignal Statistics:")
-    logger.info(f"  Buy signals: {n_buy_signals} ({signal_stats['buy_pct']:.2%})")
-    logger.info(f"  Sell signals: {n_sell_signals} ({signal_stats['sell_pct']:.2%})")
-    logger.info(f"  Hold signals: {n_hold_signals} ({signal_stats['hold_pct']:.2%})")
+    # Logging all metrics
+    logger.info("\n--- Statistical Metrics ---")
+    for k, v in stat_metrics.items():
+        logger.info(f"{k}: {v:.6f}" if isinstance(v, float) else f"{k}: {v}")
 
-    # Save test results with signal stats and PnL
+    logger.info("\n--- Trading Metrics ---")
+    for k, v in best_metrics.items():
+        logger.info(f"{k}: {v:.6f}" if isinstance(v, float) else f"{k}: {v}")
+
+    logger.info("\n--- PnL / Trade Stats ---")
+    logger.info(f"Initial Capital: ${pnl_stats['initial_capital']:,.2f}")
+    logger.info(f"Final Equity: ${pnl_stats['final_equity']:,.2f}")
+    logger.info(f"Total Return: {pnl_stats['total_return']:.2%}")
+    logger.info(f"Avg Trade Return: {pnl_stats['avg_trade_return']:.2%}")
+    logger.info(f"Buy Trades: {n_buy} ({pct_buy:.1f}%)")
+    logger.info(f"Sell Trades: {n_sell} ({pct_sell:.1f}%)")
+    logger.info(f"Hold Signals: {n_hold} ({pct_hold:.1f}%)")
+
+    # Save JSON and numpy outputs
     results_dict = {
-        "ticker": ticker,
-        "statistical_metrics": test_metrics,
-        "signal_statistics": signal_stats,
-        "signal_threshold": signal_threshold,
+        "statistical_metrics": stat_metrics,
+        "trading_metrics": best_metrics,
+        "pnl_stats": pnl_stats,
+        "best_threshold": best_threshold,
     }
 
-    if pnl_stats is not None:
-        results_dict["pnl_statistics"] = pnl_stats
+    def _json_serializable_fallback(obj):
+        """
+        Global fallback for JSON serialization.
+        Handles NumPy scalars and Pandas timestamps found in EDA reports.
+        """
+        if isinstance(obj, (pd.Timestamp, datetime)):
+            return obj.isoformat()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return str(obj)
 
     with open(results_dir / f"lstm_baseline_test_{tag}.json", "w") as f:
-        json.dump(results_dict, f, indent=2)
+        json.dump(_json_serializable_fallback(results_dict), f, indent=2)
 
     np.save(results_dir / f"lstm_baseline_test_predictions_{tag}.npy", y_pred_test)
-    np.save(results_dir / f"lstm_baseline_test_signals_{tag}.npy", signals)
+    np.save(results_dir / f"lstm_baseline_test_signals_{tag}.npy", best_signals)
 
-    # Create comprehensive plots
-    plots_dir = results_dir / "plots"
-    plots_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine number of subplots based on PnL availability
-    n_plots = 3 if pnl_stats is not None else 2
-
-    # Plot 1: Predictions vs Actual (with optional PnL)
-    fig, axes = plt.subplots(n_plots, 1, figsize=(16, 5 * n_plots))
-
-    n_samples = min(1000, len(y_test_windows))
-
-    # Panel 1: Time series
-    ax_idx = 0
-    axes[ax_idx].plot(
-        y_test_windows[:n_samples], label="Actual", alpha=0.7, linewidth=1.5
+    # Plot PnL
+    plot_lstm_pnl(
+        results_dir,
+        best_metrics,
+        y_test_windows,
+        y_pred_test,
+        best_threshold,
+        ticker,
+        aligned_df,
+        initial_capital,
+        n_sell,
+        n_hold,
+        n_buy,
+        best_signals,
+        tag,
+        results_dict
     )
-    axes[ax_idx].plot(
-        y_pred_test[:n_samples], label="Predicted", alpha=0.7, linewidth=1.5
-    )
-    axes[ax_idx].axhline(
-        y=signal_threshold,
-        color="g",
-        linestyle="--",
-        alpha=0.5,
-        label=f"Buy Threshold ({signal_threshold})",
-    )
-    axes[ax_idx].axhline(
-        y=-signal_threshold,
-        color="r",
-        linestyle="--",
-        alpha=0.5,
-        label=f"Sell Threshold ({-signal_threshold})",
-    )
-    axes[ax_idx].axhline(y=0, color="k", linestyle="-", alpha=0.3, linewidth=0.5)
-    axes[ax_idx].set_title(
-        f"{ticker} LSTM Baseline Test Predictions", fontsize=14, fontweight="bold"
-    )
-    axes[ax_idx].set_xlabel("Sample")
-    axes[ax_idx].set_ylabel("Return")
-    axes[ax_idx].legend(loc="upper left")
-    axes[ax_idx].grid(True, alpha=0.3)
-
-    # Panel 2: Scatter plot
-    ax_idx = 1
-    axes[ax_idx].scatter(
-        y_test_windows[:n_samples], y_pred_test[:n_samples], alpha=0.3, s=10
-    )
-    axes[ax_idx].plot(
-        [-0.05, 0.05], [-0.05, 0.05], "r--", label="Perfect Prediction", linewidth=2
-    )
-    axes[ax_idx].axhline(y=signal_threshold, color="g", linestyle="--", alpha=0.5)
-    axes[ax_idx].axhline(y=-signal_threshold, color="r", linestyle="--", alpha=0.5)
-    axes[ax_idx].axvline(x=signal_threshold, color="g", linestyle="--", alpha=0.5)
-    axes[ax_idx].axvline(x=-signal_threshold, color="r", linestyle="--", alpha=0.5)
-    axes[ax_idx].set_title(
-        f"{ticker} Predicted vs Actual Returns", fontsize=14, fontweight="bold"
-    )
-    axes[ax_idx].set_xlabel("Actual Return")
-    axes[ax_idx].set_ylabel("Predicted Return")
-    axes[ax_idx].legend()
-    axes[ax_idx].grid(True, alpha=0.3)
-
-    # Panel 3: PnL / Equity Curve (if available)
-    if pnl_stats is not None and "equity" in aligned_df.columns:
-        ax_idx = 2
-        equity = aligned_df["equity"].values
-
-        # Plot equity curve
-        axes[ax_idx].plot(equity, label="Equity Curve", linewidth=2, color="blue")
-        axes[ax_idx].axhline(
-            y=initial_capital,
-            color="k",
-            linestyle="--",
-            alpha=0.5,
-            label=f"Initial Capital (${initial_capital:,.0f})",
-        )
-
-        # Shade profitable/unprofitable regions
-        axes[ax_idx].fill_between(
-            range(len(equity)),
-            initial_capital,
-            equity,
-            where=(equity >= initial_capital),
-            color="green",
-            alpha=0.2,
-            label="Profit",
-        )
-        axes[ax_idx].fill_between(
-            range(len(equity)),
-            initial_capital,
-            equity,
-            where=(equity < initial_capital),
-            color="red",
-            alpha=0.2,
-            label="Loss",
-        )
-
-        # Add final PnL annotation
-        final_pnl = pnl_stats["total_pnl"]
-        final_return = pnl_stats["total_return"]
-        axes[ax_idx].annotate(
-            f"Final PnL: ${final_pnl:,.2f} ({final_return:+.2%})",
-            xy=(len(equity) - 1, equity[-1]),
-            xytext=(len(equity) * 0.7, equity[-1]),
-            fontsize=12,
-            fontweight="bold",
-            bbox=dict(
-                boxstyle="round,pad=0.5",
-                facecolor="yellow" if final_pnl > 0 else "lightcoral",
-                alpha=0.7,
-            ),
-            arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
-        )
-
-        axes[ax_idx].set_title(
-            f"{ticker} Equity Curve | Sharpe: {pnl_stats['sharpe_ratio']:.3f} | Max DD: {pnl_stats['max_drawdown']:.2%}",
-            fontsize=14,
-            fontweight="bold",
-        )
-        axes[ax_idx].set_xlabel("Sample")
-        axes[ax_idx].set_ylabel("Equity ($)")
-        axes[ax_idx].legend(loc="upper left")
-        axes[ax_idx].grid(True, alpha=0.3)
-        axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(lambda x, p: f"${x:,.0f}"))
-
-    plt.tight_layout()
-    plot_path = plots_dir / f"lstm_baseline_test_{tag}.png"
-    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
-    logger.info(f"Plot saved to {plot_path}")
-    plt.close()
-
-    # Plot 2: Signal distribution
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    # Signal counts
-    signal_labels = ["Sell", "Hold", "Buy"]
-    signal_counts = [n_sell_signals, n_hold_signals, n_buy_signals]
-    signal_colors = ["red", "gray", "green"]
-
-    axes[0].bar(signal_labels, signal_counts, color=signal_colors, alpha=0.7)
-    axes[0].set_title(f"{ticker} Signal Distribution")
-    axes[0].set_ylabel("Count")
-    axes[0].grid(True, alpha=0.3, axis="y")
-
-    # Add percentage labels on bars
-    for i, (label, count) in enumerate(zip(signal_labels, signal_counts)):
-        pct = count / len(signals) * 100
-        axes[0].text(i, count, f"{count}\n({pct:.1f}%)", ha="center", va="bottom")
-
-    # Prediction distribution
-    axes[1].hist(y_pred_test, bins=50, alpha=0.7, edgecolor="black")
-    axes[1].axvline(
-        x=signal_threshold,
-        color="g",
-        linestyle="--",
-        linewidth=2,
-        label=f"Buy Threshold",
-    )
-    axes[1].axvline(
-        x=-signal_threshold,
-        color="r",
-        linestyle="--",
-        linewidth=2,
-        label=f"Sell Threshold",
-    )
-    axes[1].axvline(x=0, color="k", linestyle="-", linewidth=1, alpha=0.5)
-    axes[1].set_title(f"{ticker} Prediction Distribution")
-    axes[1].set_xlabel("Predicted Return")
-    axes[1].set_ylabel("Frequency")
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    signal_plot_path = plots_dir / f"lstm_signals_{tag}.png"
-    plt.savefig(signal_plot_path, dpi=150, bbox_inches="tight")
-    logger.info(f"Signal plot saved to {signal_plot_path}")
-    plt.close()
 
     logger.info("Testing complete.")
 
