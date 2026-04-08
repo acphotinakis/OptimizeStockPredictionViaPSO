@@ -15,13 +15,16 @@ from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 from datetime import datetime
 
+import logging
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 logger = logging.getLogger(__name__)
 
-SESSION_START = "09:30"
-SESSION_END = "16:00"
-MAX_GAP_FILL_BARS = 5  # Forward-fill at most this many missing bars
-OUTLIER_ZSCORE_THRESHOLD = 5  # Clip returns beyond ±5σ
-OUTLIER_ROLLING_WINDOW = 60  # Rolling window (bars) for z-score computation
+from constants import SESSION_START, SESSION_END, MAX_GAP_FILL_BARS, OUTLIER_ROLLING_WINDOW, OUTLIER_ZSCORE_THRESHOLD
 
 
 class DataCleaner:

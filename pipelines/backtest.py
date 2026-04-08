@@ -19,12 +19,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from src.utils.data_storage import load_windows
+
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
-from src.models.lstm.quantized_lstm import QuantizedLSTMModel
+from backup.quantized_lstm import QuantizedLSTMModel
 from src.evaluation.backtester import Backtester
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
@@ -78,7 +80,7 @@ def main():
     # Load config
     cfg = load_config(args.config)
     set_all_seeds(cfg.pso.seed)
-    
+
     setup_logger(log_file=f"logs/05_backtest_{args.ticker}.log", level="INFO")
     logger.info("=" * 60)
     logger.info("Backtesting: %s", args.ticker)
@@ -88,36 +90,38 @@ def main():
     pso_file = Path(args.pso_results) / f"pso_results_{args.ticker}.json"
     with open(pso_file) as f:
         pso_results = json.load(f)
-    
+
     best_params = pso_results["best_params"]
     logger.info("Using IPSO hyperparameters:")
     for key, value in best_params.items():
         logger.info("  %s: %s", key, value)
 
     # Load feature data
-    ticker_dir = Path(args.features_dir) / args.ticker
-    X_train_flat = np.load(ticker_dir / "X_train.npy")
-    y_train = np.load(ticker_dir / "y_train.npy")
-    X_val_flat = np.load(ticker_dir / "X_val.npy")
-    y_val = np.load(ticker_dir / "y_val.npy")
-    X_test_flat = np.load(ticker_dir / "X_test.npy")
-    y_test = np.load(ticker_dir / "y_test.npy")
+    X_train_flat, y_train, X_val_flat, y_val, X_test_flat, y_test = load_windows(
+        data_dir=Path(args.features_dir), ticker=args.ticker
+    )
 
     # Build sliding windows
     lookback = best_params["lookback"]
     session_starts = np.zeros(len(X_train_flat), dtype=bool)
-    
-    X_train, y_train_w = build_windows(X_train_flat, y_train, session_starts[:len(X_train_flat)], lookback)
-    X_val, y_val_w = build_windows(X_val_flat, y_val, session_starts[:len(X_val_flat)], lookback)
-    X_test, y_test_w = build_windows(X_test_flat, y_test, session_starts[:len(X_test_flat)], lookback)
+
+    X_train, y_train_w = build_windows(
+        X_train_flat, y_train, session_starts[: len(X_train_flat)], lookback
+    )
+    X_val, y_val_w = build_windows(
+        X_val_flat, y_val, session_starts[: len(X_val_flat)], lookback
+    )
+    X_test, y_test_w = build_windows(
+        X_test_flat, y_test, session_starts[: len(X_test_flat)], lookback
+    )
 
     # Train final model on Train+Val
     logger.info("Training final model on Train+Val data...")
     X_combined = np.concatenate([X_train, X_val], axis=0)
     y_combined = np.concatenate([y_train_w, y_val_w], axis=0)
-    
+
     input_size = X_train.shape[2]
-    use_checkpointing = cfg.lstm.get("use_checkpointing", False)
+    use_checkpointing = cfg.lstm_baseline.use_checkpointing
     model = LSTMModel(
         input_size=input_size,
         num_layers=best_params["num_layers"],
@@ -125,10 +129,10 @@ def main():
         dropout=best_params["dropout"],
         use_checkpointing=use_checkpointing,
     )
-    
-    use_amp = cfg.lstm.get("use_amp", True)
-    accumulation_steps = cfg.lstm.get("accumulation_steps", 1)
-    
+
+    use_amp = cfg.lstm_baseline.use_amp
+    accumulation_steps = cfg.lstm_baseline.accumulation_steps
+
     trainer = LSTMTrainer(
         model=model,
         lr=best_params["learning_rate"],
@@ -138,7 +142,7 @@ def main():
         use_amp=use_amp,
         accumulation_steps=accumulation_steps,
     )
-    
+
     # Use a small validation split from combined data for early stopping
     val_split = int(0.9 * len(X_combined))
     trainer.fit(
@@ -150,7 +154,7 @@ def main():
 
     # Generate predictions on test set
     logger.info("Generating predictions on test set...")
-    
+
     # Phase 2: Quantize if requested
     if args.quantize:
         logger.info("Quantizing model for backtesting inference...")
@@ -163,13 +167,13 @@ def main():
     # Load price data for backtesting
     logger.info("Loading price data...")
     df_aligned = pd.read_parquet(Path(args.data_dir) / "aligned_universe.parquet")
-    
+
     # Extract test period prices
     # Note: This is simplified - in production you'd need to properly align windows with timestamps
     ticker_data = df_aligned[args.ticker]
     test_start_idx = len(X_train_flat) + len(X_val_flat) + lookback
     test_end_idx = test_start_idx + len(y_test_w)
-    
+
     opens_test = ticker_data["open"].iloc[test_start_idx:test_end_idx].values
     closes_test = ticker_data["close"].iloc[test_start_idx:test_end_idx].values
     timestamps_test = ticker_data.index[test_start_idx:test_end_idx]
@@ -183,7 +187,7 @@ def main():
         slippage=cfg.backtesting.slippage,
         stop_loss=cfg.backtesting.stop_loss,
     )
-    
+
     result = backtester.run(y_pred, opens_test, closes_test, timestamps_test)
 
     # Log results
@@ -220,7 +224,7 @@ def main():
         "turnover": float(result.turnover),
         "final_equity": float(result.equity_curve[-1]),
     }
-    
+
     with open(output_dir / f"backtest_{args.ticker}.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
@@ -237,7 +241,7 @@ def main():
     plt.ylabel("Portfolio Value ($)")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    
+
     plot_file = output_dir / f"equity_curve_{args.ticker}.png"
     plt.savefig(plot_file, dpi=150)
     logger.info("Equity curve plot saved to %s", plot_file)

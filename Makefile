@@ -64,13 +64,4 @@ enable_skill:
 ifndef SKILL
 	$(error SKILL variable not set. Usage: make enable_skill SKILL=<skill_name>)
 endif
-	@echo "Enabling skill: $(SKILL) and disabling others"
-	@for d in $(SKILLS_DIR)/*; do \
-		base=$$(basename $$d); \
-		if [ "$$base" = "$(SKILL)" ]; then \
-			if [ -d "$$d.disabled" ]; then mv "$$d.disabled" "$$d"; fi; \
-			echo "Enabled $$base"; \
-		else \
-			if [ -d "$$d" ] && [ ! -d "$$d.disabled" ]; then mv "$$d" "$$d.disabled"; fi; \
-		fi \
-	done
+	@python3 enable_skill.py $(SKILL)

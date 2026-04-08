@@ -24,7 +24,7 @@ if [ ! -d "data/features/${TICKER}" ]; then
 fi
 
 echo "Step 1/2: Training RL agent..."
-python scripts/train_rl_agent.py \
+python pipelines/train_rl_agent.py \
     --ticker ${TICKER} \
     --episodes ${EPISODES} \
     --eval-freq 50 \
@@ -39,7 +39,7 @@ echo "✓ Training complete"
 echo ""
 
 echo "Step 2/2: Evaluating on test set..."
-python scripts/evaluate_rl_agent.py \
+python pipelines/evaluate_rl_agent.py \
     --ticker ${TICKER}
 
 if [ $? -ne 0 ]; then

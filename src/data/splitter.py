@@ -110,8 +110,6 @@ class DataSplitter:
 # Sliding window construction
 # ------------------------------------------------------------------
 
-import numpy as np
-
 
 def build_windows(
     features: np.ndarray,

@@ -22,7 +22,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
-from src.models.lstm.quantized_lstm import QuantizedLSTMModel
+from backup.quantized_lstm import QuantizedLSTMModel
 from src.utils.logger import setup_logger
 from src.utils.memory_profiler import MemoryProfiler, MemoryMonitor
 from src.utils.memory_manager import MemoryManager

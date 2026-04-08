@@ -16,6 +16,8 @@ from typing import Optional
 
 import numpy as np
 
+from src.evaluation import metrics
+
 # Default weights (must sum to 1)
 DEFAULT_WEIGHTS = dict(rmse=0.4, sharpe=0.4, mdd=0.2)
 
@@ -24,6 +26,7 @@ ANNUALISE = np.sqrt(252 * 390)
 
 # Signal threshold (1 bp)
 SIGNAL_THRESHOLD = 1e-4
+TRANSACTION_COST = 0.001
 
 
 def generate_signals(
@@ -80,29 +83,31 @@ def max_drawdown_from_signals(signals: np.ndarray, y_true: np.ndarray) -> float:
     return float(dd.max())
 
 
+def bar_returns_from_signals(
+    signals: np.ndarray, y_true: np.ndarray, tc: float = TRANSACTION_COST
+) -> np.ndarray:
+    """Compute per-bar strategy returns after transaction costs."""
+    bar_ret = signals * y_true
+    # Subtract cost when signal changes
+    signal_change = np.abs(np.diff(signals, prepend=0.0)) > 0
+    bar_ret -= signal_change.astype(float) * tc
+    return bar_ret
+
+
 class CompositeFitness:
-    """Online-normalised composite fitness calculator.
-
-    Maintains running min/max for each component across all evaluations
-    within a single PSO run so that all terms are scaled to [0, 1].
-
-    Args:
-        weights: Dict with keys 'rmse', 'sharpe', 'mdd' that sum to 1.
-        signal_threshold: Threshold to classify predictions as up/down.
-        transaction_cost: One-way cost used in Sharpe calculation.
-    """
+    """Online-normalized composite fitness using RMSE, Sharpe, and Max Drawdown."""
 
     def __init__(
         self,
         weights: Optional[dict] = None,
         signal_threshold: float = SIGNAL_THRESHOLD,
-        transaction_cost: float = 0.001,
+        transaction_cost: float = TRANSACTION_COST,
     ) -> None:
         self.weights = weights or DEFAULT_WEIGHTS
         self.threshold = signal_threshold
         self.tc = transaction_cost
 
-        # Running bounds for online normalisation
+        # Running bounds for online normalization
         self._rmse_min = float("inf")
         self._rmse_max = float("-inf")
         self._sharpe_min = float("inf")
@@ -111,35 +116,39 @@ class CompositeFitness:
         self._mdd_max = float("-inf")
 
     def __call__(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        """Evaluate composite fitness for one particle.
+        """Evaluate composite fitness for one particle."""
+        y_true = y_true.ravel()
+        y_pred = y_pred.ravel()
 
-        Args:
-            y_true: [N] validation actual log returns.
-            y_pred: [N] model predictions.
+        # RMSE
+        rmse_val = metrics.rmse(y_true, y_pred)
 
-        Returns:
-            Scalar fitness value (lower is better).
-        """
-        # Raw components
-        rmse = float(np.sqrt(np.mean((y_pred - y_true) ** 2)))
+        # Signals and bar returns
         signals = generate_signals(y_pred, self.threshold)
-        sharpe = sharpe_from_signals(signals, y_true, self.tc)
-        mdd = max_drawdown_from_signals(signals, y_true)
+        bar_ret = bar_returns_from_signals(signals, y_true, self.tc)
+
+        # Sharpe & Max Drawdown
+        sharpe_val = metrics.sharpe_ratio(bar_ret)
+        equity_curve = np.cumprod(1.0 + bar_ret)
+        mdd_val = metrics.max_drawdown(equity_curve)
 
         # Update running bounds
-        self._rmse_min = min(self._rmse_min, rmse)
-        self._rmse_max = max(self._rmse_max, rmse)
-        self._sharpe_min = min(self._sharpe_min, sharpe)
-        self._sharpe_max = max(self._sharpe_max, sharpe)
-        self._mdd_min = min(self._mdd_min, mdd)
-        self._mdd_max = max(self._mdd_max, mdd)
+        self._rmse_min, self._rmse_max = min(self._rmse_min, rmse_val), max(
+            self._rmse_max, rmse_val
+        )
+        self._sharpe_min, self._sharpe_max = min(self._sharpe_min, sharpe_val), max(
+            self._sharpe_max, sharpe_val
+        )
+        self._mdd_min, self._mdd_max = min(self._mdd_min, mdd_val), max(
+            self._mdd_max, mdd_val
+        )
 
-        # Normalise each component to [0, 1]
-        norm_rmse = self._normalise(rmse, self._rmse_min, self._rmse_max)
-        norm_sharpe = self._normalise(sharpe, self._sharpe_min, self._sharpe_max)
-        norm_mdd = self._normalise(mdd, self._mdd_min, self._mdd_max)
+        # Normalize to [0, 1]
+        norm_rmse = self._normalize(rmse_val, self._rmse_min, self._rmse_max)
+        norm_sharpe = self._normalize(sharpe_val, self._sharpe_min, self._sharpe_max)
+        norm_mdd = self._normalize(mdd_val, self._mdd_min, self._mdd_max)
 
-        # Sharpe: higher is better --> invert for minimisation
+        # Fitness: lower is better
         fitness = (
             self.weights["rmse"] * norm_rmse
             + self.weights["sharpe"] * (1.0 - norm_sharpe)
@@ -148,7 +157,7 @@ class CompositeFitness:
         return float(fitness)
 
     @staticmethod
-    def _normalise(value: float, vmin: float, vmax: float) -> float:
+    def _normalize(value: float, vmin: float, vmax: float) -> float:
         rng = vmax - vmin
         if rng < 1e-10:
             return 0.0

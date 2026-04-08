@@ -8,11 +8,17 @@ referenced in experiment_plan.md and backtesting_framework.md.
 from __future__ import annotations
 
 from typing import Dict
-
 import numpy as np
+import sys
+from pathlib import Path
+import numpy as np
+import logging
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 ANNUALISE_1MIN = np.sqrt(252 * 390)  # 1-minute bars --> annual
 
+logger = logging.getLogger(__name__)
 
 # ======================================================================
 # Statistical metrics
@@ -227,3 +233,67 @@ def all_trading_metrics(
     if benchmark_returns is not None:
         result["information_ratio"] = information_ratio(bar_returns, benchmark_returns)
     return result
+
+
+# ======================================================================
+# Logging for Stats and Trading Metrics
+# ======================================================================
+
+
+STATS_METRIC_ORDER = [
+    "rmse",
+    "mae",
+    "mape",
+    "r2",
+    "directional_accuracy",
+    "f1_ternary",
+    "auc_ternary",
+]
+
+
+def _print_stats_info_metrics(label: str, m: dict) -> None:
+    """Pretty-print all statistical metrics with consistent formatting."""
+    parts = []
+
+    for k in STATS_METRIC_ORDER:
+        # if k not in m:
+        #     continue
+
+        v = m[k]
+
+        if k in {"rmse", "mae", "mape"}:
+            parts.append(f"{k.upper()}={v:.6f}")
+        else:
+            parts.append(f"{k.upper()}={v:.4f}")
+
+    logger.info(f"{label} — " + "  ".join(parts))
+
+
+TRADING_METRIC_ORDER = [
+    "sharpe",
+    "sortino",
+    "max_drawdown",
+    "cagr",
+    "calmar",
+    "profit_factor",
+    "win_rate",
+    "information_ratio",  # optional
+    "n_bars",
+]
+
+
+def _print_trading_metrics(label: str, m: dict) -> None:
+    """Pretty-print all trading metrics with consistent formatting."""
+    parts = []
+
+    for k in TRADING_METRIC_ORDER:
+        v = m[k]
+
+        if k == "n_bars":
+            parts.append(f"{k.upper()}={int(v)}")
+        elif k in {"max_drawdown", "cagr", "win_rate"}:
+            parts.append(f"{k.upper()}={v:.4%}")  # percentage format
+        else:
+            parts.append(f"{k.upper()}={v:.4f}")
+
+    logger.info(f"{label} — " + "  ".join(parts))

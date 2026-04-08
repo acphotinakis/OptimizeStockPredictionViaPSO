@@ -7,16 +7,19 @@ index derived from SPY (the most liquid, complete ticker).
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, List, Optional
-from pathlib import Path
 import pandas as pd
 import numpy as np
+import logging
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 logger = logging.getLogger(__name__)
 
-MAX_MISSING_FRACTION = 0.05  # Drop timestamps where >5 % of tickers have NaN
-MAX_FFILL_BARS = 5  # Forward-fill at most 5 bars per ticker during alignment
+from constants import MAX_FFILL_BARS, MAX_MISSING_FRACTION
 
 
 class TickerAligner:

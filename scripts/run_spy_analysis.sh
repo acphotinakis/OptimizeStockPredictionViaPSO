@@ -30,43 +30,10 @@ for TICKER in "${ALL_TICKERS[@]}"; do
         exit 1
     fi
 
-    echo "Step 1/4: Training LSTM model for ${TICKER}..."
-    python pipelines/run_lstm_baseline.py \
-        --ticker ${TICKER} \
-        --mode train \
-        --seed ${SEED} \
-        --results-dir ${RESULTS_DIR}
-
-    echo "✓ Training complete"
-    echo ""
-
-    echo "Step 2/4: Running validation for ${TICKER}..."
-    python pipelines/run_lstm_baseline.py \
-        --ticker ${TICKER} \
-        --mode val \
-        --seed ${SEED} \
-        --results-dir ${RESULTS_DIR}
-
-    echo "✓ Validation complete"
-    echo ""
-
-    echo "Step 3/4: Testing and generating signals for ${TICKER}..."
-    python pipelines/run_lstm_baseline.py \
-        --ticker ${TICKER} \
-        --mode test \
-        --seed ${SEED} \
-        --results-dir ${RESULTS_DIR}
-
-    echo "✓ Testing complete"
-    echo ""
-
-    echo "Step 4/4: Generating visualization for ${TICKER}..."
-    python plots/plot_lstm.py \
-        --ticker ${TICKER} \
-        --seed ${SEED} \
-        --results-dir ${RESULTS_DIR}
-
-    echo "✓ Plotting complete"
+    echo "Running LSTM pipeline for ${TICKER}..."
+    bash scripts/run_lstm_pipeline.sh ${TICKER} ${SEED}
+    
+    echo "✓ Pipeline complete for ${TICKER}"
     echo ""
 
     echo "Results for ${TICKER} saved in:"

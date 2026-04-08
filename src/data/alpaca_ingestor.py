@@ -210,6 +210,21 @@ class AlpacaIngestor:
         #     df.index = pd.to_datetime(df.index, utc=True)
         return df
 
+    @staticmethod
+    def _load_bars(path: str | Path) -> pd.DataFrame:
+        """Load a previously saved Parquet file.
+
+        Args:
+            path: Path to the Parquet file.
+
+        Returns:
+            DataFrame with DatetimeIndex (UTC).
+        """
+        df = pd.read_parquet(path)
+        # if not isinstance(df.index, pd.DatetimeIndex):
+        #     df.index = pd.to_datetime(df.index, utc=True)
+        return df
+
     def downcast_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reduce memory by downcasting numeric types.
 

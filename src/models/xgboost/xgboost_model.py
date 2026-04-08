@@ -65,65 +65,8 @@ _DEFAULT_LOOKBACK = 30
 
 
 # ======================================================================
-# Helpers
+# Helper functions
 # ======================================================================
-
-
-def load_windows(features_dir: Path, ticker: str):
-    """Load pre-built numpy arrays from script 02."""
-    prefix = features_dir / ticker
-
-    file_map = {
-        "X_train": prefix / "X_train.npy",
-        "X_val": prefix / "X_val.npy",
-        "X_test": prefix / "X_test.npy",
-        "y_train": prefix / "y_train.npy",
-        "y_val": prefix / "y_val.npy",
-        "y_test": prefix / "y_test.npy",
-    }
-
-    arrays = {}
-
-    for key, path in file_map.items():
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Missing {path}. Run script 02 first:\n"
-                f"  python scripts/02_build_features.py --target {ticker}"
-            )
-        arrays[key] = np.load(path)
-
-    return (
-        arrays["X_train"],
-        arrays["y_train"],
-        arrays["X_val"],
-        arrays["y_val"],
-        arrays["X_test"],
-        arrays["y_test"],
-    )
-
-
-def load_feature_names(features_dir: Path, ticker: str) -> list:
-    """Load feature names from metadata.pkl for a given ticker."""
-    path = features_dir / ticker / "metadata.pkl"
-
-    if not path.exists():
-        raise FileNotFoundError(f"Metadata file not found: {path}")
-
-    try:
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-    except Exception as e:
-        raise RuntimeError(f"Failed to read or parse {path}: {e}")
-
-    if "feature_names" not in data:
-        raise KeyError(f"'feature_names' key missing in {path}")
-
-    feature_names = data["feature_names"]
-
-    if not isinstance(feature_names, list):
-        raise TypeError(f"'feature_names' in {path} is not a list")
-
-    return feature_names
 
 
 class XGBoostModel:

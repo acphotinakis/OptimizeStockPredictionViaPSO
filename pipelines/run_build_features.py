@@ -26,7 +26,7 @@ from src.utils.config_loader import load_config
 logger = logging.getLogger(__name__)
 
 
-def process_ticker(ticker, dfs_train, dfs_val, dfs_test, cfg, output_dir, splitter):
+def process_ticker(ticker, dfs_train, dfs_val, dfs_test, cfg, output_dir, splitter: DataSplitter):
     if ticker not in dfs_train:
         logger.warning("Skipping %s (not in training data)", ticker)
         return

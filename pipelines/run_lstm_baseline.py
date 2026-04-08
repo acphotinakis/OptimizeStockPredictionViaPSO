@@ -24,7 +24,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-
+import pandas as pd
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -32,7 +32,7 @@ from matplotlib.ticker import FuncFormatter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.plots_lstm import plot_lstm_pnl
+from plots.plots_lstm import plot_lstm_pnl
 from src.evaluation.metrics import all_statistical_metrics
 from src.models.baselines import VanillaLSTM
 from src.data.splitter import build_windows
@@ -379,7 +379,9 @@ def run_val(args, features_dir, results_dir, ticker, tag):
 
     # Initialize model and load weights
     model = VanillaLSTM(input_size=X_val_flat.shape[1])
-    model._trainer.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+    model._trainer.model.load_state_dict(
+        torch.load(model_path, map_location="cpu", weights_only=True)
+    )
 
     # Walk-forward validation
     fold_size = args.wfv_fold_size
@@ -441,9 +443,6 @@ def run_val(args, features_dir, results_dir, ticker, tag):
     logger.info("Validation complete.")
 
 
-import pandas as pd
-
-
 def run_test(args, features_dir, results_dir, ticker, tag):
     """Test mode: final evaluation on test set with signal generation, stop-loss, threshold sweep, and full metrics."""
     from src.evaluation.metrics import (
@@ -478,7 +477,9 @@ def run_test(args, features_dir, results_dir, ticker, tag):
 
     # Load model
     model = VanillaLSTM(input_size=X_test_flat.shape[1])
-    model._trainer.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+    model._trainer.model.load_state_dict(
+        torch.load(model_path, map_location="cpu", weights_only=True)
+    )
 
     # Predictions
     y_pred_test = model.predict(X_test_windows)
@@ -637,7 +638,7 @@ def run_test(args, features_dir, results_dir, ticker, tag):
         n_buy,
         best_signals,
         tag,
-        results_dict
+        results_dict,
     )
 
     logger.info("Testing complete.")

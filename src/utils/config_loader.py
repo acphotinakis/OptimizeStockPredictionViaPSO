@@ -1,87 +1,46 @@
-"""
-src/utils/config_loader.py
-YAML configuration loader with robust error handling and dot-access support.
-"""
+# src/utils/config_loader.py
 
-from __future__ import annotations
 from pathlib import Path
-from typing import Any, Dict
 import yaml
 
-
-class Config:
-    """Nested dot-access wrapper around a YAML-loaded dictionary."""
-
-    def __init__(self, data: Dict[str, Any]) -> None:
-        if not isinstance(data, dict):
-            raise TypeError(f"Config expects dict, got {type(data).__name__}")
-
-        for key, value in data.items():
-            if not isinstance(key, str):
-                raise TypeError(
-                    f"Config keys must be strings, got {type(key).__name__}"
-                )
-            setattr(self, key, Config(value) if isinstance(value, dict) else value)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Recursively convert Config back to dictionary."""
-        out = {}
-        for k, v in self.__dict__.items():
-            if isinstance(v, Config):
-                out[k] = v.to_dict()
-            else:
-                out[k] = v
-        return out
-
-    def __repr__(self) -> str:
-        return f"Config({self.__dict__})"
+from src.utils.config_schema import *
 
 
 def load_config(path: str | Path) -> Config:
-    """Load a YAML file and return a validated Config object.
-
-    Raises:
-        FileNotFoundError: If config file does not exist
-        PermissionError: If file cannot be read
-        ValueError: If YAML is empty or invalid structure
-        yaml.YAMLError: If YAML parsing fails
-        TypeError: If parsed config is not a dict
-    """
     path = Path(path)
 
-    # ---------------------------
-    # File existence + access
-    # ---------------------------
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        raise FileNotFoundError(path)
 
-    if not path.is_file():
-        raise ValueError(f"Config path is not a file: {path}")
+    with open(path, "r") as f:
+        raw = yaml.safe_load(f)
 
-    try:
-        with open(path, "r") as f:
-            data = yaml.safe_load(f)
-    except PermissionError:
-        raise PermissionError(f"Permission denied when reading config: {path}")
-    except yaml.YAMLError as e:
-        raise yaml.YAMLError(f"Invalid YAML in config file {path}: {e}")
-
-    # ---------------------------
-    # Validation
-    # ---------------------------
-    if data is None:
-        raise ValueError(f"Config file is empty: {path}")
-
-    if not isinstance(data, dict):
-        raise TypeError(
-            f"Top-level YAML structure must be a dict, got {type(data).__name__}"
-        )
-
-    # Optional: enforce non-empty config
-    if not data:
-        raise ValueError(f"Config file contains no keys: {path}")
-
-    return Config(data)
+    return Config(
+        pso=PSOConfig(**raw["pso"]),
+        lstm=LSTMConfig(
+            num_layers=RangeInt(**raw["lstm"]["num_layers"]),
+            hidden_units=RangeInt(**raw["lstm"]["hidden_units"]),
+            dropout=RangeFloat(**raw["lstm"]["dropout"]),
+            learning_rate=RangeFloat(**raw["lstm"]["learning_rate"]),
+            lookback=LookbackConfig(**raw["lstm"]["lookback"]),
+            max_epochs=raw["lstm"]["max_epochs"],
+            batch_size=raw["lstm"]["batch_size"],
+            early_stopping_patience=raw["lstm"]["early_stopping_patience"],
+            grad_clip=raw["lstm"]["grad_clip"],
+        ),
+        lstm_baseline=LSTMBaselineConfig(**raw["lstm_baseline"]),
+        xgboost=XGBoostConfig(**raw["xgboost"]),
+        fitness=FitnessConfig(**raw["fitness"]),
+        data=DataConfig(**raw["data"]),
+        features=FeaturesConfig(
+            selector=SelectorConfig(
+                method=raw["features"]["selector"]["method"],
+                importance_threshold=raw["features"]["selector"][
+                    "importance_threshold"
+                ],
+                xgb_params=XGBParams(**raw["features"]["selector"]["xgb_params"]),
+            )
+        ),
+        backtesting=BacktestingConfig(**raw["backtesting"]),
+        logging=LoggingConfig(**raw["logging"]),
+    )
