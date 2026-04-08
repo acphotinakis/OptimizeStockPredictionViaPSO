@@ -41,6 +41,7 @@ lstm:
 
 lstm_baseline:
   # Fixed hyperparameters (no PSO optimization)
+  input_size: 10
   num_layers: 2
   hidden_units: 128
   dropout: 0.2
@@ -60,6 +61,7 @@ lstm_baseline:
   wfv_fold_size: 252
   wfv_folds: 10
   
+  output_size: 1
   # Backtesting
   # initial_capital: 100000.0
   # position_fraction: 0.02
@@ -83,6 +85,7 @@ xgboost:
   reg_lambda: 1.0
   early_stopping_rounds: 50
   use_optuna: true
+  importance_type: "gain"
   optuna_trials: 20            # fewer HPO trials
   tree_method: "gpu_hist"      # or "hist" if GPU memory is limited
   # tree_method: "hist"      # or "hist" if GPU memory is limited

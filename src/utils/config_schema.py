@@ -62,6 +62,7 @@ class LSTMConfig:
 # =========================
 @dataclass
 class LSTMBaselineConfig:
+    input_size: int
     num_layers: int
     hidden_units: int
     dropout: float
@@ -79,6 +80,8 @@ class LSTMBaselineConfig:
 
     wfv_fold_size: int
     wfv_folds: int
+
+    output_size: int
 
     # initial_capital: float
     # position_fraction: float
@@ -109,6 +112,7 @@ class XGBoostConfig:
     tree_method: str
     max_bin: int
     lookback: int
+    importance_type: str
 
 
 # =========================
