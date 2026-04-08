@@ -50,7 +50,7 @@ class TickerAligner:
         """Align all DataFrames to the master index.
 
         Args:
-            dfs: Mapping of ticker → cleaned DataFrame with DatetimeIndex.
+            dfs: Mapping of ticker -> cleaned DataFrame with DatetimeIndex.
             fields: Which columns to keep per ticker.
                 Defaults to [open, high, low, close, volume, log_return, session_start].
 
@@ -176,7 +176,7 @@ class TickerAligner:
             )
 
             logger.info(
-                "Saved %s → %s (%d rows, %d cols)",
+                "Saved %s -> %s (%d rows, %d cols)",
                 ticker,
                 file_path,
                 ticker_df.shape[0],

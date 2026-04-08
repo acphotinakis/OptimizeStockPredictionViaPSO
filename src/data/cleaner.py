@@ -24,7 +24,13 @@ sys.path.insert(0, str(project_root))
 
 logger = logging.getLogger(__name__)
 
-from constants import SESSION_START, SESSION_END, MAX_GAP_FILL_BARS, OUTLIER_ROLLING_WINDOW, OUTLIER_ZSCORE_THRESHOLD
+from constants import (
+    SESSION_START,
+    SESSION_END,
+    MAX_GAP_FILL_BARS,
+    OUTLIER_ROLLING_WINDOW,
+    OUTLIER_ZSCORE_THRESHOLD,
+)
 
 
 class DataCleaner:
@@ -254,7 +260,7 @@ class DataCleaner:
 
         logger.info("Computed rolling mean/std")
         logger.info(
-            "Rolling stats → mean(avg): %.6f | std(avg): %.6f | mean(min/max): [%.6f, %.6f] | std(min/max): [%.6f, %.6f]",
+            "Rolling stats -> mean(avg): %.6f | std(avg): %.6f | mean(min/max): [%.6f, %.6f] | std(min/max): [%.6f, %.6f]",
             np.nanmean(rolling_mean),
             np.nanmean(rolling_std),
             np.nanmin(rolling_mean),

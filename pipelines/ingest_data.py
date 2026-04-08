@@ -146,9 +146,6 @@ def main():
         df_spy_raw = alpaca_ingestor.load_bars(spy_path)
         df_spy = cleaner.clean(df_spy_raw)
         for ticker in tickers:
-            if ticker == "SPY":
-                continue
-
             raw_path = raw_dir / f"{ticker}.parquet"
             if not raw_path.exists():
                 logger.warning("Skipping %s (no raw data)", ticker)
@@ -180,9 +177,6 @@ def main():
         dfs: Dict[str, pd.DataFrame] = {}
 
         for ticker in tickers:
-            if ticker == "SPY":
-                continue
-
             df_cleaned_path = cleaned_path / f"{ticker}.parquet"
             if not df_cleaned_path.exists():
                 logger.warning("Skipping %s (no cleaned data)", ticker)
