@@ -50,13 +50,90 @@ def save_parquet(output_path: Path, ticker: str, df: pd.DataFrame):
     )
 
 
+def table_stats(alpaca_ingestor, raw_dir, tickers):
+    from prettytable import PrettyTable
+
+    table = PrettyTable()
+    table.field_names = [
+        "Ticker",
+        "Rows",
+        "Start",
+        "End",
+        "Mean Close",
+        "Std Close",
+        "Mean Vol",
+        "Std Vol",
+        "Missing %",
+    ]
+
+    stats_summary = []
+
+    for ticker in tickers:
+        path = raw_dir / f"{ticker}.parquet"
+        if not path.exists():
+            logger.warning("Missing raw data for %s", ticker)
+            continue
+
+        df = alpaca_ingestor.load_bars(path)
+
+        # Ensure datetime index
+        df.index = pd.to_datetime(df.index)
+
+        rows = len(df)
+        start = df.index.min()
+        end = df.index.max()
+
+        mean_close = df["close"].mean()
+        std_close = df["close"].std()
+
+        mean_vol = df["volume"].mean()
+        std_vol = df["volume"].std()
+
+        missing = df.isna().mean().mean()
+
+        stats_summary.append(
+            {"ticker": ticker, "mean_close": mean_close, "std_close": std_close}
+        )
+
+        table.add_row(
+            [
+                ticker,
+                rows,
+                str(start),
+                str(end),
+                f"{mean_close:.2f}",
+                f"{std_close:.2f}",
+                f"{mean_vol:.2f}",
+                f"{std_vol:.2f}",
+                f"{missing:.4%}",
+            ]
+        )
+
+    logger.info("\n%s", table)
+
+    # ---- Cross-ticker comparison ----
+    df_stats = pd.DataFrame(stats_summary)
+
+    logger.info("\n=== Cross-Ticker Dispersion ===")
+    logger.info(
+        "Mean Close (min/max): %.2f / %.2f",
+        df_stats["mean_close"].min(),
+        df_stats["mean_close"].max(),
+    )
+
+    logger.info(
+        "Std Close (min/max): %.2f / %.2f",
+        df_stats["std_close"].min(),
+        df_stats["std_close"].max(),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest, clean, and align OHLCV data")
     parser.add_argument(
         "--mode",
-        choices=["ingest", "clean", "align", "stats"],
+        choices=["ingest", "clean", "align", "stats", "plot"],
         required=True,
-        help="Execution mode: train, val, or test",
     )
     parser.add_argument("--config", type=str, default="config/default_config.yaml")
     parser.add_argument("--tickers", type=str, default="config/tickers.txt")
@@ -66,6 +143,12 @@ def main():
     parser.add_argument("--cleaned-output", type=str, default="data/cleaned")
     # for aligned outputs
     parser.add_argument("--processed-output", type=str, default="data/processed")
+    parser.add_argument(
+        "--plot-tickers",
+        type=str,
+        default=None,
+        help="Comma-separated tickers for plotting",
+    )
     parser.add_argument(
         "--skip-existing",
         action="store_true",
@@ -111,10 +194,16 @@ def main():
     )
 
     with open(args.tickers) as f:
-        tickers = [
-            line.strip() for line in f if line.strip() and not line.startswith("#")
-        ]
+        tickers = []
+        for line in f:
+            _strip = line.split()
+            if len(_strip) <= 0:
+                continue
+            if not _strip[0].startswith("#") and len(_strip[0]) > 0:
+                tickers.append(_strip[0])
     logger.info("Loaded %d tickers from %s", len(tickers), args.tickers)
+
+    logger.info(f"Tickers: [{tickers}]")
 
     if args.mode == "ingest":
         """
@@ -228,7 +317,50 @@ def main():
         table.align["Ticker"] = "l"
 
         logger.info("\n%s", table)
+    elif args.mode == "stats":
+        table_stats(alpaca_ingestor=alpaca_ingestor, raw_dir=raw_dir, tickers=tickers)
+    elif args.mode == "plot":
+        import mplfinance as mpf
 
+        if args.plot_tickers is None:
+            raise ValueError("Provide --plot-tickers (comma-separated)")
+
+        plot_list = [t.strip() for t in args.plot_tickers.split(",")]
+
+        for ticker in plot_list:
+            path = raw_dir / f"{ticker}.parquet"
+            if not path.exists():
+                logger.warning("Missing raw data for %s", ticker)
+                continue
+
+            df = alpaca_ingestor.load_bars(path)
+
+            # mplfinance requires:
+            # index = datetime, columns = Open High Low Close Volume
+            df_plot = df.copy()
+            df_plot.index = pd.to_datetime(df_plot.index)
+
+            df_plot = df_plot.rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                }
+            )
+
+            df_plot = df_plot[["Open", "High", "Low", "Close", "Volume"]]
+
+            logger.info("Plotting %s (%d rows)", ticker, len(df_plot))
+
+            mpf.plot(
+                df_plot.tail(500),  # limit for readability
+                type="candle",
+                volume=True,
+                title=f"{ticker} Candlestick",
+                style="charles",
+            )
     else:
         raise ValueError(
             "Mode not properly selected. Select either 'ingest', 'clean', 'align'"

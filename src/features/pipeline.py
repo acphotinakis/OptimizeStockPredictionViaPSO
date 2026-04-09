@@ -32,6 +32,12 @@ from .volume import compute_volume_features
 from .cross_ticker import compute_cross_ticker_features
 from .selector import FeatureSelector
 
+# Import for type hints only
+try:
+    from .universe_builder import SymbolUniverseBuilder
+except ImportError:
+    SymbolUniverseBuilder = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,26 +84,38 @@ class FeaturePipeline:
 
     Args:
         target_ticker:    The stock being predicted (e.g. 'NVDA').
-        universe_tickers: All tickers available (market ctx + sector + peers).
+        universe_builder: SymbolUniverseBuilder instance for constructing target-specific universes.
+                         If None, falls back to universe_tickers (legacy mode).
+        universe_tickers: (DEPRECATED) All tickers available. Use universe_builder instead.
         selector_kwargs:  Forwarded to FeatureSelector (e.g. importance threshold).
     """
 
     def __init__(
         self,
         target_ticker: str,
-        universe_tickers: List[str],
+        universe_builder: Optional["SymbolUniverseBuilder"] = None,
+        universe_tickers: Optional[List[str]] = None,
         selector_kwargs: Optional[Dict] = None,
     ) -> None:
         self.target_ticker = target_ticker
-        self.universe_tickers = universe_tickers
+        self.universe_builder = universe_builder
+        self.universe_tickers = universe_tickers  # Legacy fallback
         self.selector = FeatureSelector(**(selector_kwargs or {}))
 
         # Set after fit_transform — used to apply same selections on val/test
         self._feature_names_full: List[str] = []
         self._feature_names_selected: List[str] = []
         self._peer_tickers: List[str] = []
+        self._universe_tickers: List[str] = []  # Stores fitted universe
         self._fitted = False
-        logger.info(f"initialized feature pipeline")
+        
+        if universe_builder is None and universe_tickers is None:
+            raise ValueError(
+                "Must provide either universe_builder or universe_tickers. "
+                "universe_builder is recommended for proper peer selection."
+            )
+        
+        logger.info(f"Initialized feature pipeline for {target_ticker}")
 
     # ------------------------------------------------------------------
     # Public interface
@@ -120,12 +138,30 @@ class FeaturePipeline:
             y_train:      np.ndarray of shape (N,), float32 — log returns
             feature_names: List[str] of length F_selected
         """
-        self._validate_inputs(dfs_train)
+        # NEW: Get target-specific universe if universe_builder is provided
+        if self.universe_builder is not None:
+            self._universe_tickers = self.universe_builder.get_universe(
+                self.target_ticker,
+                dfs_train,
+                fit=True,  # Select peers on training data
+            )
+            
+            # Filter dfs to only include universe symbols
+            dfs_train_filtered = {
+                ticker: dfs_train[ticker]
+                for ticker in self._universe_tickers
+                if ticker in dfs_train
+            }
+        else:
+            # Legacy mode: use all provided tickers
+            dfs_train_filtered = dfs_train
+            self._universe_tickers = list(dfs_train.keys())
+        
+        self._validate_inputs(dfs_train_filtered)
 
-        X_full, y, names = self._compute_features(dfs_train, fit=True)
+        X_full, y, names = self._compute_features(dfs_train_filtered, fit=True)
 
         self._feature_names_full = names
-        # logger.info(f"Initial Features --> {self._feature_names_full}")
 
         X_sel, sel_names = self.selector.fit_transform(X_full, y, names)
         self._feature_names_selected = sel_names
@@ -133,11 +169,12 @@ class FeaturePipeline:
 
         logger.info(
             "[%s] fit_transform: %d raw features → %d selected | "
-            "samples: %d | peers: %s",
+            "samples: %d | universe: %s | peers: %s",
             self.target_ticker,
             len(names),
             len(sel_names),
             len(X_sel),
+            self._universe_tickers,
             self._peer_tickers,
         )
         return X_sel, y, sel_names
@@ -161,9 +198,21 @@ class FeaturePipeline:
                 "Pipeline has not been fitted. Call fit_transform() on training "
                 "data before calling transform()."
             )
-        self._validate_inputs(dfs)
+        
+        # NEW: Filter to fitted universe
+        if self.universe_builder is not None:
+            dfs_filtered = {
+                ticker: dfs[ticker]
+                for ticker in self._universe_tickers
+                if ticker in dfs
+            }
+        else:
+            # Legacy mode
+            dfs_filtered = dfs
+        
+        self._validate_inputs(dfs_filtered)
 
-        X_full, y, _ = self._compute_features(dfs, fit=False)
+        X_full, y, _ = self._compute_features(dfs_filtered, fit=False)
 
         # transform() uses the full feature name list from fit to locate columns
         X_sel, _ = self.selector.transform(X_full, self._feature_names_full)

@@ -1,0 +1,181 @@
+# Symbol Universe Configuration for Multivariate LSTM
+# Defines market structure, sector mappings, and market internals
+# Based on existing mass_tickers.txt (51 stocks + SPY)
+
+# Tier 1: Market Structure (always included)
+# NOTE: Only SPY exists currently - need to ingest QQQ, IWM, DIA
+market_context:
+  - SPY   # S&P 500 broad market (ALREADY HAVE)
+  - QQQ   # Nasdaq 100 tech-heavy (NEED TO INGEST)
+  - IWM   # Russell 2000 small caps (NEED TO INGEST)
+  - DIA   # Dow Jones industrials (NEED TO INGEST)
+
+# Tier 2: Sector ETF Mappings
+# NOTE: All stocks below exist in mass_tickers.txt
+# Need to ingest the sector ETFs (XLK, SOXX, XLF, etc.)
+sector_etfs:
+  technology:
+    etf: XLK  # NEED TO INGEST
+    stocks:
+      - AAPL
+      - MSFT
+      - GOOGL
+      - META
+      - CRM
+      - ADBE
+  
+  semiconductors:
+    etf: SOXX  # NEED TO INGEST
+    stocks:
+      - NVDA
+      - AMD
+      - INTC
+  
+  financials:
+    etf: XLF  # NEED TO INGEST
+    stocks:
+      - JPM
+      - BAC
+      - GS
+      - MS
+      - C
+      - WFC
+      - BLK
+      - SCHW
+  
+  healthcare:
+    etf: XLV  # NEED TO INGEST
+    stocks:
+      - JNJ
+      - UNH
+      - PFE
+      - ABBV
+      - TMO
+      - MRK
+      - LLY
+      - ABT
+  
+  energy:
+    etf: XLE  # NEED TO INGEST
+    stocks:
+      - XOM
+      - CVX
+      - COP
+      - SLB
+  
+  consumer_discretionary:
+    etf: XLY  # NEED TO INGEST
+    stocks:
+      - AMZN
+      - TSLA
+      - HD
+      - MCD
+      - NKE
+      - SBUX
+      - TGT
+  
+  consumer_staples:
+    etf: XLP  # NEED TO INGEST
+    stocks:
+      - WMT
+      - COST
+  
+  industrials:
+    etf: XLI  # NEED TO INGEST
+    stocks:
+      - CAT
+      - BA
+      - GE
+      - UPS
+      - HON
+      - LMT
+  
+  communication:
+    etf: XLC  # NEED TO INGEST
+    stocks:
+      - DIS
+      - NFLX
+      - CMCSA
+  
+  materials:
+    etf: XLB  # NEED TO INGEST
+    stocks:
+      - LIN
+      - APD
+  
+  utilities:
+    etf: XLU  # NEED TO INGEST
+    stocks:
+      - NEE
+
+# Tier 4: Market Internals (equity-only proxies)
+# NOTE: Need to ingest all three
+market_internals:
+  - UVXY  # VIX futures ETF (volatility proxy) - NEED TO INGEST
+  - GLD   # Gold ETF (flight-to-safety) - NEED TO INGEST
+  - TLT   # 20+ year Treasury bonds (risk-off signal) - NEED TO INGEST
+
+# Tier 3: Peer Selection Settings
+peer_selection:
+  max_peers: 3
+  method: "pearson"  # correlation method
+  min_correlation: 0.3  # minimum abs correlation to be considered
+  lookback_days: 252  # use 1 year of training data for correlation
+  
+# Prediction Targets (stocks we want to predict)
+# Start with high-liquidity names from each sector
+prediction_targets:
+  # Technology
+  - AAPL
+  - MSFT
+  - GOOGL
+  - META
+  # Semiconductors
+  - NVDA
+  - AMD
+  # Financials
+  - JPM
+  - BAC
+  # Healthcare
+  - JNJ
+  - UNH
+  # Consumer
+  - AMZN
+  - WMT
+  # Energy
+  - XOM
+  - CVX
+  # Industrials
+  - BA
+  - CAT
+  # Communication
+  - DIS
+  - NFLX
+  # Materials
+  - LIN
+  # Utilities
+  - NEE
+
+# Context-Only Symbols (never predicted, only used as features)
+context_only:
+  # Market structure
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  # Sector ETFs
+  - XLK
+  - SOXX
+  - XLF
+  - XLV
+  - XLE
+  - XLY
+  - XLP
+  - XLI
+  - XLC
+  - XLB
+  - XLU
+  # Market internals
+  - UVXY
+  - GLD
+  - TLT

@@ -1,7 +1,7 @@
 # src/utils/config_schema.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 
 # =========================
@@ -202,6 +202,27 @@ class LoggingConfig:
 
 
 # =========================
+# Symbol Universe
+# =========================
+@dataclass
+class PeerSelectionConfig:
+    max_peers: int
+    method: str
+    min_correlation: float
+    lookback_days: int
+
+
+@dataclass
+class SymbolUniverseConfig:
+    market_context: List[str]
+    sector_etfs: Dict[str, Dict[str, Any]]
+    market_internals: List[str]
+    peer_selection: PeerSelectionConfig
+    prediction_targets: List[str]
+    context_only: List[str]
+
+
+# =========================
 # ROOT CONFIG
 # =========================
 @dataclass
@@ -215,3 +236,4 @@ class Config:
     features: FeaturesConfig
     backtesting: BacktestingConfig
     logging: LoggingConfig
+    symbol_universe: Optional[SymbolUniverseConfig] = None

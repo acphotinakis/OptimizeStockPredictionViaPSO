@@ -18,10 +18,12 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.features.pipeline import FeaturePipeline
+from src.features.universe_builder import SymbolUniverseBuilder
 from src.data.splitter import DataSplitter
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 from src.features.scalar import PipelineScaler
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def process_ticker(
     cfg,
     output_dir,
     splitter: DataSplitter,
+    universe_builder: SymbolUniverseBuilder,
 ):
     if ticker not in dfs_train:
         logger.info("Skipping %s (not in training data)", ticker)
@@ -41,7 +44,7 @@ def process_ticker(
 
     pipeline = FeaturePipeline(
         target_ticker=ticker,
-        universe_tickers=list(dfs_train.keys()),
+        universe_builder=universe_builder,
         selector_kwargs={
             # "importance_cumulative": cfg.features.selector.importance_threshold
         },
@@ -148,11 +151,23 @@ def main():
     )
     parser.add_argument("--output", type=str, default="data/features")
     parser.add_argument("--tickers", type=str, default="config/tickers.txt")
+    parser.add_argument("--universe-config", type=str, default="config/symbol_universe.yaml")
     parser.add_argument("--n-jobs", type=int, default=1)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     setup_logger(log_file="logs/02_build_features.log", level="INFO")
+    
+    # Load symbol universe builder
+    universe_builder = None
+    if Path(args.universe_config).exists():
+        logger.info(f"Loading symbol universe builder from {args.universe_config}")
+        universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
+    else:
+        logger.warning(
+            f"Symbol universe config not found at {args.universe_config}. "
+            f"Using legacy mode (all tickers as universe)."
+        )
 
     # GPU info
     try:
@@ -260,10 +275,33 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Determine which tickers to process
+    if universe_builder is not None:
+        # Load prediction targets from universe config
+        with open(args.universe_config) as f:
+            universe_cfg = yaml.safe_load(f)
+        prediction_targets = universe_cfg.get("prediction_targets", [])
+        
+        if prediction_targets:
+            logger.info(f"Processing {len(prediction_targets)} prediction targets from universe config")
+            tickers_to_process = prediction_targets
+        else:
+            logger.warning("No prediction_targets in universe config, processing all tickers")
+            tickers_to_process = tickers
+    else:
+        # Legacy mode: process all tickers
+        tickers_to_process = tickers
+    
     # --- Parallel feature construction ---
-    logger.info("Starting parallel feature generation with %d jobs", args.n_jobs)
-    for ticker in tickers:
-        process_ticker(ticker, dfs_train, dfs_val, dfs_test, cfg, output_dir, splitter)
+    logger.info("Starting feature generation for %d tickers with %d jobs", len(tickers_to_process), args.n_jobs)
+    for ticker in tickers_to_process:
+        process_ticker(ticker, dfs_train, dfs_val, dfs_test, cfg, output_dir, splitter, universe_builder)
+    
+    # Save fitted peers for reproducibility
+    if universe_builder is not None:
+        peers_path = Path(output_dir) / "fitted_peers.json"
+        universe_builder.save_peers(peers_path)
+        logger.info(f"Saved fitted peers to {peers_path}")
 
     logger.info("=" * 60)
     logger.info("✓ Feature engineering complete!")
