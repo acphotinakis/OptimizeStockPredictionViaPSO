@@ -1,0 +1,117 @@
+# Complete Symbol Universe for Multivariate LSTM
+# Total: 69 symbols (52 from mass_tickers.txt + 17 new context symbols)
+
+# ============================================================================
+# TIER 1: MARKET STRUCTURE (4 symbols)
+# ============================================================================
+SPY    # S&P 500 (ALREADY HAVE)
+QQQ    # Nasdaq 100 tech-heavy (NEW)
+IWM    # Russell 2000 small caps (NEW)
+DIA    # Dow Jones industrials (NEW)
+
+# ============================================================================
+# TIER 2: SECTOR ETFs (11 symbols - ALL NEW)
+# ============================================================================
+XLK    # Technology Select Sector SPDR
+SOXX   # iShares Semiconductor ETF
+XLF    # Financial Select Sector SPDR
+XLV    # Health Care Select Sector SPDR
+XLE    # Energy Select Sector SPDR
+XLY    # Consumer Discretionary Select Sector SPDR
+XLP    # Consumer Staples Select Sector SPDR
+XLI    # Industrial Select Sector SPDR
+XLC    # Communication Services Select Sector SPDR
+XLB    # Materials Select Sector SPDR
+XLU    # Utilities Select Sector SPDR
+
+# ============================================================================
+# TIER 4: MARKET INTERNALS (3 symbols - ALL NEW)
+# ============================================================================
+UVXY   # ProShares Ultra VIX Short-Term Futures ETF (volatility proxy)
+GLD    # SPDR Gold Shares (flight-to-safety signal)
+TLT    # iShares 20+ Year Treasury Bond ETF (risk-on/risk-off)
+
+# ============================================================================
+# TIER 3: INDIVIDUAL STOCKS (51 symbols - ALREADY HAVE from mass_tickers.txt)
+# These serve as both prediction targets and peer candidates
+# ============================================================================
+
+# Technology (10)
+AAPL
+MSFT
+GOOGL
+NVDA
+META
+TSLA
+INTC
+AMD
+CRM
+ADBE
+
+# Financials (8)
+JPM
+BAC
+WFC
+GS
+MS
+C
+BLK
+SCHW
+
+# Healthcare (8)
+JNJ
+UNH
+PFE
+ABBV
+TMO
+MRK
+LLY
+ABT
+
+# Consumer (8)
+AMZN
+WMT
+HD
+MCD
+NKE
+SBUX
+TGT
+COST
+
+# Industrials (6)
+BA
+CAT
+GE
+UPS
+HON
+LMT
+
+# Energy (4)
+XOM
+CVX
+COP
+SLB
+
+# Communication (3)
+DIS
+NFLX
+CMCSA
+
+# Materials (2)
+LIN
+APD
+
+# Utilities (1)
+NEE
+
+# ============================================================================
+# SUMMARY
+# ============================================================================
+# Total symbols: 69
+# - Market structure: 4 (1 existing + 3 new)
+# - Sector ETFs: 11 (all new)
+# - Market internals: 3 (all new)
+# - Individual stocks: 51 (all existing)
+#
+# New symbols to ingest: 17 (see tickers_new_context.txt)
+# ============================================================================

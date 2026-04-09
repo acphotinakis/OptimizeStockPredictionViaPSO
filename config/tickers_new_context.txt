@@ -1,0 +1,29 @@
+# New Context Symbols for Multivariate LSTM
+# These 17 symbols need to be ingested to complete the symbol universe
+# Existing stocks (51) are already in mass_tickers.txt
+
+# === TIER 1: MARKET STRUCTURE (3 new symbols) ===
+# Note: SPY already exists in mass_tickers.txt
+QQQ    # Nasdaq 100 tech-heavy
+IWM    # Russell 2000 small caps
+DIA    # Dow Jones industrials
+
+# === TIER 2: SECTOR ETFs (11 new symbols) ===
+XLK    # Technology Select Sector SPDR
+SOXX   # iShares Semiconductor ETF
+XLF    # Financial Select Sector SPDR
+XLV    # Health Care Select Sector SPDR
+XLE    # Energy Select Sector SPDR
+XLY    # Consumer Discretionary Select Sector SPDR
+XLP    # Consumer Staples Select Sector SPDR
+XLI    # Industrial Select Sector SPDR
+XLC    # Communication Services Select Sector SPDR
+XLB    # Materials Select Sector SPDR
+XLU    # Utilities Select Sector SPDR
+
+# === TIER 4: MARKET INTERNALS (3 new symbols) ===
+UVXY   # ProShares Ultra VIX Short-Term Futures ETF (volatility proxy)
+GLD    # SPDR Gold Shares (flight-to-safety signal)
+TLT    # iShares 20+ Year Treasury Bond ETF (risk-on/risk-off)
+
+# Total: 17 new symbols to ingest
