@@ -182,8 +182,10 @@ class DataCleaner:
 
         # Run-length encoding using shift & cumsum
         run_id = (is_missing != is_missing.shift()).cumsum()
-        gap_lengths = is_missing.groupby(run_id).transform("sum")
-        df_re["gap_length"] = gap_lengths.where(is_missing, 0)
+        # gap_lengths = is_missing.groupby(run_id).transform("sum")
+        gap_lengths = is_missing.astype(int).groupby(run_id).transform("sum")
+        gap_lengths = gap_lengths.where(is_missing, 0)
+        df_re["gap_length"] = gap_lengths
 
         num_short_gaps = ((is_missing) & (gap_lengths <= self.max_gap_fill)).sum()
         num_long_gaps = ((is_missing) & (gap_lengths > self.max_gap_fill)).sum()
@@ -199,7 +201,9 @@ class DataCleaner:
         short_gap_mask = is_missing & (gap_lengths <= self.max_gap_fill)
         cols = ["open", "high", "low", "close", "volume"]
 
-        df_re.loc[short_gap_mask, cols] = df_re[cols].ffill()
+        # df_re.loc[short_gap_mask, cols] = df_re[cols].ffill()
+        ffilled = df_re[cols].ffill()
+        df_re.loc[short_gap_mask, cols] = ffilled.loc[short_gap_mask]
         logger.info("Forward-filled %d short-gap bars", short_gap_mask.sum())
 
         # -----------------------------------------------------------------

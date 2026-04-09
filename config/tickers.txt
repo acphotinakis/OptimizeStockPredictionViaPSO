@@ -5,6 +5,13 @@
 # Technology (5)
 AAPL
 MSFT
+GOOGL
+NVDA
+META
+TSLA
+AMD
 
 # Benchmark ETF
 SPY
+QQQ
+XLK

@@ -97,14 +97,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wfv-fold-size", type=int, default=252)
     parser.add_argument("--wfv-folds", type=int, default=10)
 
-    # Testing-specific arguments
-    parser.add_argument("--initial-capital", type=float, default=100_000.0)
-    parser.add_argument("--position-fraction", type=float, default=0.02)
-    parser.add_argument("--transaction-cost", type=float, default=0.001)
-    parser.add_argument("--slippage", type=float, default=0.0005)
-    parser.add_argument("--stop-loss", type=float, default=0.02)
-    parser.add_argument("--daily-loss-limit", type=float, default=0.05)
-
     args = parser.parse_args()
 
     # Filter arguments based on mode
@@ -112,12 +104,6 @@ def parse_args() -> argparse.Namespace:
         for attr in [
             "wfv_fold_size",
             "wfv_folds",
-            "initial_capital",
-            "position_fraction",
-            "transaction_cost",
-            "slippage",
-            "stop_loss",
-            "daily_loss_limit",
         ]:
             if hasattr(args, attr):
                 delattr(args, attr)
@@ -495,7 +481,7 @@ def run_test(args, features_dir, results_dir, ticker, tag):
     best_strategy_returns = None
 
     returns = y_test_windows.flatten()
-    initial_capital = args.initial_capital
+    initial_capital = 100000.0
 
     for threshold in thresholds:
         signals = np.where(
@@ -509,7 +495,7 @@ def run_test(args, features_dir, results_dir, ticker, tag):
         for t in range(len(returns)):
             strategy_returns[t] = position[t] * returns[t]
             if t > 0 and position[t] != position[t - 1]:
-                strategy_returns[t] -= args.transaction_cost
+                strategy_returns[t] -= 0.001
             if t > 0:
                 equity_curve[t] = equity_curve[t - 1] * (1 + strategy_returns[t])
             else:
@@ -518,7 +504,7 @@ def run_test(args, features_dir, results_dir, ticker, tag):
             # Stop-loss
             if t > 0:
                 dd = (equity_curve[t] - equity_curve[t - 1]) / equity_curve[t - 1]
-                if dd < -args.stop_loss:
+                if dd < -0.02:
                     strategy_returns[t] = 0
                     position[t] = 0
                     equity_curve[t] = equity_curve[t - 1]
