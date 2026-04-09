@@ -5,6 +5,25 @@
 # Technology (5)
 AAPL
 MSFT
+GOOGL
+META
+INTC
+
+NVDA
+ADBE
+CRM
+
+# Market internals
+UVXY
+GLD
+TLT
+
+# ETF
+XLK
+SOXX
 
 # Benchmark ETF
 SPY
+QQQ
+IWM
+DIA

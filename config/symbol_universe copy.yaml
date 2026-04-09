@@ -31,6 +31,82 @@ sector_etfs:
       - AMD
       - INTC
   
+  financials:
+    etf: XLF  # NEED TO INGEST
+    stocks:
+      - JPM
+      - BAC
+      - GS
+      - MS
+      - C
+      - WFC
+      - BLK
+      - SCHW
+  
+  healthcare:
+    etf: XLV  # NEED TO INGEST
+    stocks:
+      - JNJ
+      - UNH
+      - PFE
+      - ABBV
+      - TMO
+      - MRK
+      - LLY
+      - ABT
+  
+  energy:
+    etf: XLE  # NEED TO INGEST
+    stocks:
+      - XOM
+      - CVX
+      - COP
+      - SLB
+  
+  consumer_discretionary:
+    etf: XLY  # NEED TO INGEST
+    stocks:
+      - AMZN
+      - TSLA
+      - HD
+      - MCD
+      - NKE
+      - SBUX
+      - TGT
+  
+  consumer_staples:
+    etf: XLP  # NEED TO INGEST
+    stocks:
+      - WMT
+      - COST
+  
+  industrials:
+    etf: XLI  # NEED TO INGEST
+    stocks:
+      - CAT
+      - BA
+      - GE
+      - UPS
+      - HON
+      - LMT
+  
+  communication:
+    etf: XLC  # NEED TO INGEST
+    stocks:
+      - DIS
+      - NFLX
+      - CMCSA
+  
+  materials:
+    etf: XLB  # NEED TO INGEST
+    stocks:
+      - LIN
+      - APD
+  
+  utilities:
+    etf: XLU  # NEED TO INGEST
+    stocks:
+      - NEE
 
 # Tier 4: Market Internals (equity-only proxies)
 # NOTE: Need to ingest all three
@@ -57,7 +133,28 @@ prediction_targets:
   # Semiconductors
   - NVDA
   - AMD
-
+  # Financials
+  - JPM
+  - BAC
+  # Healthcare
+  - JNJ
+  - UNH
+  # Consumer
+  - AMZN
+  - WMT
+  # Energy
+  - XOM
+  - CVX
+  # Industrials
+  - BA
+  - CAT
+  # Communication
+  - DIS
+  - NFLX
+  # Materials
+  - LIN
+  # Utilities
+  - NEE
 
 # Context-Only Symbols (never predicted, only used as features)
 context_only:
@@ -69,6 +166,15 @@ context_only:
   # Sector ETFs
   - XLK
   - SOXX
+  - XLF
+  - XLV
+  - XLE
+  - XLY
+  - XLP
+  - XLI
+  - XLC
+  - XLB
+  - XLU
   # Market internals
   - UVXY
   - GLD

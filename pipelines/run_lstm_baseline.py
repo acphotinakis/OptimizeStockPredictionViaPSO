@@ -510,18 +510,26 @@ def run_test(args, features_dir, results_dir, ticker, tag):
             strategy_returns[t] = position[t] * returns[t]
             if t > 0 and position[t] != position[t - 1]:
                 strategy_returns[t] -= args.transaction_cost
+            
+            # Calculate equity before stop-loss check
             if t > 0:
                 equity_curve[t] = equity_curve[t - 1] * (1 + strategy_returns[t])
             else:
                 equity_curve[t] = initial_capital * (1 + strategy_returns[t])
+            
+            # Prevent infinity and NaN values
+            if not np.isfinite(equity_curve[t]) or equity_curve[t] <= 0:
+                equity_curve[t] = equity_curve[t - 1] if t > 0 else initial_capital
+                strategy_returns[t] = 0
+                position[t] = 0
 
-            # Stop-loss
-            if t > 0:
+            # Stop-loss check
+            if t > 0 and equity_curve[t - 1] > 0:
                 dd = (equity_curve[t] - equity_curve[t - 1]) / equity_curve[t - 1]
                 if dd < -args.stop_loss:
-                    strategy_returns[t] = 0
+                    strategy_returns[t] = -args.stop_loss
+                    equity_curve[t] = equity_curve[t - 1] * (1 - args.stop_loss)
                     position[t] = 0
-                    equity_curve[t] = equity_curve[t - 1]
 
         # Trading metrics
         trading_metrics = all_trading_metrics(equity_curve, strategy_returns)
