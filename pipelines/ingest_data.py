@@ -148,7 +148,7 @@ def main():
         for ticker in tickers:
             raw_path = raw_dir / f"{ticker}.parquet"
             if not raw_path.exists():
-                logger.warning("Skipping %s (no raw data)", ticker)
+                logger.info("Skipping %s (no raw data)", ticker)
                 raise ValueError(
                     f"Raw data for {ticker} doesn't exist. Ensure ingestion for it first."
                 )
@@ -179,7 +179,7 @@ def main():
         for ticker in tickers:
             df_cleaned_path = cleaned_path / f"{ticker}.parquet"
             if not df_cleaned_path.exists():
-                logger.warning("Skipping %s (no cleaned data)", ticker)
+                logger.info("Skipping %s (no cleaned data)", ticker)
                 raise ValueError(
                     f"Cleaned data for {ticker} doesn't exist. Ensure cleaner for it first."
                 )

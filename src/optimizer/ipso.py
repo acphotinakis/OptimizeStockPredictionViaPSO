@@ -61,7 +61,7 @@ class IPSO(StandardPSO):
             # Mutate: reinitialise position and velocity randomly
             particle.position = random_position(self._rng)
             particle.velocity = random_velocity(self._rng)
-            logger.debug("Particle %d mutated at iteration %d", particle.idx, t)
+            logger.info("Particle %d mutated at iteration %d", particle.idx, t)
             return True  # Signal: skip standard velocity/position update
         return False
 

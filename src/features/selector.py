@@ -53,6 +53,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy import stats
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -162,61 +163,79 @@ class FeatureSelector:
         # ------------------------------------------------------------------
         # Stage 1: Variance threshold
         # ------------------------------------------------------------------
+        start_time = time.perf_counter()
         X_work, names, original_indices = self._stage_variance(
             X, names, original_indices
         )
-        logger.info("Stage 1 (variance):    %d → %d features", n_original, len(names))
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "Stage 1 (variance): %d → %d features (took %.4f s)",
+            n_original,
+            len(names),
+            elapsed,
+        )
 
         # ------------------------------------------------------------------
         # Stage 2: Pearson inter-feature correlation deduplication  [Zeng et al.]
         # ------------------------------------------------------------------
         # We need MI scores to decide WHICH feature to drop in each correlated pair.
         # Compute MI once here on the variance-filtered set; reuse in Stage 4.
+        # ------------------------------------------------------------------
+        start_time = time.perf_counter()
+        # Compute MI once for use in Stage 4
         mi_scores_all = self._compute_mi(X_work, y)
-
         n_before_corr = len(names)
         X_work, names, original_indices = self._stage_pearson_dedup(
             X_work, y, names, original_indices, mi_scores_all
         )
+        elapsed = time.perf_counter() - start_time
         logger.info(
-            "Stage 2 (Pearson r>%.2f, p<%.2f): %d → %d features",
+            "Stage 2 (Pearson r>%.2f, p<%.2f): %d → %d features (took %.4f s)",
             self.correlation_threshold,
             self.pearson_p_threshold,
             n_before_corr,
             len(names),
+            elapsed,
         )
 
         # ------------------------------------------------------------------
         # Stage 3: VIF pruning                              [Blueprint extension]
         # ------------------------------------------------------------------
+        start_vif = time.perf_counter()
         n_before_vif = len(names)
         X_work, names, original_indices = self._stage_vif(
             X_work, names, original_indices
         )
+        elapsed_vif = time.perf_counter() - start_vif
+
         logger.info(
-            "Stage 3 (VIF>%.1f): %d → %d features",
+            "Stage 3 (VIF>%.1f): %d → %d features (took %.4f s)",
             self.vif_threshold,
             n_before_vif,
             len(names),
+            elapsed_vif,
         )
 
         # ------------------------------------------------------------------
         # Stage 4: Mutual Information ranking               [Blueprint extension]
         # ------------------------------------------------------------------
         # Recompute MI on the VIF-filtered set (features have changed).
+        start_mi = time.perf_counter()
         mi_scores_final = self._compute_mi(X_work, y)
 
         n_before_mi = len(names)
         names, original_indices = self._stage_mi_rank(
             names, original_indices, mi_scores_final
         )
+        elapsed_mi = time.perf_counter() - start_mi
+
         logger.info(
-            "Stage 4 (MI quantile>%.2f): %d → %d features",
+            "Stage 4 (MI quantile>%.2f): %d → %d features (took %.4f s)",
             self.mi_quantile_threshold,
             n_before_mi,
             len(names),
+            elapsed_mi,
         )
-
         # ------------------------------------------------------------------
         # Store results
         # ------------------------------------------------------------------
@@ -351,18 +370,25 @@ class FeatureSelector:
         original_indices: List[int],
     ) -> Tuple[np.ndarray, List[str], List[int]]:
         """Remove near-constant features."""
+
+        # Compute variance (float64 for numerical stability)
         variances = np.var(X, axis=0, dtype=np.float64)
         keep_mask = variances > self.variance_threshold
 
-        dropped = [n for n, k in zip(names, keep_mask) if not k]
-        if dropped:
-            logger.debug("Variance drop: %s", dropped)
+        # Fast boolean indexing for names and indices
+        names_arr = np.asarray(names)
+        indices_arr = np.asarray(original_indices)
 
-        return (
-            X[:, keep_mask],
-            [n for n, k in zip(names, keep_mask) if k],
-            [i for i, k in zip(original_indices, keep_mask) if k],
-        )
+        kept_names = names_arr[keep_mask].tolist()
+        kept_indices = indices_arr[keep_mask].tolist()
+
+        # Only compute dropped if logging is enabled
+        if logger.isEnabledFor(logging.DEBUG):
+            dropped = names_arr[~keep_mask]
+            if dropped.size:
+                logger.info("Variance drop: %s", dropped.tolist())
+
+        return X[:, keep_mask], kept_names, kept_indices
 
     def _stage_pearson_dedup(
         self,
@@ -385,59 +411,35 @@ class FeatureSelector:
         features and target. The goal is multicollinearity removal, not
         relevance filtering (that's Stage 4).
         """
-        F = X.shape[1]
-        to_drop: set = set()
+        corr_matrix = np.corrcoef(X, rowvar=False)
+        F = corr_matrix.shape[0]
+
+        to_drop = set()
 
         for i in range(F):
             if i in to_drop:
                 continue
+
             for j in range(i + 1, F):
                 if j in to_drop:
                     continue
 
-                # scipy.pearsonr returns (r, p_value) — Zeng requires both
-                r_val, p_val = stats.pearsonr(X[:, i], X[:, j])
-
-                correlated = (
-                    abs(r_val) > self.correlation_threshold
-                    and p_val < self.pearson_p_threshold
-                )
-
-                if correlated:
-                    # Drop the feature with lower MI score (less target-relevant)
-                    # If MI scores are equal, drop j (higher index = added later,
-                    # typically a derived / lag feature)
+                if abs(corr_matrix[i, j]) > self.correlation_threshold:
                     if mi_scores[i] >= mi_scores[j]:
                         to_drop.add(j)
-                        logger.debug(
-                            "Pearson drop: '%s' (MI=%.4f) over '%s' (MI=%.4f) "
-                            "|r|=%.3f p=%.4f",
-                            names[j],
-                            mi_scores[j],
-                            names[i],
-                            mi_scores[i],
-                            abs(r_val),
-                            p_val,
-                        )
                     else:
                         to_drop.add(i)
-                        logger.debug(
-                            "Pearson drop: '%s' (MI=%.4f) over '%s' (MI=%.4f) "
-                            "|r|=%.3f p=%.4f",
-                            names[i],
-                            mi_scores[i],
-                            names[j],
-                            mi_scores[j],
-                            abs(r_val),
-                            p_val,
-                        )
-                        break  # i is dropped — no point checking more j for this i
+                        break
 
-        keep_mask = [i not in to_drop for i in range(F)]
+        keep_mask = np.array([i not in to_drop for i in range(F)])
+
+        names_arr = np.asarray(names)
+        idx_arr = np.asarray(original_indices)
+
         return (
             X[:, keep_mask],
-            [n for n, k in zip(names, keep_mask) if k],
-            [idx for idx, k in zip(original_indices, keep_mask) if k],
+            names_arr[keep_mask].tolist(),
+            idx_arr[keep_mask].tolist(),
         )
 
     def _stage_vif(
@@ -446,55 +448,38 @@ class FeatureSelector:
         names: List[str],
         original_indices: List[int],
     ) -> Tuple[np.ndarray, List[str], List[int]]:
-        """
-        Iteratively remove the highest-VIF feature until all VIF < threshold.
-        [Blueprint extension — catches collective multicollinearity Pearson misses]
-
-        VIF_i = 1 / (1 - R²_i) where R²_i is from regressing feature i on
-        all other features. VIF > 10 is the standard econometric red flag.
-
-        Skip if fewer than 3 features remain (VIF is undefined for 1-2 features).
-        Skip if N < F (underdetermined system — VIF computation fails).
-        """
         if X.shape[1] < 3:
-            logger.debug("VIF stage skipped: fewer than 3 features.")
+            logger.info("VIF stage skipped: fewer than 3 features.")
             return X, names, original_indices
-
         if X.shape[0] <= X.shape[1]:
-            logger.warning(
-                "VIF stage skipped: N=%d samples ≤ F=%d features (underdetermined). "
-                "Increase training data or reduce features before VIF.",
+            logger.info(
+                "VIF stage skipped: N=%d ≤ F=%d (underdetermined).",
                 X.shape[0],
                 X.shape[1],
             )
             return X, names, original_indices
 
+        keep_mask = np.ones(X.shape[1], dtype=bool)
         names_w = list(names)
         orig_w = list(original_indices)
-        X_w = X.copy()
 
-        max_iterations = X.shape[1]  # safety bound — can't drop more than F features
-
-        for _ in range(max_iterations):
-            if X_w.shape[1] < 3:
+        for _ in range(X.shape[1]):
+            if keep_mask.sum() < 3:
                 break
 
-            vif_values = self._compute_vif(X_w)
+            vif_values = self._compute_vif_vectorized(X[:, keep_mask])
+            max_vif_idx = int(np.argmax(vif_values))
+            max_vif = vif_values[max_vif_idx]
 
-            max_vif = vif_values.max()
             if max_vif < self.vif_threshold:
-                break  # all features within acceptable range
+                break
 
-            # Drop the feature with the highest VIF
-            worst_idx = int(np.argmax(vif_values))
-            logger.debug("VIF drop: '%s' (VIF=%.2f)", names_w[worst_idx], max_vif)
+            logger.info("VIF drop: '%s' (VIF=%.2f)", names_w[max_vif_idx], max_vif)
+            keep_mask[np.arange(len(keep_mask))[keep_mask][max_vif_idx]] = False
+            names_w.pop(max_vif_idx)
+            orig_w.pop(max_vif_idx)
 
-            keep = [i for i in range(X_w.shape[1]) if i != worst_idx]
-            X_w = X_w[:, keep]
-            names_w = [names_w[i] for i in keep]
-            orig_w = [orig_w[i] for i in keep]
-
-        return X_w, names_w, orig_w
+        return X[:, keep_mask], names_w, orig_w
 
     def _stage_mi_rank(
         self,
@@ -533,9 +518,7 @@ class FeatureSelector:
 
         if not selected_names:
             # Safety: never return zero features — keep top 10 at minimum
-            logger.warning(
-                "MI stage filtered ALL features. Keeping top 10 by MI score."
-            )
+            logger.info("MI stage filtered ALL features. Keeping top 10 by MI score.")
             selected_names = [n for n, _, _ in ranked[:10]]
             selected_orig = [idx for _, idx, _ in ranked[:10]]
 
@@ -544,6 +527,25 @@ class FeatureSelector:
     # ------------------------------------------------------------------
     # Shared utilities
     # ------------------------------------------------------------------
+
+    def _compute_vif_vectorized(self, X: np.ndarray) -> np.ndarray:
+        """
+        Vectorized VIF computation using matrix inversion.
+        """
+        # Compute correlation matrix
+        C = np.corrcoef(X, rowvar=False)
+        try:
+            invC = np.linalg.inv(C)
+        except np.linalg.LinAlgError:
+            invC = np.linalg.pinv(C)
+
+        # Make a writable copy of the diagonal
+        vif = np.diag(invC).copy()
+
+        # Force inf for near-singular features
+        vif[np.isnan(vif) | (vif > 1e10)] = np.inf
+
+        return vif
 
     @staticmethod
     def _compute_mi(X: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -561,7 +563,7 @@ class FeatureSelector:
         # MI computation is sensitive to NaN — should not occur after pipeline
         # cleaning, but guard anyway
         if np.any(~np.isfinite(X)) or np.any(~np.isfinite(y)):
-            logger.warning(
+            logger.info(
                 "Non-finite values detected before MI computation. "
                 "Replacing with 0.0."
             )
@@ -570,58 +572,3 @@ class FeatureSelector:
 
         mi = mutual_info_regression(X, y, random_state=42, n_neighbors=5)
         return mi.astype(np.float64)
-
-    @staticmethod
-    def _compute_vif(X: np.ndarray) -> np.ndarray:
-        """
-        Compute Variance Inflation Factor for each column of X.
-
-        VIF_i = 1 / (1 - R²_i) where R²_i is the coefficient of determination
-        from regressing column i on all other columns.
-
-        Uses numpy's lstsq for efficiency (avoids statsmodels dependency for
-        this core operation, though statsmodels VIF gives identical results).
-
-        Returns:
-            vif: np.ndarray of shape (F,)
-        """
-        F = X.shape[1]
-        vif = np.zeros(F, dtype=np.float64)
-
-        for i in range(F):
-            y_i = X[:, i]
-            X_others = np.delete(X, i, axis=1)
-
-            # Add intercept column
-            X_design = np.column_stack([np.ones(len(y_i)), X_others])
-
-            # OLS via lstsq: minimise ||X_design @ beta - y_i||²
-            try:
-                coeffs, residuals, rank, _ = np.linalg.lstsq(X_design, y_i, rcond=None)
-
-                if rank < X_design.shape[1]:
-                    # Perfect multicollinearity — VIF is undefined / infinite
-                    vif[i] = np.inf
-                    continue
-
-                y_pred = X_design @ coeffs
-                ss_res = np.sum((y_i - y_pred) ** 2)
-                ss_tot = np.sum((y_i - y_i.mean()) ** 2)
-
-                if ss_tot < 1e-12:
-                    # Constant feature — should have been removed in Stage 1
-                    vif[i] = np.inf
-                    continue
-
-                r_squared = 1.0 - ss_res / ss_tot
-                # Clamp r_squared to [0, 1-eps] to avoid division by zero
-                r_squared = np.clip(r_squared, 0.0, 1.0 - 1e-10)
-                vif[i] = 1.0 / (1.0 - r_squared)
-
-            except np.linalg.LinAlgError:
-                logger.warning(
-                    "lstsq failed for feature index %d — assigning VIF=inf", i
-                )
-                vif[i] = np.inf
-
-        return vif

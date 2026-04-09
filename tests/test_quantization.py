@@ -121,7 +121,7 @@ def test_mixed_precision_training():
     logger.info("=" * 60)
 
     if not torch.cuda.is_available():
-        logger.warning("GPU not available, skipping mixed precision test")
+        logger.info("GPU not available, skipping mixed precision test")
         return
 
     # Create synthetic training data

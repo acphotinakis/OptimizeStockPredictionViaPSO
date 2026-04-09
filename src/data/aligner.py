@@ -69,7 +69,7 @@ class TickerAligner:
             ]
 
         if self.benchmark_ticker not in dfs:
-            logger.warning(
+            logger.info(
                 "Benchmark ticker %s not found; using first available ticker as master index.",
                 self.benchmark_ticker,
             )
@@ -85,14 +85,6 @@ class TickerAligner:
             len(master_index),
         )
 
-        # aligned: Dict[str, pd.DataFrame] = {}
-        # for ticker, df in dfs.items():
-        #     # Keep only requested fields that exist
-        #     available = [f for f in fields if f in df.columns]
-        #     df_sub = (
-        #         df[available].reindex(master_index).ffill(limit=self.max_ffill_bars)
-        #     )
-        #     aligned[ticker] = df_sub
         aligned_parts = []
         for ticker, df in dfs.items():
             # Ensure index is DatetimeIndex in UTC
@@ -117,13 +109,6 @@ class TickerAligner:
             aligned_parts.append(df_sub)
 
         result = pd.concat(aligned_parts, axis=1)
-
-        # Stack into MultiIndex column DataFrame
-        # result = pd.concat(aligned, axis=1)
-        # result.columns = pd.MultiIndex.from_tuples(
-        #     [(ticker, col) for ticker in aligned for col in aligned[ticker].columns],
-        #     names=["ticker", "field"],
-        # )
 
         # Drop timestamps where too many tickers have NaN close
         if "close" in fields:

@@ -122,7 +122,7 @@ def load_optimal_threshold(
         theta = float(data.get("optimal_threshold", 1e-4))
         logger.info(f"  Optimal threshold (from validation): {theta:.5f}")
         return theta
-    logger.warning("  WARNING: threshold file not found. Falling back to θ=1e-4.")
+    logger.info("  WARNING: threshold file not found. Falling back to θ=1e-4.")
     return 1e-4
 
 
@@ -133,9 +133,7 @@ def load_prices(
     raw_path = Path("data/raw") / f"{ticker}.parquet"
 
     if not raw_path.exists():
-        logger.warning(
-            "Raw price file not found: %s. Using synthetic prices.", raw_path
-        )
+        logger.info("Raw price file not found: %s. Using synthetic prices.", raw_path)
 
         y_test = np.load(Path(features_dir) / ticker / "y_test.npy")
 
@@ -160,7 +158,7 @@ def load_prices(
 
     raw = AlpacaIngestor._load_bars(raw_path)
     df = DataCleaner().clean(raw)
-    _, _, df_test = DataSplitter(train_end="2022-01-03", val_end="2023-01-03").split(df)
+    _, _, df_test = DataSplitter().split(df)
 
     opens = np.asarray(df_test["open"].to_numpy(), dtype=np.float32)
     closes = np.asarray(df_test["close"].to_numpy(), dtype=np.float32)

@@ -111,7 +111,7 @@ class RLTrainer:
             prices_val = ohlcv["close"].values[len(X_train) : len(X_train) + len(X_val)]
             logger.info("Loaded OHLCV data")
         except Exception as e:
-            logger.warning(f"Could not load OHLCV: {e}. Using dummy prices.")
+            logger.info(f"Could not load OHLCV: {e}. Using dummy prices.")
             prices_train = np.ones(len(X_train))
             prices_val = np.ones(len(X_val))
 
@@ -335,12 +335,12 @@ class RLTrainer:
                 "Ret": f"{train_stats['total_return']:+.2%}",
                 "Sharpe": f"{train_stats['sharpe_ratio']:.2f}",
             }
-            
+
             if val_stats is not None:
                 postfix["ValSharpe"] = f"{val_stats['sharpe_ratio']:.2f}"
-            
+
             pbar.set_postfix(postfix)
-            
+
         # Save final model
         agent.save(self.checkpoints_dir / f"rl_agent_{self.ticker}_final.pth")
 

@@ -69,7 +69,7 @@ class DataCleaner:
 
         # Handle empty DataFrame early
         if len(df) == 0:
-            logger.warning("Empty DataFrame provided to clean(); returning as-is")
+            logger.info("Empty DataFrame provided to clean(); returning as-is")
             return df
 
         df = self._ensure_utc(df)
@@ -80,7 +80,7 @@ class DataCleaner:
         df = self._reindex_and_fill(df)
         df = self._clip_outliers(df)
         df = self._add_derived(df)
-        logger.debug("Cleaned DataFrame: %d rows", len(df))
+        logger.info("Cleaned DataFrame: %d rows", len(df))
         return df
 
     # ------------------------------------------------------------------
@@ -112,7 +112,7 @@ class DataCleaner:
         df = df.loc[mask]
 
         if before - len(df) != 0:
-            logger.debug(
+            logger.info(
                 "Session filter: dropped %d pre/post-market bars", before - len(df)
             )
         return df
@@ -120,7 +120,7 @@ class DataCleaner:
     def _remove_zero_volume(self, df: pd.DataFrame) -> pd.DataFrame:
         before = len(df)
         df = df[df["volume"] > 0]
-        logger.debug("Zero-volume removal: dropped %d bars", before - len(df))
+        logger.info("Zero-volume removal: dropped %d bars", before - len(df))
         return df
 
     def _ohlc_consistency(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -134,7 +134,7 @@ class DataCleaner:
         )
         dropped = (~mask).sum()
         if dropped:
-            logger.debug("OHLC consistency: dropped %d invalid bars", dropped)
+            logger.info("OHLC consistency: dropped %d invalid bars", dropped)
         return df[mask]
 
     def _reindex_and_fill(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -226,7 +226,7 @@ class DataCleaner:
         # 7. Final check
         # -----------------------------------------------------------------
         if df_re.isna().sum().sum() > 0:
-            logger.warning(
+            logger.info(
                 "NaNs remain after reindex/fill: %d total", df_re.isna().sum().sum()
             )
             df_re = df_re.dropna()

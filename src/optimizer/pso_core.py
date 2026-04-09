@@ -240,7 +240,7 @@ class StandardPSO:
                     fitness = future.result()
                     self._update_bests(particle, fitness)
         except Exception as e:
-            logger.warning(
+            logger.info(
                 "Parallel evaluation failed (%s); falling back to sequential.", e
             )
             for particle in self._swarm:
@@ -290,4 +290,4 @@ class StandardPSO:
         path = self.checkpoint_dir / f"checkpoint_iter_{iteration:04d}.json"
         with open(path, "w") as f:
             json.dump(state, f, indent=2)
-        logger.debug("Checkpoint saved: %s", path)
+        logger.info("Checkpoint saved: %s", path)

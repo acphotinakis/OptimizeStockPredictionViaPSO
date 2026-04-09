@@ -111,7 +111,7 @@ def compute_cross_ticker_features(
                 "will provide context from other tickers."
             )
         else:
-            logger.warning("SPY not in dfs; SPY-based features will be zero.")
+            logger.info("SPY not in dfs; SPY-based features will be zero.")
 
         for col in [
             "beta_spy_60",
@@ -139,7 +139,7 @@ def compute_cross_ticker_features(
     # If None is passed here, we compute on the full series which includes validation/test data
     computed_peer_tickers = None
     if peer_tickers is None:
-        logger.warning(
+        logger.info(
             f"peer_tickers is None for {target_ticker}. Computing correlations on FULL series "
             "which may include validation/test data. This creates LOOK-AHEAD BIAS. "
             "Peers should be selected on training data only and passed explicitly."
@@ -152,7 +152,7 @@ def compute_cross_ticker_features(
                 corrs[t] = float(r_target.corr(r_other))
             peer_tickers = sorted(corrs, key=lambda x: abs(corrs[x]), reverse=True)[:3]
             computed_peer_tickers = peer_tickers  # Store for return
-            logger.warning(
+            logger.info(
                 f"Auto-selected peers for {target_ticker} on FULL data: {peer_tickers}"
             )
         else:

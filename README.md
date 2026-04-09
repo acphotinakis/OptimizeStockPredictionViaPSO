@@ -339,3 +339,9 @@ See `ai_outputs/reproducibility.md` for full instructions including Docker setup
   note={Course project, Biologically-Inspired Intelligent Systems}
 }
 ```
+
+
+ClaudePaper  on  fixing ❯  mamba create -n rapids_gpu \
+  -c rapidsai -c nvidia -c conda-forge \
+  cudf=23.08 cuml=23.08 cupy python=3.10 "cuda-version>=12.0,<12.4" \
+  --channel-priority flexible

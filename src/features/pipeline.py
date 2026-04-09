@@ -123,7 +123,9 @@ class FeaturePipeline:
         self._validate_inputs(dfs_train)
 
         X_full, y, names = self._compute_features(dfs_train, fit=True)
+
         self._feature_names_full = names
+        # logger.info(f"Initial Features --> {self._feature_names_full}")
 
         X_sel, sel_names = self.selector.fit_transform(X_full, y, names)
         self._feature_names_selected = sel_names
@@ -228,7 +230,7 @@ class FeaturePipeline:
         # Warn on excessive NaN in close (indicates alignment or cleaning issues)
         nan_pct = df["close"].isna().mean()
         if nan_pct > 0.01:
-            logger.warning(
+            logger.info(
                 "[%s] close column has %.1f%% NaN values — "
                 "check alignment and cleaning stages.",
                 self.target_ticker,
@@ -238,7 +240,7 @@ class FeaturePipeline:
         # Warn on duplicate timestamps
         n_dupes = df.index.duplicated().sum()
         if n_dupes > 0:
-            logger.warning(
+            logger.info(
                 "[%s] %d duplicate timestamps detected — "
                 "deduplicate before feature engineering.",
                 self.target_ticker,
@@ -368,7 +370,7 @@ class FeaturePipeline:
         def _append_block(df_block: Optional[pd.DataFrame], block_name: str) -> None:
             """Append a feature block, logging any issues."""
             if df_block is None or df_block.empty:
-                logger.debug("Block '%s' is empty — skipping.", block_name)
+                logger.info("Block '%s' is empty — skipping.", block_name)
                 return
             # Remove duplicate column names within the block
             df_block = df_block.loc[:, ~df_block.columns.duplicated()]
@@ -415,7 +417,7 @@ class FeaturePipeline:
         n_inf = np.isinf(X).sum()
         n_nan = np.isnan(X).sum()
         if n_inf > 0 or n_nan > 0:
-            logger.warning(
+            logger.info(
                 "[%s] Replacing %d NaN and %d inf values with 0.0 in feature matrix.",
                 self.target_ticker,
                 n_nan,
@@ -442,7 +444,7 @@ class FeaturePipeline:
             X = X[valid_mask]
             y = y[valid_mask]
 
-        logger.debug(
+        logger.info(
             "[%s] Feature matrix: %d samples × %d features",
             self.target_ticker,
             X.shape[0],
@@ -475,7 +477,7 @@ class FeaturePipeline:
         else:
             # Fallback: group by calendar date
             session_ids = pd.Series(
-                pd.factorize(close.index.date)[0],
+                pd.factorize(pd.to_datetime(close.index).date)[0],
                 index=close.index,
             )
 
@@ -519,7 +521,7 @@ class FeaturePipeline:
 
         for col, lags in LAG_DEPTHS.items():
             if col not in name_to_idx:
-                logger.debug("Lag source '%s' not found in features — skipping.", col)
+                logger.info("Lag source '%s' not found in features — skipping.", col)
                 continue
 
             col_data = X[:, name_to_idx[col]]  # shape: (N,)
@@ -567,10 +569,81 @@ class FeaturePipeline:
 
         n_dupes = len(feature_names) - len(keep_names)
         if n_dupes > 0:
-            logger.warning(
+            logger.info(
                 "%d duplicate feature column(s) removed: %s",
                 n_dupes,
                 [n for n in feature_names if feature_names.count(n) > 1],
             )
 
         return X[:, keep_indices], keep_names
+
+
+from prettytable import PrettyTable
+import pandas as pd
+
+
+def pretty_print_df(
+    df: pd.DataFrame,
+    name: str = "DataFrame",
+    n_head: int = 3,
+    n_tail: int = 3,
+    logger=None,
+):
+    """
+    Pretty print a DataFrame with:
+      - shape
+      - column names
+      - dtypes
+      - missing %
+      - first N rows
+      - last N rows
+    """
+    if df is None or df.empty:
+        msg = f"{name}: EMPTY DataFrame"
+        if logger:
+            logger.info(msg)
+        else:
+            print(msg)
+        return
+
+    # --- Summary table ---
+    summary = PrettyTable()
+    summary.title = f"{name} Summary"
+    summary.field_names = ["Metric", "Value"]
+
+    summary.add_row(["Shape", df.shape])
+    summary.add_row(["Rows", len(df)])
+    summary.add_row(["Columns", len(df.columns)])
+    summary.add_row(["Column Names", ", ".join(map(str, df.columns.tolist()))])
+
+    # Dtypes
+    dtype_str = ", ".join([f"{col}:{dtype}" for col, dtype in df.dtypes.items()])
+    summary.add_row(["Dtypes", dtype_str])
+
+    # Missing %
+    missing_pct = df.isna().mean().mean() * 100
+    summary.add_row(["Missing %", f"{missing_pct:.4f}%"])
+
+    # --- Head table ---
+    head_table = PrettyTable()
+    head_table.title = f"{name} (First {n_head} rows)"
+    head_table.field_names = ["Index"] + list(df.columns)
+
+    for idx, row in df.head(n_head).iterrows():
+        head_table.add_row([str(idx)] + list(row.values))
+
+    # --- Tail table ---
+    tail_table = PrettyTable()
+    tail_table.title = f"{name} (Last {n_tail} rows)"
+    tail_table.field_names = ["Index"] + list(df.columns)
+
+    for idx, row in df.tail(n_tail).iterrows():
+        tail_table.add_row([str(idx)] + list(row.values))
+
+    # --- Output ---
+    output = f"\n{summary}\n\n{head_table}\n\n{tail_table}\n"
+
+    if logger:
+        logger.info(output)
+    else:
+        print(output)

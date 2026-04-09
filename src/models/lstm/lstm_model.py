@@ -157,9 +157,9 @@ class LSTMTrainer:
         self.history: Dict[str, list] = {"train_loss": [], "val_loss": []}
 
         if self.use_amp:
-            logger.debug("Mixed precision training enabled (FP16)")
+            logger.info("Mixed precision training enabled (FP16)")
         if self.accumulation_steps > 1:
-            logger.debug(
+            logger.info(
                 "Gradient accumulation: %d steps (effective batch=%d)",
                 self.accumulation_steps,
                 self.batch_size * self.accumulation_steps,

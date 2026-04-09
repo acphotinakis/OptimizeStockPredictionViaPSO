@@ -129,7 +129,7 @@ class MemoryProfiler:
 
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
-                logger.debug("Reset GPU peak memory stats")
+                logger.info("Reset GPU peak memory stats")
         except ImportError:
             pass
 

@@ -45,7 +45,7 @@ class AlpacaIngestor:
         api_key = api_key or os.getenv("ALPACA_API_KEY")
         secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY")
 
-        logger.debug("Alpaca API credentials loaded from environment")
+        logger.info("Alpaca API credentials loaded from environment")
 
         if not api_key or not secret_key:
             logger.error(
@@ -63,7 +63,7 @@ class AlpacaIngestor:
             "1Hour": TimeFrame.Hour,
             "1Day": TimeFrame.Day,
         }
-        logger.debug("TimeFrame mapping initialized")
+        logger.info("TimeFrame mapping initialized")
 
         self.base_url = base_url
 
@@ -150,7 +150,7 @@ class AlpacaIngestor:
 
             # Downcast to reduce memory usage (Phase 1: Data Quantization)
             df = self.downcast_ohlcv(df)
-            logger.debug("Downcasted %s to float32/int32", ticker)
+            logger.info("Downcasted %s to float32/int32", ticker)
 
             return df
 
@@ -192,7 +192,7 @@ class AlpacaIngestor:
                 df.to_parquet(out_path)
                 logger.info("  Saved %d bars to %s", len(df), out_path)
             else:
-                logger.warning("  No data for %s — file not written", ticker)
+                logger.info("  No data for %s — file not written", ticker)
 
             time.sleep(self.RATE_LIMIT_SLEEP)
 

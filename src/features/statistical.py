@@ -10,58 +10,57 @@ import numpy as np
 import pandas as pd
 from numba import njit
 
+# Define rolling windows per feature type
+rolling_specs = {
+    "mean": [10, 20, 60, 120],
+    "var": [10, 20, 60],
+    "skew": [20, 60],
+    "kurt": [20, 60],
+}
+
 
 def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute 20 rolling statistical features from log returns.
+    """Compute statistical features from log returns for a single ticker.
 
     Args:
-        df: Single-ticker DataFrame containing 'log_return' and 'close'.
+        df: DataFrame with 'log_return' and 'close'.
 
     Returns:
-        DataFrame of statistical feature columns.
+        DataFrame of statistical features.
     """
-    out = pd.DataFrame(index=df.index)
     r = df["log_return"]
     C = df["close"]
+    out = pd.DataFrame(index=df.index)
 
-    # ---- Rolling mean of returns -------------------------------------------
-    for w in (10, 20, 60, 120):
-        out[f"ret_mean_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).mean()
-
-    # ---- Rolling variance ---------------------------------------------------
-    for w in (10, 20, 60):
-        out[f"ret_var_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).var()
-
-    # ---- Rolling skewness ---------------------------------------------------
-    for w in (20, 60):
-        out[f"ret_skew_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).skew()
-
-    # ---- Rolling excess kurtosis --------------------------------------------
-    for w in (20, 60):
-        out[f"ret_kurt_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).kurt()
+    # ---- Vectorized rolling stats (mean, var, skew, kurt) ------------------
+    unique_windows = sorted(set(sum(rolling_specs.values(), [])))
+    for w in unique_windows:
+        roll = r.rolling(window=w, min_periods=max(1, w // 2))
+        # Compute all stats at once
+        stats = roll.agg(["mean", "var", "skew", "kurt"])
+        # Filter only required stats for this window
+        stats = stats[[s for s in stats.columns if w in rolling_specs.get(s, [])]]
+        stats.columns = [f"ret_{col}_{w}" for col in stats.columns]
+        out = pd.concat([out, stats], axis=1)
 
     # ---- Lag-1 autocorrelation ---------------------------------------------
-    # for w in (20, 60):
-    #     out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
-    #         lambda x: pd.Series(x).autocorr(lag=1) if len(x) > 2 else 0.0,
-    #         raw=True,
-    #     )
+    # Precompute unique windows to minimize rolling calls
     for w in (20, 60):
-        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
-            lambda x: _fast_autocorr(x),
-            raw=True,
-        )
+        roll = r.rolling(window=w, min_periods=max(1, w // 2))
+        out[f"ret_autocorr_1_{w}"] = roll.apply(_fast_autocorr, raw=True)
 
     # ---- Price range ratio (compression metric) ----------------------------
     for w in (20, 60):
-        sma_w = C.rolling(w, min_periods=1).mean()
-        out[f"range_ratio_{w}"] = (
-            C.rolling(w, min_periods=1).max() - C.rolling(w, min_periods=1).min()
-        ) / (sma_w + 1e-10)
+        roll = C.rolling(window=w, min_periods=1)
+        sma_w = roll.mean()
+        high = roll.max()
+        low = roll.min()
+        out[f"range_ratio_{w}"] = (high - low) / (sma_w + 1e-10)
 
     # ---- Realized volatility (sum of squared returns) ----------------------
     for w in (10, 30):
-        out[f"rv_{w}"] = np.sqrt(r.pow(2).rolling(w, min_periods=1).sum())
+        roll_sq = r.pow(2).rolling(window=w, min_periods=1)
+        out[f"rv_{w}"] = np.sqrt(roll_sq.sum())
 
     # ---- Hurst exponent (R/S approximation) --------------------------------
     out["hurst_exp_60"] = _rolling_hurst(r, window=60)

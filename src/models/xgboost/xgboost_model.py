@@ -117,10 +117,10 @@ class XGBoostModel:
             cp.cuda.set_allocator(pool.malloc)
             logger.info("GPU memory pool configured")
         except ImportError:
-            logger.warning("cupy not available, falling back to CPU")
+            logger.info("cupy not available, falling back to CPU")
             self._xgb_params["tree_method"] = "hist"
         except Exception as e:
-            logger.warning(f"GPU setup failed: {e}, falling back to CPU")
+            logger.info(f"GPU setup failed: {e}, falling back to CPU")
             self._xgb_params["tree_method"] = "hist"
 
     def __init__(
@@ -297,13 +297,13 @@ class XGBoostModel:
                     if 0 <= idx < n_flat:
                         importances[idx] = float(score)
                     else:
-                        logger.warning(
+                        logger.info(
                             "Feature index %d out of range [0, %d)", idx, n_flat
                         )
                 else:
-                    logger.debug("Skipping non-standard feature name: %s", feat_name)
+                    logger.info("Skipping non-standard feature name: %s", feat_name)
             except (ValueError, IndexError) as e:
-                logger.warning("Failed to parse feature name '%s': %s", feat_name, e)
+                logger.info("Failed to parse feature name '%s': %s", feat_name, e)
         return importances
 
     def get_per_original_feature_importances(
