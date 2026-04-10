@@ -26,7 +26,6 @@ sys.path.insert(0, str(project_root))
 
 from src.utils.data_storage import load_windows
 from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
-from backup.quantized_lstm import QuantizedLSTMModel
 from src.evaluation.backtester import Backtester
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger

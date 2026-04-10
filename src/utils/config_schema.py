@@ -50,11 +50,12 @@ class LSTMConfig:
     dropout: RangeFloat
     learning_rate: RangeFloat
     lookback: LookbackConfig
-
+    use_amp: bool
     max_epochs: int
     batch_size: int
     early_stopping_patience: int
     grad_clip: float
+    accumulation_steps: int
 
 
 # =========================

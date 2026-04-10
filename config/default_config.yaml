@@ -34,10 +34,12 @@ lstm:
     choices: [10, 30, 60, 120]
   
   # Training settings
+  use_amp: True
   max_epochs: 100
   batch_size: 256
   early_stopping_patience: 10
   grad_clip: 1.0
+  accumulation_steps: 1
 
 lstm_baseline:
   # Fixed hyperparameters (no PSO optimization)

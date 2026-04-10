@@ -113,35 +113,18 @@ def auc_ternary(
         return float("nan")
 
 
-def all_statistical_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-    """Compute all statistical metrics and return as a dict."""
-    y_true = y_true.ravel()
-    y_pred = y_pred.ravel()
-    return {
-        "rmse": rmse(y_true, y_pred),
-        "mae": mae(y_true, y_pred),
-        "mape": mape(y_true, y_pred),
-        "r2": r_squared(y_true, y_pred),
-        "directional_accuracy": directional_accuracy(y_true, y_pred),
-        "f1_ternary": f1_ternary(y_true, y_pred),
-        "auc_ternary": auc_ternary(y_true, y_pred),
-    }
-
-
 # ======================================================================
 # Signal generation
 # ======================================================================
 
 
-def generate_signals(
-    y_pred: np.ndarray, threshold: float = 1e-4
-) -> np.ndarray:
+def generate_signals(y_pred: np.ndarray, threshold: float = 1e-4) -> np.ndarray:
     """Convert predicted log returns to ternary trade signals {-1, 0, +1}.
-    
+
     Args:
         y_pred: Predicted log returns.
         threshold: Minimum absolute value to generate a signal (default: 1bp).
-    
+
     Returns:
         Array of signals: +1 (long), 0 (flat), -1 (short).
     """
@@ -237,31 +220,14 @@ def information_ratio(
     return float(active.mean() / std * ANNUALISE_1MIN)
 
 
-def all_trading_metrics(
-    equity_curve: np.ndarray,
-    bar_returns: np.ndarray,
-    benchmark_returns: np.ndarray | None = None,
-) -> Dict[str, float]:
-    """Compute all trading metrics and return as a dict."""
-    result = {
-        "sharpe": sharpe_ratio(bar_returns),
-        "sortino": sortino_ratio(bar_returns),
-        "max_drawdown": max_drawdown(equity_curve),
-        "cagr": cagr(equity_curve),
-        "calmar": calmar_ratio(equity_curve),
-        "profit_factor": profit_factor(bar_returns),
-        "win_rate": win_rate(bar_returns),
-        "n_bars": len(bar_returns),
-    }
-    if benchmark_returns is not None:
-        result["information_ratio"] = information_ratio(bar_returns, benchmark_returns)
-    return result
-
-
 # ======================================================================
-# Logging for Stats and Trading Metrics
+# Metrics + Logging Utilities
 # ======================================================================
 
+
+# ----------------------------------------------------------------------
+# Metric Orders (controls display)
+# ----------------------------------------------------------------------
 
 STATS_METRIC_ORDER = [
     "rmse",
@@ -273,25 +239,6 @@ STATS_METRIC_ORDER = [
     "auc_ternary",
 ]
 
-
-def _print_stats_info_metrics(label: str, m: dict) -> None:
-    """Pretty-print all statistical metrics with consistent formatting."""
-    parts = []
-
-    for k in STATS_METRIC_ORDER:
-        # if k not in m:
-        #     continue
-
-        v = m[k]
-
-        if k in {"rmse", "mae", "mape"}:
-            parts.append(f"{k.upper()}={v:.6f}")
-        else:
-            parts.append(f"{k.upper()}={v:.4f}")
-
-    logger.info(f"{label} — " + "  ".join(parts))
-
-
 TRADING_METRIC_ORDER = [
     "sharpe",
     "sortino",
@@ -300,23 +247,98 @@ TRADING_METRIC_ORDER = [
     "calmar",
     "profit_factor",
     "win_rate",
-    "information_ratio",  # optional
+    "information_ratio",
     "n_bars",
 ]
 
 
-def _print_trading_metrics(label: str, m: dict) -> None:
-    """Pretty-print all trading metrics with consistent formatting."""
+# ----------------------------------------------------------------------
+# Public API
+# ----------------------------------------------------------------------
+
+
+def all_statistical_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    label: str = "Stats",
+) -> Dict[str, float]:
+    """Compute statistical metrics and optionally log them."""
+    y_true = y_true.ravel()
+    y_pred = y_pred.ravel()
+
+    result = {
+        "rmse": rmse(y_true, y_pred),
+        "mae": mae(y_true, y_pred),
+        "mape": mape(y_true, y_pred),
+        "r2": r_squared(y_true, y_pred),
+        "directional_accuracy": directional_accuracy(y_true, y_pred),
+        "f1_ternary": f1_ternary(y_true, y_pred),
+        "auc_ternary": auc_ternary(y_true, y_pred),
+    }
+
+    _log_metrics(label, result, STATS_METRIC_ORDER, metric_type="stats")
+
+    return result
+
+
+def all_trading_metrics(
+    equity_curve: np.ndarray,
+    bar_returns: np.ndarray,
+    benchmark_returns: np.ndarray | None = None,
+    label: str = "Trading",
+) -> Dict[str, float]:
+    """Compute trading metrics and optionally log them."""
+    result = {
+        "sharpe": sharpe_ratio(bar_returns),
+        "sortino": sortino_ratio(bar_returns),
+        "max_drawdown": max_drawdown(equity_curve),
+        "cagr": cagr(equity_curve),
+        "calmar": calmar_ratio(equity_curve),
+        "profit_factor": profit_factor(bar_returns),
+        "win_rate": win_rate(bar_returns),
+        "n_bars": len(bar_returns),
+    }
+
+    if benchmark_returns is not None:
+        result["information_ratio"] = information_ratio(bar_returns, benchmark_returns)
+
+    _log_metrics(label, result, TRADING_METRIC_ORDER, metric_type="trading")
+
+    return result
+
+
+# ----------------------------------------------------------------------
+# Internal Logging Helpers
+# ----------------------------------------------------------------------
+
+
+def _log_metrics(
+    label: str,
+    metrics: Dict[str, float],
+    order: list[str],
+    metric_type: str,
+) -> None:
+    """Generic metric logger with consistent formatting."""
     parts = []
 
-    for k in TRADING_METRIC_ORDER:
-        v = m[k]
+    for k in order:
+        if k not in metrics:
+            continue
 
-        if k == "n_bars":
-            parts.append(f"{k.upper()}={int(v)}")
-        elif k in {"max_drawdown", "cagr", "win_rate"}:
-            parts.append(f"{k.upper()}={v:.4%}")  # percentage format
-        else:
-            parts.append(f"{k.upper()}={v:.4f}")
+        v = metrics[k]
+
+        if metric_type == "stats":
+            if k in {"rmse", "mae", "mape"}:
+                parts.append(f"{k.upper()}={v:.6f}")
+            else:
+                parts.append(f"{k.upper()}={v:.4f}")
+
+        elif metric_type == "trading":
+            if k == "n_bars":
+                parts.append(f"{k.upper()}={int(v)}")
+            elif k in {"max_drawdown", "cagr", "win_rate"}:
+                parts.append(f"{k.upper()}={v:.4%}")
+            else:
+                parts.append(f"{k.upper()}={v:.4f}")
 
     logger.info(f"{label} — " + "  ".join(parts))

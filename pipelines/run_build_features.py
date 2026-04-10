@@ -1,337 +1,173 @@
 #!/usr/bin/env python3
-"""
-Builds feature matrices for each ticker using aligned OHLCV data.
-Leakage-safe: universe selection happens outside FeaturePipeline.
-"""
+"""Build feature matrices for each ticker.  Leakage-safe: universe selection
+is done once per ticker on training data and frozen for val/test."""
 
 import argparse
+import gc
 import logging
-from pathlib import Path
 import pickle
 import sys
-import gc
-import yaml
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import yaml
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.features.pipeline import FeaturePipeline
 from src.features.universe_builder import SymbolUniverseBuilder
+from src.features.scalar import PipelineScaler
 from src.data.splitter import DataSplitter
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
-from src.features.scalar import PipelineScaler
 
 logger = logging.getLogger(__name__)
 
 
-# -----------------------------
-# Utilities
-# -----------------------------
-def extract_ticker_dfs(df_multi: pd.DataFrame, tickers: list[str]) -> dict:
-    """Return {ticker: DataFrame} from MultiIndex columns."""
-    return {
-        t: df_multi.xs(t, axis=1, level=0)
-        for t in tickers
-        if t in df_multi.columns.get_level_values(0)
-    }
-
-
-def drop_columns_if_exist(dfs: dict, cols: list[str]) -> dict:
-    """Safely drop columns across all tickers."""
-    return {t: df.drop(columns=cols, errors="ignore") for t, df in dfs.items()}
-
-
-def filter_dfs(dfs: dict, universe: list[str]) -> dict:
-    """Keep only tickers in universe."""
-    return {t: dfs[t] for t in universe if t in dfs}
-
-
-def load_ticker_parquets(data_dir: Path, tickers: list[str]) -> dict:
-    dfs = {}
-
-    for t in tickers:
-        path = data_dir / f"{t}.parquet"
-        if not path.exists():
-            logger.warning("Missing parquet for %s", t)
-            continue
-
-        df = pd.read_parquet(path)
-
-        # enforce datetime index consistency
-        df.index = pd.to_datetime(df.index)
-
-        dfs[t] = df
-
-    return dfs
-
-
-# -----------------------------
-# Core processing
-# -----------------------------
 def process_ticker(
     ticker: str,
-    dfs_train,
-    dfs_val,
-    dfs_test,
-    cfg,
-    output_dir,
+    dfs_train: dict,
+    dfs_val: dict,
+    dfs_test: dict,
     universe_builder: SymbolUniverseBuilder,
-):
+    output_dir: Path,
+) -> None:
     if ticker not in dfs_train:
         logger.info("Skipping %s (not in training data)", ticker)
         return
 
-    # -------------------------------------------------------
-    # 1. Build universe ONCE per ticker (no leakage)
-    # -------------------------------------------------------
-    universe = universe_builder.get_universe(
-        ticker,
-        dfs_train,
-        fit=True,
-    )
+    # 1. Universe — fit on train, reuse for val/test
+    universe = universe_builder.get_universe(ticker, dfs_train, fit=True)
+    peers = universe_builder.get_fitted_peers(ticker)
+    filter_dfs = lambda dfs: {t: dfs[t] for t in universe if t in dfs}
 
-    logger.info(f"Universe { universe}")
+    logger.info("[%s] universe=%d %s", ticker, len(universe), universe)
+    logger.info("[%s] universe=%d  peers=%s", ticker, len(universe), universe)
 
-    # import sys
-    # sys.exit(0)
+    # 2. Feature pipeline
+    pipeline = FeaturePipeline(target_ticker=ticker, peer_tickers=peers)
+    X_train, y_train, feat_names = pipeline.fit_transform(filter_dfs(dfs_train))
+    X_val, y_val = pipeline.transform(filter_dfs(dfs_val))
+    X_test, y_test = pipeline.transform(filter_dfs(dfs_test))
 
-    dfs_train_f = filter_dfs(dfs_train, universe)
-    dfs_val_f = filter_dfs(dfs_val, universe)
-    dfs_test_f = filter_dfs(dfs_test, universe)
+    # 3. Scaling — fit on train only
+    def to_df(X, y):
+        df = pd.DataFrame(X, columns=feat_names)
+        df["log_return"] = y
+        return df
 
-    logger.info(
-        "[%s] universe size=%d | peers=%s",
-        ticker,
-        len(universe),
-        universe,
-    )
+    scaler = PipelineScaler().fit(to_df(X_train, y_train), feature_cols=feat_names)
 
-    # -------------------------------------------------------
-    # 2. Feature pipeline (no internal universe logic)
-    # -------------------------------------------------------
-    pipeline = FeaturePipeline(
-        target_ticker=ticker,
-        universe_builder=SymbolUniverseBuilder,  # IMPORTANT: disable internal selection
-        universe_tickers=universe_builder._fitted_peers[ticker],
-        selector_kwargs={},
-    )
+    def scale(X, y):
+        s = scaler.transform(to_df(X, y))
+        return s[feat_names].to_numpy(np.float32), s["log_return"].to_numpy(np.float32)
 
-    X_train, y_train, feature_names = pipeline.fit_transform(dfs_train_f)
-    X_val, y_val = pipeline.transform(dfs_val_f)
-    X_test, y_test = pipeline.transform(dfs_test_f)
+    X_train_s, y_train_s = scale(X_train, y_train)
+    X_val_s, y_val_s = scale(X_val, y_val)
+    X_test_s, y_test_s = scale(X_test, y_test)
 
-    # -------------------------------------------------------
-    # 3. Scaling (fit only on train)
-    # -------------------------------------------------------
-    scaler = PipelineScaler()
+    # 4. Save
+    out = output_dir / ticker
+    out.mkdir(parents=True, exist_ok=True)
 
-    train_df = pd.DataFrame(X_train, columns=feature_names)
-    train_df["log_return"] = y_train
+    for name, arr in {
+        "X_train": X_train_s,
+        "y_train": y_train_s,
+        "X_val": X_val_s,
+        "y_val": y_val_s,
+        "X_test": X_test_s,
+        "y_test": y_test_s,
+    }.items():
+        np.save(out / f"{name}.npy", arr, allow_pickle=False)
 
-    val_df = pd.DataFrame(X_val, columns=feature_names)
-    val_df["log_return"] = y_val
+    scaler.save(out / "scaler.pkl")
+    with open(out / "metadata.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "feature_names": feat_names,
+                "n_features": len(feat_names),
+                "train_samples": len(X_train_s),
+                "val_samples": len(X_val_s),
+                "test_samples": len(X_test_s),
+            },
+            f,
+        )
 
-    test_df = pd.DataFrame(X_test, columns=feature_names)
-    test_df["log_return"] = y_test
-
-    scaler.fit(train_df, target_col="log_return", feature_cols=feature_names)
-
-    # Verify no scaler contamination with val/test data
-    assert (
-        scaler.target_scaler.data_min_[0] <= y_train.min()
-    ), "Target scaler contaminated: data_min_ is below training min"
-    assert (
-        scaler.target_scaler.data_max_[0] >= y_train.max()
-    ), "Target scaler contaminated: data_max_ is above training max"
-
-    train_scaled = scaler.transform(train_df, target_col="log_return")
-    val_scaled = scaler.transform(val_df, target_col="log_return")
-    test_scaled = scaler.transform(test_df, target_col="log_return")
-
-    X_train_scaled = train_scaled[feature_names].to_numpy(np.float32)
-    y_train_scaled = train_scaled["log_return"].to_numpy(np.float32)
-
-    X_val_scaled = val_scaled[feature_names].to_numpy(np.float32)
-    y_val_scaled = val_scaled["log_return"].to_numpy(np.float32)
-
-    X_test_scaled = test_scaled[feature_names].to_numpy(np.float32)
-    y_test_scaled = test_scaled["log_return"].to_numpy(np.float32)
-
-    # -------------------------------------------------------
-    # 4. Save outputs
-    # -------------------------------------------------------
-    ticker_dir = Path(output_dir) / ticker
-    ticker_dir.mkdir(parents=True, exist_ok=True)
-
-    arrays = {
-        "X_train": X_train_scaled,
-        "y_train": y_train_scaled,
-        "X_val": X_val_scaled,
-        "y_val": y_val_scaled,
-        "X_test": X_test_scaled,
-        "y_test": y_test_scaled,
-    }
-
-    for name, arr in arrays.items():
-        np.save(ticker_dir / f"{name}.npy", arr, allow_pickle=False)
-
-    scaler.save(ticker_dir / "scaler.pkl")
-
-    metadata = {
-        "feature_names": feature_names,
-        "n_features": len(feature_names),
-        "train_samples": len(X_train_scaled),
-        "val_samples": len(X_val_scaled),
-        "test_samples": len(X_test_scaled),
-    }
-
-    with open(ticker_dir / "metadata.pkl", "wb") as f:
-        pickle.dump(metadata, f)
-
-    logger.info("✓ %s complete (%d features)", ticker, len(feature_names))
-
-    # -------------------------------------------------------
-    # 5. Cleanup
-    # -------------------------------------------------------
-    del (
-        X_train,
-        X_val,
-        X_test,
-        y_train,
-        y_val,
-        y_test,
-        train_df,
-        val_df,
-        test_df,
-        train_scaled,
-        val_scaled,
-        test_scaled,
-        scaler,
-    )
+    logger.info("✓ %s: %d features", ticker, len(feat_names))
+    del X_train, X_val, X_test, y_train, y_val, y_test
+    del X_train_s, X_val_s, X_test_s, y_train_s, y_val_s, y_test_s
     gc.collect()
 
 
-# -----------------------------
-# Main
-# -----------------------------
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config/default_config.yaml")
-    parser.add_argument(
-        "--input", type=str, default="data/processed/aligned_universe.parquet"
-    )
-    parser.add_argument("--output", type=str, default="data/features")
-    parser.add_argument("--tickers", type=str, default="config/tickers.txt")
-    parser.add_argument(
-        "--universe-config", type=str, default="config/symbol_universe.yaml"
-    )
-    parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--config", default="config/default_config.yaml")
+    parser.add_argument("--output", default="data/features")
+    parser.add_argument("--tickers", default="config/tickers.txt")
+    parser.add_argument("--universe-config", default="config/symbol_universe.yaml")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    load_config(args.config)
     setup_logger(log_file="logs/02_build_features.log", level="INFO")
 
-    # -----------------------------
-    # Universe builder
-    # -----------------------------
-    universe_builder = None
-    if Path(args.universe_config).exists():
-        logger.info("Loading universe config: %s", args.universe_config)
-        universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
-    else:
-        logger.warning("No universe config found → legacy mode")
-
-    # -----------------------------
     # Load tickers
-    # -----------------------------
     with open(args.tickers) as f:
-        tickers = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+        all_tickers = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    logger.info("Loaded %d tickers", len(all_tickers))
 
-    logger.info("Loaded %d tickers", len(tickers))
+    # Universe builder
+    universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
 
-    # -----------------------------
-    # Load aligned data
-    # -----------------------------
+    # Load and split data
     processed_dir = Path("data/processed")
-    dfs = load_ticker_parquets(processed_dir, tickers)
+    dfs = {}
+    for t in all_tickers:
+        p = processed_dir / f"{t}.parquet"
+        if p.exists():
+            df = pd.read_parquet(p)
+            df.index = pd.to_datetime(df.index)
+            dfs[t] = df
+        else:
+            logger.warning("Missing parquet: %s", t)
     logger.info("Loaded %d ticker DataFrames", len(dfs))
 
-    df_aligned = pd.concat(dfs, axis=1, keys=dfs.keys())
-    df_aligned.index = pd.to_datetime(df_aligned.index)
-    df_aligned = df_aligned.sort_index()
+    df_aligned = pd.concat(dfs, axis=1, keys=dfs.keys()).sort_index()
+    df_train, df_val, df_test = DataSplitter().split(df_aligned)
 
-    logger.info("Rebuilt aligned dataset: %s", df_aligned.shape)
-
-    splitter = DataSplitter()
-    df_train_all, df_val_all, df_test_all = splitter.split(df_aligned)
-
-    dfs_train = extract_ticker_dfs(df_train_all, tickers)
-    dfs_val = extract_ticker_dfs(df_val_all, tickers)
-    dfs_test = extract_ticker_dfs(df_test_all, tickers)
-
-    # timezone normalize
-    for dfs in [dfs_train, dfs_val, dfs_test]:
-        for t, df in dfs.items():
-            df.index = pd.to_datetime(df.index).tz_localize(None)
-
-    # -----------------------------
-    # Drop leakage columns
-    # -----------------------------
     DROP_COLS = ["gap_flag", "gap_length", "post_long_gap", "outlier_flag"]
 
-    dfs_train = drop_columns_if_exist(dfs_train, DROP_COLS)
-    dfs_val = drop_columns_if_exist(dfs_val, DROP_COLS)
-    dfs_test = drop_columns_if_exist(dfs_test, DROP_COLS)
+    def extract(df_split: pd.DataFrame) -> dict:
+        out = {}
+        for t in all_tickers:
+            if t not in df_split.columns.get_level_values(0):
+                continue
+            sub = df_split.xs(t, axis=1, level=0).copy()
+            sub.index = pd.to_datetime(sub.index).tz_localize(None)
+            out[t] = sub.drop(columns=DROP_COLS, errors="ignore")
+        return out
 
-    # inspect
-    # splitter.inspect_split("TRAIN", dfs_train)
-    # splitter.inspect_split("VAL", dfs_val)
-    # splitter.inspect_split("TEST", dfs_test)
+    dfs_train = extract(df_train)
+    dfs_val = extract(df_val)
+    dfs_test = extract(df_test)
 
-    # -----------------------------
-    # Output dir
-    # -----------------------------
+    # Determine prediction targets
+    with open(args.universe_config) as f:
+        u_cfg = yaml.safe_load(f)
+    targets = u_cfg.get("prediction_targets", all_tickers)
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # -----------------------------
-    # Select tickers
-    # -----------------------------
-    if universe_builder is not None:
-        with open(args.universe_config) as f:
-            universe_cfg = yaml.safe_load(f)
-
-        tickers_to_process = universe_cfg.get("prediction_targets", tickers)
-    else:
-        tickers_to_process = tickers
-
-    logger.info("Processing %d tickers", len(tickers_to_process))
-
-    # -----------------------------
-    # Run pipeline
-    # -----------------------------
-    for ticker in tickers_to_process:
+    for ticker in targets:
         process_ticker(
-            ticker,
-            dfs_train,
-            dfs_val,
-            dfs_test,
-            cfg,
-            output_dir,
-            universe_builder,
+            ticker, dfs_train, dfs_val, dfs_test, universe_builder, output_dir
         )
 
-    # -----------------------------
-    # Save peers
-    # -----------------------------
-    if universe_builder is not None:
-        peers_path = Path(output_dir) / "fitted_peers.json"
-        universe_builder.save_peers(peers_path)
-        logger.info("Saved peers → %s", peers_path)
-
+    peers_path = output_dir / "fitted_peers.json"
+    universe_builder.save_peers(peers_path)
+    logger.info("Saved peers → %s", peers_path)
     logger.info("✓ Feature engineering complete")
 
 

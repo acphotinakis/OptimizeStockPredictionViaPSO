@@ -16,8 +16,6 @@ from .metrics import (
     information_ratio,
     all_statistical_metrics,
     all_trading_metrics,
-    _print_stats_info_metrics,
-    _print_trading_metrics,
 )
 from .backtester import Backtester, BacktestResult
 from .walk_forward import WalkForwardValidator
@@ -40,8 +38,6 @@ __all__ = [
     "information_ratio",
     "all_statistical_metrics",
     "all_trading_metrics",
-    "_print_stats_info_metrics",
-    "_print_trading_metrics",
     "Backtester",
     "BacktestResult",
     "WalkForwardValidator",
