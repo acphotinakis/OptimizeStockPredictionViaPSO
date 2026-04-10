@@ -232,6 +232,20 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     logger.info(f"Target min: {target_scaler.data_min_}")
     logger.info(f"Target max: {target_scaler.data_max_}")
     logger.info(f"Target scale: {target_scaler.scale_}")
+    # =========================
+    # STRUCTURE INFO
+    # =========================
+    logger.info(f"Num features: {len(cols)}")
+
+    # Feature scaler shapes
+    logger.info(f"feature_scaler.center_ shape: {np.shape(feature_scaler.center_)}")
+    logger.info(f"feature_scaler.scale_ shape: {np.shape(feature_scaler.scale_)}")
+
+    # Target scaler shapes
+    logger.info(f"target_scaler.data_min_ shape: {np.shape(target_scaler.data_min_)}")
+    logger.info(f"target_scaler.data_max_ shape: {np.shape(target_scaler.data_max_)}")
+    logger.info(f"target_scaler.scale_ shape: {np.shape(target_scaler.scale_)}")
+
     import sys
 
     sys.exit(0)
