@@ -65,3 +65,7 @@ ifndef SKILL
 	$(error SKILL variable not set. Usage: make enable_skill SKILL=<skill_name>)
 endif
 	@python3 enable_skill.py $(SKILL)
+
+
+
+	
