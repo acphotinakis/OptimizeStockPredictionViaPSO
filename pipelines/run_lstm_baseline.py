@@ -191,6 +191,51 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     X_train_flat, y_train = load_data(ticker_dir, "train")
     X_val_flat, y_val = load_data(ticker_dir, "val")
 
+    logger.info(f"shape: {X_train_flat.shape}")
+    logger.info(f"mean: {np.mean(X_train_flat)}")
+    logger.info(f"std: {np.std(X_train_flat)}")
+    logger.info(f"min: {np.min(X_train_flat)}")
+    logger.info(f"max: {np.max(X_train_flat)}")
+    logger.info(f"First 3 rows:\n{X_train_flat[:3]}")
+    logger.info(f"Last 3 rows:\n{X_train_flat[-3:]}")
+
+    import pickle
+
+    with open(ticker_dir / "metadata.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    logger.info(f"Data --> {data}")
+
+    import joblib
+
+    data = joblib.load(ticker_dir / "scaler.pkl")
+
+    logger.info(f"Type: {type(data)}")
+    logger.info(f"Keys: {list(data.keys())}")
+
+    feature_scaler = data["feature"]
+    target_scaler = data["target"]
+    cols = data["cols"]
+
+    logger.info(f"Num features: {len(cols)}")
+    logger.info(f"First 10 columns: {cols[:10]}")
+
+    logger.info(f"Feature median (first 5): {feature_scaler.center_[:5]}")
+    logger.info(f"Feature IQR (first 5): {feature_scaler.scale_[:5]}")
+
+    for i, name in enumerate(cols[:10]):  # limit to first 10
+        logger.info(
+            f"{name}: median={feature_scaler.center_[i]:.4f}, "
+            f"IQR={feature_scaler.scale_[i]:.4f}"
+        )
+
+    logger.info(f"Target min: {target_scaler.data_min_}")
+    logger.info(f"Target max: {target_scaler.data_max_}")
+    logger.info(f"Target scale: {target_scaler.scale_}")
+    import sys
+
+    sys.exit(0)
+
     log_memory_usage("After loading data")
 
     # Build windows
@@ -510,13 +555,13 @@ def run_test(args, features_dir, results_dir, ticker, tag):
             strategy_returns[t] = position[t] * returns[t]
             if t > 0 and position[t] != position[t - 1]:
                 strategy_returns[t] -= args.transaction_cost
-            
+
             # Calculate equity before stop-loss check
             if t > 0:
                 equity_curve[t] = equity_curve[t - 1] * (1 + strategy_returns[t])
             else:
                 equity_curve[t] = initial_capital * (1 + strategy_returns[t])
-            
+
             # Prevent infinity and NaN values
             if not np.isfinite(equity_curve[t]) or equity_curve[t] <= 0:
                 equity_curve[t] = equity_curve[t - 1] if t > 0 else initial_capital
