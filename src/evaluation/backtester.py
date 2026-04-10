@@ -27,6 +27,7 @@ from .metrics import (
     calmar_ratio,
     profit_factor,
     win_rate,
+    generate_signals,
 )
 
 SIGNAL_THRESHOLD = 1e-4  # 1 bp
@@ -79,6 +80,8 @@ class Backtester:
         self.daily_limit = daily_loss_limit
         self.threshold = signal_threshold
 
+        self.n_shares = 0.0
+
     # ------------------------------------------------------------------
 
     def run(
@@ -87,6 +90,7 @@ class Backtester:
         opens: np.ndarray,
         closes: np.ndarray,
         timestamps: pd.DatetimeIndex,
+        session_starts: np.ndarray | None = None,
     ) -> BacktestResult:
         """Execute the backtest.
 
@@ -95,6 +99,8 @@ class Backtester:
             opens:      [N] bar open prices.
             closes:     [N] bar close prices.
             timestamps: [N] UTC DatetimeIndex.
+            session_starts: [N] bool array, True at first bar of each session.
+                           If None, falls back to time-based detection (9:30 open, 16:00 close).
 
         Returns:
             BacktestResult dataclass.
@@ -119,8 +125,12 @@ class Backtester:
 
         for t in range(N):
             # --- Session boundary bookkeeping ---
-            is_session_open = et_index[t].hour == 9 and et_index[t].minute == 30
-            is_session_close = et_index[t].hour == 15 and et_index[t].minute == 59
+            if session_starts is not None:
+                is_session_open = bool(session_starts[t])
+                is_session_close = (t == N - 1) or bool(session_starts[t + 1])
+            else:
+                is_session_open = et_index[t].hour == 9 and et_index[t].minute == 30
+                is_session_close = et_index[t].hour == 16 and et_index[t].minute == 0
 
             if is_session_open:
                 session_open_equity = equity[t]
@@ -168,11 +178,10 @@ class Backtester:
 
             # --- Mark-to-market unrealised P&L using close price ---
             if position != 0:
-                trade_value = self.f * equity[t]
-                n_shares = trade_value / (entry_price + 1e-10)
-                mtm_pnl = position * n_shares * (closes[t] - entry_price)
+                position_value = self.f * entry_equity
+                self.n_shares = position_value / (entry_price + 1e-10)
+                mtm_pnl = position * self.n_shares * (closes[t] - entry_price)
                 equity[t + 1] = equity[t] + mtm_pnl
-
                 # Stop-loss: if unrealised drawdown exceeds limit, force flat next bar
                 trade_dd = (entry_equity - equity[t + 1]) / (entry_equity + 1e-10)
                 if trade_dd > self.stop_loss and t + 1 < N:
@@ -220,10 +229,7 @@ class Backtester:
     # ------------------------------------------------------------------
 
     def _make_signals(self, y_pred: np.ndarray) -> np.ndarray:
-        sig = np.zeros(len(y_pred), dtype=np.float32)
-        sig[y_pred > self.threshold] = 1.0
-        sig[y_pred < -self.threshold] = -1.0
-        return sig
+        return generate_signals(y_pred, self.threshold)
 
     # ------------------------------------------------------------------
     # Threshold optimisation on validation set
@@ -236,6 +242,7 @@ class Backtester:
         opens_val: np.ndarray,
         closes_val: np.ndarray,
         timestamps_val: pd.DatetimeIndex,
+        session_starts_val: np.ndarray | None = None,
         candidates: Optional[List[float]] = None,
     ) -> float:
         """Grid-search the signal threshold maximising Sharpe on the val set.
@@ -245,6 +252,7 @@ class Backtester:
             y_true_val: [N] val actual returns (unused here; prices used).
             opens_val, closes_val: [N] price arrays.
             timestamps_val: [N] DatetimeIndex.
+            session_starts_val: [N] bool array for session boundaries.
             candidates: Threshold values to search.
 
         Returns:
@@ -264,7 +272,7 @@ class Backtester:
                 daily_loss_limit=self.daily_limit,
                 signal_threshold=theta,
             )
-            result = bt.run(y_pred_val.copy(), opens_val, closes_val, timestamps_val)
+            result = bt.run(y_pred_val.copy(), opens_val, closes_val, timestamps_val, session_starts_val)
             if result.sharpe > best_sr:
                 best_sr = result.sharpe
                 best_theta = theta

@@ -108,13 +108,13 @@ class FeaturePipeline:
         self._peer_tickers: List[str] = []
         self._universe_tickers: List[str] = []  # Stores fitted universe
         self._fitted = False
-        
+
         if universe_builder is None and universe_tickers is None:
             raise ValueError(
                 "Must provide either universe_builder or universe_tickers. "
                 "universe_builder is recommended for proper peer selection."
             )
-        
+
         logger.info(f"Initialized feature pipeline for {target_ticker}")
 
     # ------------------------------------------------------------------
@@ -138,28 +138,12 @@ class FeaturePipeline:
             y_train:      np.ndarray of shape (N,), float32 — log returns
             feature_names: List[str] of length F_selected
         """
-        # NEW: Get target-specific universe if universe_builder is provided
-        if self.universe_builder is not None:
-            self._universe_tickers = self.universe_builder.get_universe(
-                self.target_ticker,
-                dfs_train,
-                fit=True,  # Select peers on training data
-            )
-            
-            # Filter dfs to only include universe symbols
-            dfs_train_filtered = {
-                ticker: dfs_train[ticker]
-                for ticker in self._universe_tickers
-                if ticker in dfs_train
-            }
-        else:
-            # Legacy mode: use all provided tickers
-            dfs_train_filtered = dfs_train
-            self._universe_tickers = list(dfs_train.keys())
-        
-        self._validate_inputs(dfs_train_filtered)
 
-        X_full, y, names = self._compute_features(dfs_train_filtered, fit=True)
+        self._universe_tickers = list(dfs_train.keys())
+
+        self._validate_inputs(dfs_train)
+
+        X_full, y, names = self._compute_features(dfs_train, fit=True)
 
         self._feature_names_full = names
 
@@ -198,21 +182,10 @@ class FeaturePipeline:
                 "Pipeline has not been fitted. Call fit_transform() on training "
                 "data before calling transform()."
             )
-        
-        # NEW: Filter to fitted universe
-        if self.universe_builder is not None:
-            dfs_filtered = {
-                ticker: dfs[ticker]
-                for ticker in self._universe_tickers
-                if ticker in dfs
-            }
-        else:
-            # Legacy mode
-            dfs_filtered = dfs
-        
-        self._validate_inputs(dfs_filtered)
 
-        X_full, y, _ = self._compute_features(dfs_filtered, fit=False)
+        self._validate_inputs(dfs)
+
+        X_full, y, _ = self._compute_features(dfs, fit=False)
 
         # transform() uses the full feature name list from fit to locate columns
         X_sel, _ = self.selector.transform(X_full, self._feature_names_full)
@@ -393,21 +366,21 @@ class FeaturePipeline:
         # During fit: peers are selected by correlation; stored in self._peer_tickers
         # During transform: stored peers are used — no re-selection on val/test
         # ----------------------------------------------------------------
-        if fit:
-            cross, peer_tickers = compute_cross_ticker_features(
-                self.target_ticker,
-                dfs,
-                peer_tickers=None,  # will be selected internally
-                return_peer_tickers=True,
-            )
-            self._peer_tickers = peer_tickers
-        else:
-            cross = compute_cross_ticker_features(
-                self.target_ticker,
-                dfs,
-                peer_tickers=self._peer_tickers,  # reuse train selection
-                return_peer_tickers=False,
-            )
+        # if fit:
+        #     cross, peer_tickers = compute_cross_ticker_features(
+        #         self.target_ticker,
+        #         dfs,
+        #         peer_tickers=None,  # will be selected internally
+        #         return_peer_tickers=True,
+        #     )
+        #     self._peer_tickers = peer_tickers
+        # else:
+        cross = compute_cross_ticker_features(
+            self.target_ticker,
+            dfs,
+            peer_tickers=self._peer_tickers,  # reuse train selection
+            return_peer_tickers=False,
+        )
 
         # ----------------------------------------------------------------
         # Assemble all blocks into a single NumPy matrix

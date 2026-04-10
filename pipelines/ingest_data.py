@@ -244,8 +244,22 @@ def main():
 
             df_ticker_raw = alpaca_ingestor.load_bars(raw_path)
             df_ticker = cleaner.clean(df_ticker_raw)
+
+            # Final fields to keep
+            # fields = [
+            #     "open",
+            #     "high",
+            #     "low",
+            #     "close",
+            #     "volume",
+            #     "log_return",
+            #     "session_start",
+            # ]
+            # df_ticker = df_ticker[[c for c in fields if c in df_ticker.columns]]
+
             # df_ticker.index = pd.to_datetime(df_ticker.index)
             logger.info(f"Ticker Index in clean = {df_ticker.index}")
+            logger.info(f"Ticker Columns in clean = {df_ticker.columns}")
 
             # Save individual ticker
             ticker_file = cleaned_path / f"{ticker}.parquet"

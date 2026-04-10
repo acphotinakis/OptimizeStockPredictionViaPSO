@@ -2,44 +2,28 @@
 src/data/splitter.py
 
 Chronological (no-shuffle) train / validation / test split for time-series data.
-Guarantees zero lookahead: scaler parameters are fitted only on the training set.
+Does NOT scale data. Use PipelineScaler separately to avoid leakage.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Tuple
-
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import RobustScaler, MinMaxScaler
+from prettytable import PrettyTable
 
 logger = logging.getLogger(__name__)
 
-# Features whose values are bounded by construction — use MinMaxScaler
-BOUNDED_FEATURES = {
-    "rsi_14",
-    "rsi_30",
-    "stoch_k",
-    "stoch_d",
-    "williams_r",
-    "bb_pct_b",
-    "mfi_14",
-    "mfi_30",
-    "tod_sin",
-    "tod_cos",
-    "dow_sin",
-    "dow_cos",
-}
-
 
 class DataSplitter:
-    """Chronological split + per-feature normalization.
+    """Chronological split by percentage.
+    
+    Does NOT scale data. Use PipelineScaler separately to avoid leakage.
 
     Args:
-        train_end: Last date of the training period (inclusive), ISO string.
-        val_end: Last date of the validation period (inclusive), ISO string.
-        bounded_features: Feature names that should use MinMaxScaler [-1, 1].
+        train_pct: Fraction of data for training (default: 0.6).
+        val_pct: Fraction of data for validation (default: 0.2).
+        test_pct: Fraction of data for testing (default: 0.2).
     """
 
     def __init__(
@@ -47,7 +31,6 @@ class DataSplitter:
         train_pct: float = 0.6,
         val_pct: float = 0.2,
         test_pct: float = 0.2,
-        bounded_features: set | None = None,
     ) -> None:
         assert (
             abs(train_pct + val_pct + test_pct - 1.0) < 1e-6
@@ -55,9 +38,6 @@ class DataSplitter:
         self.train_pct = train_pct
         self.val_pct = val_pct
         self.test_pct = test_pct
-        self.bounded_features = bounded_features or BOUNDED_FEATURES
-        self._scalers: dict = {}
-        self._feature_names: list = []
 
     def split(
         self, df: pd.DataFrame
@@ -79,89 +59,46 @@ class DataSplitter:
         )
         return df_train, df_val, df_test
 
+    def inspect_split(self, name: str, dfs: dict, n_head: int = 3, n_tail: int = 3):
+        """
+        Prints:
+        - number of tickers
+        - per-ticker shape
+        - columns
+        - head (first 3 rows)
+        - tail (last 3 rows)
+        """
+        header = f"\n{'=' * 80}\n{name} | tickers={len(dfs)}\n{'=' * 80}"
+        (logger.info if logger else print)(header)
 
-# """
-# src/data/splitter.py
+        for ticker, df in dfs.items():
+            msg = f"\n[{ticker}] shape={df.shape}"
+            (logger.info if logger else print)(msg)
 
-# Chronological (no-shuffle) train / validation / test split for time-series data.
-# Guarantees zero lookahead: scaler parameters are fitted only on the training set.
-# """
+            # columns
+            cols = list(df.columns)
+            (logger.info if logger else print)(f"Columns ({len(cols)}): {cols}")
 
-# from __future__ import annotations
+            # head
+            head = df.head(n_head)
+            tail = df.tail(n_tail)
 
-# import logging
-# from typing import Tuple
+            head_table = PrettyTable()
+            head_table.title = f"{ticker} | FIRST {n_head} ROWS"
+            head_table.field_names = ["index"] + cols
 
-# import numpy as np
-# import pandas as pd
-# from sklearn.preprocessing import RobustScaler, MinMaxScaler
+            for idx, row in head.iterrows():
+                head_table.add_row([idx] + list(row.values))
 
-# logger = logging.getLogger(__name__)
+            tail_table = PrettyTable()
+            tail_table.title = f"{ticker} | LAST {n_tail} ROWS"
+            tail_table.field_names = ["index"] + cols
 
-# # Features whose values are bounded by construction — use MinMaxScaler
-# BOUNDED_FEATURES = {
-#     "rsi_14",
-#     "rsi_30",
-#     "stoch_k",
-#     "stoch_d",
-#     "williams_r",
-#     "bb_pct_b",
-#     "mfi_14",
-#     "mfi_30",
-#     "tod_sin",
-#     "tod_cos",
-#     "dow_sin",
-#     "dow_cos",
-# }
+            for idx, row in tail.iterrows():
+                tail_table.add_row([idx] + list(row.values))
 
-
-# class DataSplitter:
-#     """Chronological split + per-feature normalization.
-
-#     Args:
-#         train_end: Last date of the training period (inclusive), ISO string.
-#         val_end: Last date of the validation period (inclusive), ISO string.
-#         bounded_features: Feature names that should use MinMaxScaler [-1, 1].
-#     """
-
-#     def __init__(
-#         self,
-#         train_end: str = "2022-01-03",
-#         val_end: str = "2023-01-03",
-#         bounded_features: set | None = None,
-#     ) -> None:
-#         self.train_end = train_end
-#         self.val_end = val_end
-#         self.bounded_features = bounded_features or BOUNDED_FEATURES
-#         self._scalers: dict = {}
-#         self._feature_names: list = []
-
-#     # ------------------------------------------------------------------
-#     # Split
-#     # ------------------------------------------------------------------
-
-#     def split(
-#         self, df: pd.DataFrame
-#     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-#         """Split DataFrame chronologically into (train, val, test).
-
-#         Args:
-#             df: Aligned feature DataFrame with DatetimeIndex.
-
-#         Returns:
-#             Tuple of (df_train, df_val, df_test).
-#         """
-#         df_train = df.loc[: self.train_end]
-#         df_val = df.loc[self.train_end : self.val_end].iloc[1:]
-#         df_test = df.loc[self.val_end :].iloc[1:]
-
-#         logger.info(
-#             "Split sizes — Train: %d  Val: %d  Test: %d",
-#             len(df_train),
-#             len(df_val),
-#             len(df_test),
-#         )
-#         return df_train, df_val, df_test
+            output = f"{head_table}\n\n{tail_table}\n"
+            (logger.info if logger else print)(output)
 
 
 # ------------------------------------------------------------------

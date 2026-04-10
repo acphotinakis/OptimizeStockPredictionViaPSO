@@ -30,9 +30,11 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from plots.plots_lstm import plot_lstm_pnl
+from src.features.scalar import PipelineScaler
 from src.evaluation.metrics import all_statistical_metrics
 from src.models.baselines import VanillaLSTM
 from src.data.splitter import build_windows
@@ -246,9 +248,9 @@ def run_train(args, features_dir, results_dir, ticker, tag):
     logger.info(f"target_scaler.data_max_ shape: {np.shape(target_scaler.data_max_)}")
     logger.info(f"target_scaler.scale_ shape: {np.shape(target_scaler.scale_)}")
 
-    import sys
+    # import sys
 
-    sys.exit(0)
+    # sys.exit(0)
 
     log_memory_usage("After loading data")
 
@@ -542,6 +544,11 @@ def run_test(args, features_dir, results_dir, ticker, tag):
 
     # Predictions
     y_pred_test = model.predict(X_test_windows)
+
+    scaler = PipelineScaler.load(ticker_dir / "scaler.pkl")
+    scaler.inverse_transform_target(y_pred_test)
+    scaler.inverse_transform_target(y_test_windows)
+
     stat_metrics = all_statistical_metrics(y_test_windows, y_pred_test)
     _print_info_metrics("Test", stat_metrics)
 

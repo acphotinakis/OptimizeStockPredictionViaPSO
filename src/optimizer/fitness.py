@@ -17,6 +17,7 @@ from typing import Optional
 import numpy as np
 
 from src.evaluation import metrics
+from src.evaluation.metrics import generate_signals
 
 # Default weights (must sum to 1)
 DEFAULT_WEIGHTS = dict(rmse=0.4, sharpe=0.4, mdd=0.2)
@@ -27,16 +28,6 @@ ANNUALISE = np.sqrt(252 * 390)
 # Signal threshold (1 bp)
 SIGNAL_THRESHOLD = 1e-4
 TRANSACTION_COST = 0.001
-
-
-def generate_signals(
-    y_pred: np.ndarray, threshold: float = SIGNAL_THRESHOLD
-) -> np.ndarray:
-    """Convert predicted log returns to ternary trade signals {-1, 0, +1}."""
-    sig = np.zeros(len(y_pred), dtype=np.float32)
-    sig[y_pred > threshold] = 1.0
-    sig[y_pred < -threshold] = -1.0
-    return sig
 
 
 def sharpe_from_signals(

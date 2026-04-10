@@ -309,20 +309,70 @@ class DataCleaner:
 
         return df
 
+    # @staticmethod
+    # def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
+    #     """Add log_return, session_minute, session_start flag."""
+    #     df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
+
+    #     et_index = df.index.tz_convert("America/New_York")
+    #     session_open_time = pd.Timestamp(SESSION_START).time()
+    #     session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
+
+    #     # Convert to Series to allow clip
+    #     session_minutes = pd.Series(
+    #         et_index.hour * 60 + et_index.minute - session_open_minutes, index=df.index
+    #     )
+    #     df["session_minute"] = session_minutes.clip(lower=0)
+
+    #     df["session_start"] = (df["session_minute"] == 0).astype(bool)
+    #     return df
+
     @staticmethod
     def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
         """Add log_return, session_minute, session_start flag."""
-        df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
 
+        n = len(df)
+
+        # --- log return ---
+        df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
+        n_nan_lr = df["log_return"].isna().sum()
+
+        # --- timezone conversion ---
         et_index = df.index.tz_convert("America/New_York")
+
         session_open_time = pd.Timestamp(SESSION_START).time()
         session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
 
-        # Convert to Series to allow clip
+        logger.info(f"Session Open Time: {session_open_time}")
+        logger.info(f"Session Open Minutes: {session_open_minutes}")
+
+        # --- session minute ---
         session_minutes = pd.Series(
-            et_index.hour * 60 + et_index.minute - session_open_minutes, index=df.index
+            et_index.hour * 60 + et_index.minute - session_open_minutes,
+            index=df.index,
         )
+
+        logger.info(f"Session Minutes: {session_minutes}")
+
         df["session_minute"] = session_minutes.clip(lower=0)
 
-        df["session_start"] = (df["session_minute"] == 0).astype(bool)
+        # --- session start flag ---
+        df["session_start"] = df["session_minute"] == 0
+
+        # --- diagnostics ---
+        n_session_starts = int(df["session_start"].sum())
+        n_zero_returns = int((df["log_return"] == 0).sum())
+
+        logger.info(
+            "Derived features added | rows=%d | log_return NaNs=%d | "
+            "session_starts=%d | zero_log_returns=%d",
+            n,
+            n_nan_lr,
+            n_session_starts,
+            n_zero_returns,
+        )
+        import sys
+
+        sys.exit(0)
+
         return df

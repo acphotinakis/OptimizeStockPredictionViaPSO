@@ -87,7 +87,10 @@ class TickerAligner:
 
         aligned_parts = []
         for ticker, df in dfs.items():
-            # Ensure index is DatetimeIndex in UTC
+
+            df = df.copy()
+
+            # normalize index
             if not isinstance(df.index, pd.DatetimeIndex):
                 df.index = pd.to_datetime(df.index, utc=True)
             elif df.index.tz is None:
@@ -96,12 +99,20 @@ class TickerAligner:
                 df.index = df.index.tz_convert("UTC")
 
             available = [f for f in fields if f in df.columns]
-            df_sub = (
-                df[available].reindex(master_index).ffill(limit=self.max_ffill_bars)
-            )
-            # Optionally convert to float32 to save memory
+
+            df_sub = df[available].reindex(master_index)
+
+            # Session-aware forward-filling: only fill within the same trading session
+            if "session_start" in df_sub.columns:
+                session_ids = df_sub["session_start"].fillna(False).astype(bool).cumsum()
+                df_sub = df_sub.groupby(session_ids, group_keys=False).apply(
+                    lambda g: g.ffill(limit=self.max_ffill_bars)
+                )
+            else:
+                df_sub = df_sub.ffill(limit=self.max_ffill_bars)
+
             df_sub = df_sub.astype(np.float32, errors="ignore")
-            # df_sub.columns = pd.MultiIndex.from_product([[ticker], df_sub.columns])
+
             df_sub.columns = pd.MultiIndex.from_product(
                 [[ticker], df_sub.columns], names=["ticker", "field"]
             )

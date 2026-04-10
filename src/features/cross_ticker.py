@@ -39,6 +39,9 @@ def compute_cross_ticker_features(
     if target_ticker not in dfs:
         raise KeyError(f"Target ticker {target_ticker} not in dfs.")
 
+    if peer_tickers is None:
+        raise ValueError("Peers must be passed")
+
     df_target = dfs[target_ticker]
     out = pd.DataFrame(index=df_target.index)
 
@@ -134,31 +137,6 @@ def compute_cross_ticker_features(
     out["mkt_breadth"] = (all_returns > 0).mean(axis=1)
     out["universe_mean_ret"] = all_returns.mean(axis=1)
 
-    # ---- Peer correlations (top-3 most correlated) -------------------------
-    # WARNING: peer_tickers should be pre-selected on TRAINING data only to avoid look-ahead bias
-    # If None is passed here, we compute on the full series which includes validation/test data
-    computed_peer_tickers = None
-    if peer_tickers is None:
-        logger.info(
-            f"peer_tickers is None for {target_ticker}. Computing correlations on FULL series "
-            "which may include validation/test data. This creates LOOK-AHEAD BIAS. "
-            "Peers should be selected on training data only and passed explicitly."
-        )
-        others = [t for t in dfs if t != target_ticker]
-        if len(others) > 0:
-            corrs = {}
-            for t in others:
-                r_other = dfs[t]["log_return"].reindex(df_target.index).fillna(0.0)
-                corrs[t] = float(r_target.corr(r_other))
-            peer_tickers = sorted(corrs, key=lambda x: abs(corrs[x]), reverse=True)[:3]
-            computed_peer_tickers = peer_tickers  # Store for return
-            logger.info(
-                f"Auto-selected peers for {target_ticker} on FULL data: {peer_tickers}"
-            )
-        else:
-            peer_tickers = []
-            computed_peer_tickers = []
-
     for rank, peer in enumerate(peer_tickers[:3], 1):
         if peer in dfs:
             r_peer = dfs[peer]["log_return"].reindex(df_target.index).fillna(0.0)
@@ -172,8 +150,4 @@ def compute_cross_ticker_features(
 
     result = out.fillna(0.0)
 
-    if return_peer_tickers:
-        return result, (
-            computed_peer_tickers if computed_peer_tickers is not None else peer_tickers
-        )
     return result
