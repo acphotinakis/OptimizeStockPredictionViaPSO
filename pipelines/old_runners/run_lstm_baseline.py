@@ -65,17 +65,6 @@ def _load_model(results_dir: Path, ticker: str, seed: int) -> tuple[VanillaLSTM,
     return model_path, params
 
 
-def _print_metrics(label: str, m: dict) -> None:
-    logger.info(
-        "%s — RMSE=%.6f  DA=%.4f  F1=%.4f  R²=%.4f",
-        label,
-        m["rmse"],
-        m["directional_accuracy"],
-        m["f1_ternary"],
-        m["r2"],
-    )
-
-
 def _resolve_hyperparams(args: argparse.Namespace, cfg) -> dict:
     """Merge config defaults with CLI overrides (CLI wins)."""
     base = VanillaLSTM.DEFAULT_PARAMS.copy()
@@ -111,29 +100,34 @@ def run_train(
     args: argparse.Namespace, cfg, ticker_dir: Path, results_dir: Path, tag: str
 ) -> None:
     logger.info("[TRAIN] Loading data...")
-    X_train_flat, y_train = _load_split(ticker_dir, "train")
+    X_train, y_train = _load_split(ticker_dir, "train")
     X_val_flat, y_val = _load_split(ticker_dir, "val")
+    print(f"Feature Mean: {X_train.mean(axis=0)}")  # Is it near 0?
+    print(f"Feature Max: {X_train.max(axis=0)}")  # Is it near 1 or 3?
+    print(f"Target Range: [{y_train.min()}, {y_train.max()}]")
 
     hyperparams = _resolve_hyperparams(args, cfg)
     logger.info("Hyperparameters: %s", hyperparams)
 
-    X_train, y_train_w = make_windows(X_train_flat, y_train, hyperparams["lookback"])
+    X_train, y_train_w = make_windows(X_train, y_train, hyperparams["lookback"])
     X_val, y_val_w = make_windows(X_val_flat, y_val, hyperparams["lookback"])
     logger.info("X_train=%s  X_val=%s", X_train.shape, X_val.shape)
 
-    model = VanillaLSTM(
-        input_size=X_train_flat.shape[1], device=args.device, **hyperparams
-    )
+    model = VanillaLSTM(input_size=X_train.shape[2], device=args.device, **hyperparams)
 
     t0 = time.time()
+
+    # import sys
+
+    # sys.exit(0)
     history = model.fit(X_train, y_train_w, X_val, y_val_w)
     elapsed = time.time() - t0
     logger.info("Training complete in %.1fs", elapsed)
 
-    torch.cuda.empty_cache()
+    scaler = PipelineScaler.load(ticker_dir / "scaler.pkl")
+
     y_pred_val = model.predict(X_val)
     val_metrics = all_statistical_metrics(y_val_w, y_pred_val, label=f"LSTM Training")
-    _print_metrics("Validation", val_metrics)
 
     # Save weights
     model_path = results_dir / f"lstm_baseline_model_{tag}.pth"
@@ -260,7 +254,6 @@ def run_test(
     # scaler.inverse_transform_target(y_test_w)
 
     stat_metrics = all_statistical_metrics(y_test_w, y_pred, label=f"LSTM Testing")
-    _print_metrics("Test", stat_metrics)
 
     # Threshold sweep: find best Sharpe
     returns = y_test_w.flatten()

@@ -127,6 +127,11 @@ class XGBoostBaseline:
 # ======================================================================
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class VanillaLSTM:
     """LSTM with manually chosen hyperparameters (no PSO optimization).
 
@@ -165,6 +170,25 @@ class VanillaLSTM:
     ) -> None:
         params = {**self.DEFAULT_PARAMS, **overrides}
         self.lookback = params["lookback"]
+
+        # ------------------------------------------------------------------
+        # Log all resolved hyperparameters
+        # ------------------------------------------------------------------
+        logger.info(
+            "[LSTM INIT] input_size=%d | device=%s | num_layers=%d | hidden_units=%d | "
+            "dropout=%.3f | learning_rate=%.6f | lookback=%d | max_epochs=%d | "
+            "patience=%d | batch_size=%d",
+            input_size,
+            device,
+            params["num_layers"],
+            params["hidden_units"],
+            params["dropout"],
+            params["learning_rate"],
+            params["lookback"],
+            params["max_epochs"],
+            params["patience"],
+            params["batch_size"],
+        )
 
         model = LSTMModel(
             input_size=input_size,

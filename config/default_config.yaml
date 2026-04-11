@@ -43,12 +43,13 @@ lstm:
 
 lstm_baseline:
   # Fixed hyperparameters (no PSO optimization)
-  input_size: 10
+  # input_size: 10
   num_layers: 2
   hidden_units: 128
   dropout: 0.2
   learning_rate: 0.001
   lookback: 30
+  # lookback: 60
   max_epochs: 100
   patience: 10
   batch_size: 256

@@ -19,6 +19,8 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+from src.evaluation.metrics import all_statistical_metrics
+
 
 class LSTMModel(nn.Module):
     """Stacked LSTM with many-to-one output.
@@ -144,7 +146,8 @@ class LSTMTrainer:
         self.patience = patience
         self.batch_size = batch_size
         self.grad_clip = grad_clip
-        self.use_amp = use_amp and torch.cuda.is_available()
+        # self.use_amp = use_amp and torch.cuda.is_available()
+        self.use_amp = False
         self.accumulation_steps = accumulation_steps
         self.seed = seed
 
@@ -257,17 +260,54 @@ class LSTMTrainer:
             avg_train_loss = epoch_loss / len(train_ds)
 
             # ---- Validation ----
+            # ---- Validation ----
             self.model.eval()
             val_loss = 0.0
+
+            y_val_true = []
+            y_val_pred = []
+
             with torch.no_grad():
                 for x_val_b, y_val_b in val_dl:
                     x_val_b, y_val_b = x_val_b.to(self.device), y_val_b.to(self.device)
-                    val_pred = self.model(x_val_b)
-                    val_loss += self.criterion(val_pred, y_val_b).item() * len(x_val_b)
+
+                    preds = self.model(x_val_b)
+
+                    # Loss accumulation
+                    val_loss += self.criterion(preds, y_val_b).item() * len(x_val_b)
+
+                    # Collect predictions for metrics
+                    y_val_pred.append(preds.detach().cpu().numpy().flatten())
+                    y_val_true.append(y_val_b.detach().cpu().numpy().flatten())
+
             val_loss /= len(val_ds)
+
+            # Concatenate full validation predictions
+            y_val_true = np.concatenate(y_val_true)
+            y_val_pred = np.concatenate(y_val_pred)
+
+            # Compute metrics
+            metrics = all_statistical_metrics(
+                y_val_true,
+                y_val_pred,
+                label=f"LSTM Epoch {epoch+1}",
+            )
 
             self.history["train_loss"].append(avg_train_loss)
             self.history["val_loss"].append(val_loss)
+
+            # Log everything in one line
+            logger.info(
+                "[EPOCH %d] train_loss=%.6f | val_loss=%.6f | RMSE=%.6f | MAE=%.6f | DA=%.4f | F1=%.4f | R2=%.4f",
+                epoch + 1,
+                avg_train_loss,
+                val_loss,
+                metrics["rmse"],
+                metrics["mae"],
+                metrics["directional_accuracy"],
+                metrics["f1_ternary"],
+                metrics["r2"],
+            )
 
             # ---- Early stopping ----
             if val_loss < best_val_loss - 1e-7:

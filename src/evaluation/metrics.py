@@ -265,7 +265,7 @@ def all_statistical_metrics(
     """Compute statistical metrics and optionally log them."""
     y_true = y_true.ravel()
     y_pred = y_pred.ravel()
-
+    logger.info(f"y_true shape {y_true.shape} || y_pred shape {y_pred.shape}")
     result = {
         "rmse": rmse(y_true, y_pred),
         "mae": mae(y_true, y_pred),
