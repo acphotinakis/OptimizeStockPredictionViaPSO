@@ -12,6 +12,8 @@ from .xgboost_plots import (
     create_summary_dashboard,
 )
 
+from .lstm_history_plot import plot_training_history
+
 __all__ = [
     "load_xgboost_results",
     "plot_training_curves",
@@ -20,4 +22,5 @@ __all__ = [
     "plot_hyperparameters",
     "plot_all_results",
     "create_summary_dashboard",
+    "plot_training_history",
 ]

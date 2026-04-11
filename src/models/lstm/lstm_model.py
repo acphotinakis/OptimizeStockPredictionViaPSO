@@ -146,6 +146,7 @@ class LSTMTrainer:
         self.patience = patience
         self.batch_size = batch_size
         self.grad_clip = grad_clip
+        # LINE BELOW CAUSED MODEL NOT TO LEARN (IDK WHY JUST IGNORE IT)
         # self.use_amp = use_amp and torch.cuda.is_available()
         self.use_amp = False
         self.accumulation_steps = accumulation_steps
@@ -196,7 +197,20 @@ class LSTMTrainer:
 
         best_val_loss = float("inf")
         patience_counter = 0
-        self.history = {"train_loss": [], "val_loss": []}
+        # self.history = {"train_loss": [], "val_loss": []}
+        self.history = {
+            k: []
+            for k in [
+                "train_loss",
+                "val_loss",
+                "rmse",
+                "mae",
+                "mape",
+                "r2",
+                "directional_accuracy",
+                "f1_ternary",
+            ]
+        }
 
         for epoch in tqdm(range(self.max_epochs), desc="Epochs", unit="epoch"):
             self.model.train()
@@ -295,6 +309,12 @@ class LSTMTrainer:
 
             self.history["train_loss"].append(avg_train_loss)
             self.history["val_loss"].append(val_loss)
+            self.history["rmse"].append(metrics["rmse"])
+            self.history["mae"].append(metrics["mae"])
+            self.history["mape"].append(metrics["mape"])
+            self.history["r2"].append(metrics["r2"])
+            self.history["directional_accuracy"].append(metrics["directional_accuracy"])
+            self.history["f1_ternary"].append(metrics["f1_ternary"])
 
             # Log everything in one line
             logger.info(
@@ -339,11 +359,3 @@ class LSTMTrainer:
                 pred_batch = self.model(X_batch).cpu().numpy()
                 preds.append(pred_batch)
         return np.vstack(preds)
-
-    # def predict(self, X: np.ndarray) -> np.ndarray:
-    #     """Predict on a numpy array."""
-    #     self.model.eval()
-    #     with torch.no_grad():
-    #         X_t = torch.FloatTensor(X).to(self.device)
-    #         pred = self.model(X_t).cpu().numpy()
-    #     return pred

@@ -29,6 +29,7 @@ from pathlib import Path
 
 import matplotlib
 
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,6 +41,7 @@ import torch
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
+from plots.lstm_history_plot import plot_training_history
 from src.data.splitter import build_windows
 from src.evaluation.metrics import all_statistical_metrics
 from src.models.baselines import VanillaLSTM
@@ -170,6 +172,12 @@ def train_lstm(
     history = model.fit(X_train, y_train_w, X_val, y_val_w)
     elapsed = time.time() - t0
     logger.info("Training complete in %.1fs", elapsed)
+
+    plot_training_history(
+        history=history,
+        output_path="outputs/lstm_training_history.png",
+        title="LSTM Training Metrics",
+    )
 
     y_pred_val = model.predict(X_val)
     val_metrics = all_statistical_metrics(y_val_w, y_pred_val)
