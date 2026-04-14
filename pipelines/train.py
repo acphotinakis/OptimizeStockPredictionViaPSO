@@ -86,14 +86,22 @@ def _lstm_hyperparams(args: argparse.Namespace, cfg) -> dict:
 def train_lstm(ctx: RuntimeContext) -> None:
     logger.info("=== LSTM TRAINING  ticker=%s ===", ctx.ticker)
 
-    X_train, y_train = ctx.tracker.load_split(Phase.TRAIN)
-    X_val, y_val = ctx.tracker.load_split(Phase.VAL)
+    X_train_split, y_train_split = ctx.tracker.load_split(Phase.TRAIN)
+    X_val_split, y_val_split = ctx.tracker.load_split(Phase.VAL)
 
     hp = _lstm_hyperparams(ctx.args, ctx.cfg)
     logger.info("Hyperparameters: %s", hp)
 
-    X_train, y_train_w = ctx.tracker._make_windows(X_train, y_train, hp["lookback"])
-    X_val, y_val_w = ctx.tracker._make_windows(X_val, y_val, hp["lookback"])
+    session_starts = np.zeros(len(X_train_split), dtype=bool)
+
+    lookback = ctx.cfg.lstm_baseline.lookback
+
+    X_train, y_train_w = build_windows(
+        X_train_split, y_train_split, session_starts[: len(X_train_split)], lookback
+    )
+    X_val, y_val_w = build_windows(
+        X_val_split, y_val_split, session_starts[: len(X_val_split)], lookback
+    )
     logger.info("Windowed — [X] train=%s  val=%s", X_train.shape, X_val.shape)
     logger.info("Windowed — [y] train=%s  val=%s", y_train_w.shape, y_val_w.shape)
 
@@ -215,19 +223,26 @@ def _xgb_train_tune(args, X_train, y_train, X_val, y_val) -> tuple[XGBoostModel,
 def train_xgboost(ctx: RuntimeContext) -> None:
     logger.info("=== XGBOOST TRAINING ticker=%s ===", ctx.ticker)
 
-    X_train, y_train = ctx.tracker.load_split(Phase.TRAIN)
-    X_val, y_val = ctx.tracker.load_split(Phase.VAL)
+    X_train_split, y_train_split = ctx.tracker.load_split(Phase.TRAIN)
+    X_val_split, y_val_split = ctx.tracker.load_split(Phase.VAL)
 
     hp = _xgb_hyperparams_from_cfg(ctx.cfg)
     logger.info("Hyperparameters: %s", hp)
 
     lookback = hp["lookback"]
 
-    X_train, y_train_w = ctx.tracker._make_windows(X_train, y_train, lookback)
-    X_val, y_val_w = ctx.tracker._make_windows(X_val, y_val, lookback)
+    session_starts = np.zeros(len(X_train_split), dtype=bool)
 
-    logger.info("Windowed — [X] train=%s val=%s", X_train.shape, X_val.shape)
-    logger.info("Windowed — [y] train=%s val=%s", y_train_w.shape, y_val_w.shape)
+    lookback = ctx.cfg.lstm_baseline.lookback
+
+    X_train, y_train_w = build_windows(
+        X_train_split, y_train_split, session_starts[: len(X_train_split)], lookback
+    )
+    X_val, y_val_w = build_windows(
+        X_val_split, y_val_split, session_starts[: len(X_val_split)], lookback
+    )
+    logger.info("Windowed — [X] train=%s  val=%s", X_train.shape, X_val.shape)
+    logger.info("Windowed — [y] train=%s  val=%s", y_train_w.shape, y_val_w.shape)
 
     t0 = time.time()
 

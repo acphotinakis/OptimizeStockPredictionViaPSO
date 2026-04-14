@@ -13,10 +13,8 @@ import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
-from src.data.splitter import build_windows
 from .usage_enums import ModelType, Phase, RunMode, ArtifactType
 
-import sys
 
 # =========================================================
 # EXPERIMENT TRACKER
@@ -49,13 +47,11 @@ class ExperimentTracker:
         # -----------------------------------------------------
         if self.mode == RunMode.CREATE:
             self.run_id = run_id or str(uuid.uuid4())
-
         elif self.mode == RunMode.ATTACH:
             if run_id is None:
                 raise ValueError("RunMode.ATTACH requires run_id")
             self.run_id = run_id
             self._verify_run_exists()
-
         else:
             raise ValueError(f"Invalid RunMode: {self.mode}")
 
@@ -227,26 +223,6 @@ class ExperimentTracker:
         )
 
         return X, y
-
-    def _make_windows(self, X_flat: np.ndarray, y: np.ndarray, lookback: int):
-        """Apply sliding-window construction with no session boundaries."""
-        session_starts = np.zeros(len(X_flat), dtype=bool)
-        return build_windows(X_flat, y, session_starts, lookback)
-
-    # =========================================================
-    # LOGGING
-    # =========================================================
-
-    def append_log(self, message: str, filename="train.log"):
-        path = self.log_path(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.utcnow().isoformat()
-        with open(path, "a") as f:
-            f.write(f"[{timestamp}] {message}\n")
-
-    def log_metrics(self, phase: Phase, metrics: dict):
-        self.save_metrics(phase, metrics)
 
     # =========================================================
     # HELPERS

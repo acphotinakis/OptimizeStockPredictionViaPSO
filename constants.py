@@ -1,5 +1,8 @@
 # Constants
 
+from pathlib import Path
+
+
 FEATURES_DIR = "data/features/"
 RESULTS_DIR = "results/"
 
@@ -17,3 +20,6 @@ OUTLIER_ROLLING_WINDOW = 60  # Rolling window (bars) for z-score computation
 # Validation Constants
 DEFAULT_WFV_FOLD_SIZE = 252 * 390  # 1 month of 1-minute bars
 DEFAULT_WFV_FOLDS = 6
+
+
+DEFAULT_CONFIG_PATH = Path("config/default_config.yaml")

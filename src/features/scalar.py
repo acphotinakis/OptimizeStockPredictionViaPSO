@@ -34,6 +34,7 @@ class PipelineScaler:
             c for c in train_df.columns if c != target_col
         ]
         self.feature_scaler.fit(train_df[self.feature_cols])
+        # CRITICAL FIX: Removed target scaler - don't scale targets
         return self
 
     def transform(
@@ -41,7 +42,7 @@ class PipelineScaler:
     ) -> pd.DataFrame:
         out = df.copy()
         out[self.feature_cols] = self.feature_scaler.transform(df[self.feature_cols])
-        # Target column is passed through unchanged
+        # CRITICAL FIX: Don't transform target - pass through unchanged
         return out
 
     def inverse_transform_target(self, values: np.ndarray) -> np.ndarray:

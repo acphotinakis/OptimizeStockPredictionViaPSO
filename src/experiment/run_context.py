@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 
-from src.utils.config_loader import load_config
+from src.utils.config_loader import Config, load_config
 from src.utils.seed import set_all_seeds
 from .usage_enums import ModelType, RunMode, Phase
 from .experiment_tracker import ExperimentTracker
@@ -33,7 +33,7 @@ class RuntimeContext:
     run_id: str | None = None
 
     # populated in __post_init__
-    cfg: object = None
+    cfg: Config = None
     features_path: Path = None
     results_path: Path = None
     tracker: ExperimentTracker = None

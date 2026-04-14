@@ -100,66 +100,96 @@ class XGBoostModel:
         n_jobs: Number of parallel threads (-1 = all available).
     """
 
-    def _setup_gpu_memory(self) -> None:
-        """Configure GPU memory management if using GPU training."""
+    def __init__(
+        self,
+        lookback: int = _DEFAULT_LOOKBACK,
+        importance_type: str = "gain",
+        early_stopping_rounds: int = _DEFAULT_EARLY_STOPPING_ROUNDS,
+        **xgb_params,
+    ) -> None:
+        """
+        Initialize XGBoostModel with clean parameter separation.
+
+        Args:
+            lookback: Number of timesteps T to use.
+            importance_type: Feature importance metric ('gain', 'weight', 'cover').
+            early_stopping_rounds: Patience for early stopping.
+            **xgb_params: XGBoost booster parameters (merged with defaults).
+        """
+        self.lookback = lookback
+        self.importance_type = importance_type
+        self.early_stopping_rounds = early_stopping_rounds
+
+        # Merge defaults with user-provided params (user takes precedence)
+        self._xgb_params = {**_DEFAULT_PARAMS, **xgb_params}
+
+        # Internal state
+        self._model: Optional[xgb.XGBRegressor] = None
+        self._best_iteration: int = 0
+        self._feature_names: List[str] = []
+        self.history: Dict[str, List[float]] = {"train_rmse": [], "val_rmse": []}
+
+        self._setup_device()
+
+    @classmethod
+    def from_config(cls, cfg: Optional[Config] = None, **overrides) -> "XGBoostModel":
+        """
+        Factory method to construct from Config object.
+
+        Args:
+            cfg: Configuration object with optional 'xgboost' section.
+            **overrides: Additional parameters to override config values.
+
+        Returns:
+            Configured XGBoostModel instance.
+        """
+        params: Dict[str, Any] = {}
+
+        if cfg is not None:
+            params.update(getattr(cfg, "xgboost", {}))
+
+        params.update(overrides)
+
+        # Extract non-xgb parameters
+        lookback = params.pop("lookback", _DEFAULT_LOOKBACK)
+        importance_type = params.pop("importance_type", "gain")
+        early_stopping = params.pop(
+            "early_stopping_rounds", _DEFAULT_EARLY_STOPPING_ROUNDS
+        )
+
+        return cls(
+            lookback=lookback,
+            importance_type=importance_type,
+            early_stopping_rounds=early_stopping,
+            **params,
+        )
+
+    def _setup_device(self) -> None:
+        """Configure GPU/CPU device settings."""
         if self._xgb_params.get("tree_method") != "gpu_hist":
             return
 
         try:
             import cupy as cp
 
-            logger.info(cp.__version__)
-            logger.info(cp.cuda.runtime.getDeviceCount())
-            logger.info(cp.cuda.runtime.runtimeGetVersion())
-
-            # Set memory pool
             pool = cp.cuda.MemoryPool()
             cp.cuda.set_allocator(pool.malloc)
             logger.info("GPU memory pool configured")
         except ImportError:
-            logger.info("cupy not available, falling back to CPU")
+            logger.info("CuPy unavailable, falling back to CPU")
             self._xgb_params["tree_method"] = "hist"
         except Exception as e:
-            logger.info(f"GPU setup failed: {e}, falling back to CPU")
+            logger.info(f"GPU setup failed: {e}, using CPU")
             self._xgb_params["tree_method"] = "hist"
 
-    def __init__(
-        self,
-        cfg: Optional[Config] = None,
-        lookback: int = _DEFAULT_LOOKBACK,
-        early_stopping_rounds: int = _DEFAULT_EARLY_STOPPING_ROUNDS,
-        importance_type: str = "gain",
-        **kwargs,
-    ) -> None:
-        # Start with default YAML-based params
-        self._xgb_params: Dict[str, Any] = _DEFAULT_PARAMS.copy()
-
-        # Override from user config if provided
-        if cfg is not None:
-            self._xgb_params.update(getattr(cfg, "xgboost", {}))
-
-        self.cfg = cfg
-        # Override with explicit kwargs
-        self._xgb_params.update(kwargs)
-
-        self.lookback = lookback
-        self.early_stopping_rounds = early_stopping_rounds
-        self.importance_type = importance_type
-
-        # Store constructor kwargs for get_params()
-        self._init_kwargs: Dict[str, Any] = {
-            "lookback": lookback,
-            "early_stopping_rounds": early_stopping_rounds,
-            "importance_type": importance_type,
+    def get_params(self) -> Dict[str, Any]:
+        """Return full parameter dict for serialization."""
+        return {
+            "lookback": self.lookback,
+            "importance_type": self.importance_type,
+            "early_stopping_rounds": self.early_stopping_rounds,
             **self._xgb_params,
         }
-
-        self._model: Optional[xgb.XGBRegressor] = None
-        self._best_iteration: int = 0
-        self._feature_names: List[str] = []
-        self.history: Dict[str, List[float]] = {"train_rmse": [], "val_rmse": []}
-
-        self._setup_gpu_memory()
 
     # ------------------------------------------------------------------
     # Core interface — mirrors LSTMTrainer
@@ -248,88 +278,6 @@ class XGBoostModel:
         if self._model is None:
             raise RuntimeError("Call fit() before predict().")
         return self._model.predict(self._flatten(X)).astype(np.float32)
-
-    def get_params(self) -> Dict[str, Any]:
-        """Return the full constructor parameter dict (mirrors LSTM interface)."""
-        return dict(self._init_kwargs)
-
-    # ------------------------------------------------------------------
-    # Feature importance
-    # ------------------------------------------------------------------
-
-    def get_feature_importances(
-        self,
-        importance_type: Optional[str] = None,
-    ) -> np.ndarray:
-        """Return per-input-feature importance scores.
-
-        The scores are computed over the *flattened* feature vector
-        (length = lookback × F).  If you want per-original-feature
-        importances, aggregate across the lookback axis with np.mean.
-
-        Args:
-            importance_type: One of 'gain', 'weight', 'cover',
-                'total_gain', 'total_cover'.  Defaults to the value
-                passed at construction time.
-
-        Returns:
-            Float32 array of shape [lookback × F].
-        """
-        if self._model is None:
-            raise RuntimeError("Call fit() before get_feature_importances().")
-        itype = importance_type or self.importance_type
-        booster = self._model.get_booster()
-        scores_dict = booster.get_score(importance_type=itype)
-        # XGBoost may omit features with zero importance; fill with 0.0
-        n_flat = self._model.n_features_in_
-        importances = np.zeros(n_flat, dtype=np.float32)
-        for feat_name, score in scores_dict.items():
-            # # Feature names are 'f0', 'f1', ... when no names are set
-            # try:
-            #     idx = int(feat_name.lstrip("f"))
-            #     importances[idx] = float(score)
-            # except (ValueError, IndexError):
-            #     pass
-            try:
-                # XGBoost uses 'f{idx}' format for unnamed features
-                if feat_name.startswith("f") and feat_name[1:].isdigit():
-                    idx = int(feat_name[1:])
-                    if 0 <= idx < n_flat:
-                        importances[idx] = float(score)
-                    else:
-                        logger.info(
-                            "Feature index %d out of range [0, %d)", idx, n_flat
-                        )
-                else:
-                    logger.info("Skipping non-standard feature name: %s", feat_name)
-            except (ValueError, IndexError) as e:
-                logger.info("Failed to parse feature name '%s': %s", feat_name, e)
-        return importances
-
-    def get_per_original_feature_importances(
-        self,
-        n_original_features: int,
-        importance_type: Optional[str] = None,
-    ) -> np.ndarray:
-        """Aggregate flattened importances back to original feature axes.
-
-        Each original feature appears `lookback` times in the flattened
-        vector (once per timestep).  This method returns the mean
-        importance across all timesteps for each original feature.
-
-        Args:
-            n_original_features: F (number of features before flattening).
-            importance_type: See get_feature_importances().
-
-        Returns:
-            Float32 array of shape [F].
-        """
-        flat_imp = self.get_feature_importances(importance_type)
-        # Reshape to [lookback, F] then average across timestep axis
-        reshaped = flat_imp[: self.lookback * n_original_features].reshape(
-            self.lookback, n_original_features
-        )
-        return reshaped.mean(axis=0)
 
     # ------------------------------------------------------------------
     # Serialisation helpers

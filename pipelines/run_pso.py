@@ -28,8 +28,6 @@ from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 from src.utils.seed import set_all_seeds
-from src.utils.memory_profiler import MemoryProfiler, MemoryMonitor
-from src.utils.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -148,10 +146,6 @@ def main():
 
     setup_logger(log_file=f"logs/03_run_pso_{args.ticker}.log", level="INFO")
 
-    # Memory profiling setup
-    if args.profile_memory:
-        logger.info("Memory profiling enabled")
-        MemoryProfiler.log_memory("Initial")
     logger.info("=" * 60)
     logger.info("IPSO Hyperparameter Optimization: %s", args.ticker)
     logger.info("=" * 60)
@@ -176,17 +170,10 @@ def main():
 
     logger.info("Loading features from %s", ticker_dir)
 
-    if args.profile_memory:
-        with MemoryMonitor("Loading feature data"):
-            X_train_flat = np.load(ticker_dir / "X_train.npy")
-            y_train = np.load(ticker_dir / "y_train.npy")
-            X_val_flat = np.load(ticker_dir / "X_val.npy")
-            y_val = np.load(ticker_dir / "y_val.npy")
-    else:
-        X_train_flat = np.load(ticker_dir / "X_train.npy")
-        y_train = np.load(ticker_dir / "y_train.npy")
-        X_val_flat = np.load(ticker_dir / "X_val.npy")
-        y_val = np.load(ticker_dir / "y_val.npy")
+    X_train_flat = np.load(ticker_dir / "X_train.npy")
+    y_train = np.load(ticker_dir / "y_train.npy")
+    X_val_flat = np.load(ticker_dir / "X_val.npy")
+    y_val = np.load(ticker_dir / "y_val.npy")
 
     logger.info("Train: %s, Val: %s", X_train_flat.shape, X_val_flat.shape)
     logger.info("Data types: X_train=%s, y_train=%s", X_train_flat.dtype, y_train.dtype)
@@ -308,17 +295,9 @@ def main():
     # Run optimization
     logger.info("Starting IPSO optimization...")
 
-    if args.profile_memory:
-        MemoryProfiler.reset_peak_memory()
-        with MemoryMonitor("IPSO optimization"):
-            best_params, best_fitness = optimizer.run(
-                X_train_windows, y_train_windows, X_val_windows, y_val_windows
-            )
-        MemoryManager.log_memory_stats("Final")
-    else:
-        best_params, best_fitness = optimizer.run(
-            X_train_windows, y_train_windows, X_val_windows, y_val_windows
-        )
+    best_params, best_fitness = optimizer.run(
+        X_train_windows, y_train_windows, X_val_windows, y_val_windows
+    )
 
     logger.info("=" * 60)
     logger.info("Optimization complete!")

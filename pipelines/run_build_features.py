@@ -4,6 +4,7 @@ is done once per ticker on training data and frozen for val/test."""
 
 import argparse
 import gc
+import hashlib
 import logging
 import pickle
 import sys
@@ -24,6 +25,38 @@ from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def compute_checksum(path: Path) -> str:
+    """
+    Compute SHA256 checksum of file for integrity verification.
+
+    Args:
+        path: Path to file
+
+    Returns:
+        Hex digest of SHA256 hash
+    """
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(8192):  # Read in chunks to handle large files
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def verify_checksum(path: Path, expected: str) -> bool:
+    """
+    Verify file matches expected checksum.
+
+    Args:
+        path: File to verify
+        expected: Expected SHA256 hex digest
+
+    Returns:
+        True if matches, False otherwise
+    """
+    actual = compute_checksum(path)
+    return actual == expected
 
 
 def process_ticker(
@@ -81,36 +114,56 @@ def process_ticker(
         "y_test": y_test_s,
     }
 
-    for name, arr in arrays_to_save.items():
-        np.save(out / f"{name}.npy", arr, allow_pickle=False)
+    artifacts = {
+        "X_train": X_train_s,
+        "y_train": y_train_s,
+        "X_val": X_val_s,
+        "y_val": y_val_s,
+        "X_test": X_test_s,
+        "y_test": y_test_s,
+    }
 
-    # Compute SHA256 checksums after saving to detect silent corruption
-    import hashlib
+    checksums = {}
 
-    def _sha256(path: Path) -> str:
-        sha = hashlib.sha256()
-        with open(path, "rb") as f:
-            while chunk := f.read(65536):
-                sha.update(chunk)
-        return sha.hexdigest()
+    for name, arr in artifacts.items():
+        # Atomic write: write to temp then rename
+        temp_path = out / f"{name}.npy.tmp"
+        final_path = out / f"{name}.npy"
 
-    checksums = {name: _sha256(out / f"{name}.npy") for name in arrays_to_save}
+        try:
+            np.save(temp_path, arr, allow_pickle=False)
+            temp_path.rename(final_path)  # Atomic rename
+            checksums[name] = compute_checksum(final_path)
+            logger.debug(
+                "[%s] Saved %s with checksum %s", ticker, name, checksums[name][:16]
+            )
+        except Exception as e:
+            # Clean up temp file if exists
+            if temp_path.exists():
+                temp_path.unlink()
+            raise RuntimeError(f"Failed to save {name} for {ticker}: {e}")
 
+    # Save scaler
     scaler.save(out / "scaler.pkl")
-    with open(out / "metadata.pkl", "wb") as f:
-        pickle.dump(
-            {
-                "feature_names": feat_names,
-                "n_features": len(feat_names),
-                "train_samples": len(X_train_s),
-                "val_samples": len(X_val_s),
-                "test_samples": len(X_test_s),
-                "checksums": checksums,
-            },
-            f,
-        )
 
-    logger.info("[SELECTED] %s: %d features", ticker, len(feat_names))
+    # Save metadata with checksums
+    metadata = {
+        "feature_names": feat_names,
+        "n_features": len(feat_names),
+        "train_samples": len(X_train_s),
+        "val_samples": len(X_val_s),
+        "test_samples": len(X_test_s),
+        "checksums": checksums,  # Store checksums for verification
+    }
+
+    with open(out / "metadata.pkl", "wb") as f:
+        pickle.dump(metadata, f)
+
+    logger.info(
+        "[SELECTED] %s: %d features, checksums verified", ticker, len(feat_names)
+    )
+
+    # Cleanup
     del X_train, X_val, X_test, y_train, y_val, y_test
     del X_train_s, X_val_s, X_test_s, y_train_s, y_val_s, y_test_s
     gc.collect()

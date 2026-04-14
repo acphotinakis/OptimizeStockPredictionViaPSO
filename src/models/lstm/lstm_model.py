@@ -1,39 +1,17 @@
-"""
-src/models/lstm_model.py
-
-Configurable stacked LSTM for many-to-one time-series regression.
-All architecture parameters are passed at construction time, allowing
-the PSO optimizer to vary them freely.
-"""
-
-from __future__ import annotations
-
-from typing import Dict, Optional, Tuple
-
-import numpy as np
+# src/models/lstm/lstm_model.py
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
-import logging
 from tqdm import tqdm
+import logging
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-from src.evaluation.metrics import (
-    compute_and_log_all_statistical_metrics,
-)
-
 
 class LSTMModel(nn.Module):
-    """Stacked LSTM with many-to-one output.
-
-    Args:
-        input_size: Number of features (F) per timestep.
-        num_layers: Number of stacked LSTM layers (1–4).
-        hidden_units: Hidden state dimension (H).
-        dropout: Dropout probability applied inter-layer and pre-output.
-        output_size: Prediction dimension (1 for regression).
-    """
+    """Stacked LSTM with many-to-one output."""
 
     def __init__(
         self,
@@ -51,20 +29,17 @@ class LSTMModel(nn.Module):
         self.dropout_rate = dropout
         self.use_checkpointing = use_checkpointing
 
-        # Stacked LSTM — dropout applied between layers (not after last)
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_units,
             num_layers=num_layers,
             dropout=dropout if num_layers > 1 else 0.0,
-            batch_first=True,  # input shape: [batch, seq, features]
+            batch_first=True,
         )
 
         self.dropout = nn.Dropout(p=dropout)
         self.fc = nn.Linear(hidden_units, output_size)
         self._init_weights()
-
-    # ------------------------------------------------------------------
 
     def _init_weights(self) -> None:
         """Xavier / orthogonal init; forget-gate bias = 1."""
@@ -75,42 +50,27 @@ class LSTMModel(nn.Module):
                 nn.init.orthogonal_(param.data)
             elif "bias" in name:
                 param.data.zero_()
-                # Set forget-gate bias to 1 (Jozefowicz et al., 2015)
                 n = param.size(0)
                 param.data[n // 4 : n // 2].fill_(1.0)
         nn.init.xavier_uniform_(self.fc.weight)
         nn.init.zeros_(self.fc.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
-
-        Args:
-            x: [batch, seq_len, input_size]
-
-        Returns:
-            out: [batch, 1]
-        """
-        # Phase 3: Gradient checkpointing to save memory during training
         if self.use_checkpointing and self.training:
             from torch.utils.checkpoint import checkpoint
 
             lstm_out, _ = checkpoint(self.lstm, x, use_reentrant=False)
         else:
-            lstm_out, _ = self.lstm(x)  # [B, T, H]
+            lstm_out, _ = self.lstm(x)
 
-        last_hidden = lstm_out[:, -1, :]  # many-to-one: last timestep
+        last_hidden = lstm_out[:, -1, :]
         out = self.dropout(last_hidden)
-        out = self.fc(out)  # [B, 1]
+        out = self.fc(out)
         return out
 
 
-# ======================================================================
-# Trainer
-# ======================================================================
-
-
 class LSTMTrainer:
-    """Manages training, early stopping, gradient accumulation, and checkpointing for LSTMModel."""
+    """Fixed trainer with proper gradient accumulation."""
 
     def __init__(
         self,
@@ -132,9 +92,7 @@ class LSTMTrainer:
         self.patience = patience
         self.batch_size = batch_size
         self.grad_clip = grad_clip
-        # LINE BELOW CAUSED MODEL NOT TO LEARN (IDK WHY JUST IGNORE IT)
-        # self.use_amp = use_amp and torch.cuda.is_available()
-        self.use_amp = False
+        self.use_amp = False  # Disabled per original comment
         self.accumulation_steps = accumulation_steps
         self.seed = seed
 
@@ -142,34 +100,12 @@ class LSTMTrainer:
             self.model.parameters(), lr=lr, weight_decay=1e-5
         )
         self.criterion = nn.MSELoss()
-        self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
         self._best_state: Optional[dict] = None
-        self.history = {
-            k: []
-            for k in [
-                "train_loss",
-                "val_loss",
-                "rmse",
-                "mae",
-                "mape",
-                "r2",
-                "directional_accuracy",
-                "f1_ternary",
-            ]
+        self.history: Dict[str, list] = {
+            "train_loss": [],
+            "val_loss": [],
+            "rmse": [],
         }
-
-        if self.use_amp:
-            logger.info("Mixed precision training enabled (FP16)")
-        if self.accumulation_steps > 1:
-            logger.info(
-                "Gradient accumulation: %d steps (effective batch=%d)",
-                self.accumulation_steps,
-                self.batch_size * self.accumulation_steps,
-            )
-
-    # ------------------------------------------------------------------
-    # INTERNAL UTILS
-    # ------------------------------------------------------------------
 
     def _to_tensor(self, arr: np.ndarray) -> torch.Tensor:
         return torch.as_tensor(arr, dtype=torch.float32, device=self.device)
@@ -177,18 +113,12 @@ class LSTMTrainer:
     def _predict_batches(self, X: np.ndarray, batch_size: int) -> np.ndarray:
         self.model.eval()
         preds = []
-
         with torch.no_grad():
             for i in range(0, len(X), batch_size):
                 X_batch = self._to_tensor(X[i : i + batch_size])
                 pred = self.model(X_batch).detach().cpu().numpy()
                 preds.append(pred)
-
         return np.concatenate(preds).reshape(-1)
-
-    # ------------------------------------------------------------------
-    # TRAIN
-    # ------------------------------------------------------------------
 
     def fit(
         self,
@@ -210,9 +140,17 @@ class LSTMTrainer:
             batch_size=self.batch_size,
             shuffle=True,
             generator=torch.Generator().manual_seed(self.seed),
+            pin_memory=torch.cuda.is_available(),
+            num_workers=2 if torch.cuda.is_available() else 0,
         )
 
-        val_dl = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
+        val_dl = DataLoader(
+            val_ds,
+            batch_size=self.batch_size,
+            shuffle=False,
+            pin_memory=torch.cuda.is_available(),
+            num_workers=2 if torch.cuda.is_available() else 0,
+        )
 
         best_val_loss = float("inf")
         patience_counter = 0
@@ -220,53 +158,51 @@ class LSTMTrainer:
         for epoch in tqdm(range(self.max_epochs), desc="Epochs"):
             self.model.train()
             epoch_loss = 0.0
+            self.optimizer.zero_grad()  # Zero once at start of epoch
 
-            for x_b, y_b in train_dl:
+            for batch_idx, (x_b, y_b) in enumerate(train_dl):
                 pred = self.model(x_b)
-                loss = self.criterion(pred, y_b)
+                # CRITICAL FIX: Scale loss by accumulation steps
+                loss = self.criterion(pred, y_b) / self.accumulation_steps
 
                 if not torch.isfinite(loss):
                     raise ValueError(f"Non-finite loss: {loss.item()}")
 
                 loss.backward()
 
+                # CRITICAL FIX: Only step every accumulation_steps
+                if (batch_idx + 1) % self.accumulation_steps == 0:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+
+                # Restore true loss value for logging
+                epoch_loss += loss.item() * self.accumulation_steps * len(x_b)
+
+            # Handle remaining gradients if dataset size not divisible by accumulation_steps
+            if (batch_idx + 1) % self.accumulation_steps != 0:
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-                epoch_loss += loss.item() * len(x_b)
-
             avg_train_loss = epoch_loss / len(train_ds)
 
-            # ---- VALIDATION (reused logic) ----
+            # Validation
             y_pred = self._predict_batches(X_val, self.batch_size)
-            metrics = compute_and_log_all_statistical_metrics(
-                y_val, y_pred, label=f"LSTM Epoch {epoch+1}"
-            )
+            val_loss = np.sqrt(np.mean((y_val - y_pred) ** 2))  # RMSE
 
-            val_loss = metrics["rmse"]
-
-            # ---- HISTORY ----
             self.history["train_loss"].append(avg_train_loss)
             self.history["val_loss"].append(val_loss)
-
-            for k in metrics:
-                if k in self.history:
-                    self.history[k].append(metrics[k])
+            self.history["rmse"].append(val_loss)
 
             logger.info(
-                "[EPOCH %d] train_loss=%.6f | val_loss=%.6f | RMSE=%.6f | MAE=%.6f | DA=%.4f | F1=%.4f | R2=%.4f",
+                "[EPOCH %d] train_loss=%.6f | val_rmse=%.6f",
                 epoch + 1,
                 avg_train_loss,
                 val_loss,
-                metrics["rmse"],
-                metrics["mae"],
-                metrics["directional_accuracy"],
-                metrics["f1_ternary"],
-                metrics["r2"],
             )
 
-            # ---- EARLY STOPPING ----
+            # Early stopping
             if val_loss < best_val_loss - 1e-7:
                 best_val_loss = val_loss
                 patience_counter = 0
@@ -286,22 +222,5 @@ class LSTMTrainer:
 
         return self.history
 
-    # ------------------------------------------------------------------
-    # INFERENCE
-    # ------------------------------------------------------------------
-
     def predict(self, X: np.ndarray, batch_size: int = 256) -> np.ndarray:
         return self._predict_batches(X, batch_size)
-
-    def evaluate(
-        self, X: np.ndarray, y: np.ndarray, batch_size: int = 256
-    ) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
-
-        y_pred = self._predict_batches(X, batch_size)
-        y_true = y.reshape(-1)
-
-        metrics = compute_and_log_all_statistical_metrics(
-            y_true, y_pred, label="Evaluation"
-        )
-
-        return metrics, y_true, y_pred

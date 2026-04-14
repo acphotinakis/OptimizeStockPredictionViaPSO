@@ -8,6 +8,7 @@ Does NOT scale data. Use PipelineScaler separately to avoid leakage.
 from __future__ import annotations
 
 import logging
+from typing import Tuple
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
@@ -167,67 +168,52 @@ class DataSplitter:
 
 
 def build_windows(
-    features: np.ndarray,
+    X: np.ndarray,
     returns: np.ndarray,
     session_starts: np.ndarray,
     lookback: int,
-) -> tuple[np.ndarray, np.ndarray]:
+    step: int = 1,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Build sliding-window (lookback, F) --> next-bar-return pairs, fully vectorized.
-    Excludes windows that cross a session boundary.
+    Build sliding windows for time series prediction.
 
     Args:
-        features: [N, F] scaled feature matrix
-        returns:  [N] target log returns
-        session_starts: [N] bool array, True at first bar of session
-        lookback: sequence length
+        X: Feature matrix [N, F]
+        returns: Return targets [N]
+        session_starts: Boolean array indicating session boundaries [N]
+        lookback: Window size
+        step: Stride for sliding window
 
     Returns:
-        X: [M, lookback, F] input tensor
-        y: [M] target log returns
+        X_windowed: [M, lookback, F] windowed features
+        y: [M] next-bar returns
     """
-    N, F = features.shape
+    N, F = X.shape
+    valid_indices = []
 
-    # --- Compute session IDs ---
-    session_ids = np.cumsum(session_starts)
+    # Find valid window start indices (no session boundary in window)
+    for i in range(lookback - 1, N):
+        # Check if window [i-lookback+1, i] spans a session boundary
+        window_start = i - lookback + 1
+        if window_start > 0 and not np.any(session_starts[window_start : i + 1]):
+            # Also ensure we have a next bar to predict
+            if i + 1 < N:
+                valid_indices.append(i)
 
-    # --- Build valid mask ---
-    # A window ending at index i predicts the NEXT bar at index i+1.
-    # So we need i+1 < N (i.e. i < N-1) and the window [i-lookback+1 .. i]
-    # must not cross a session boundary.
-    valid_mask = np.zeros(N, dtype=bool)
+    valid_indices = np.array(valid_indices)
+    M = len(valid_indices)
 
-    # Windows require at least `lookback` bars before them AND a next bar after.
-    # We mark index i as valid if:
-    #   - i >= lookback (enough history)
-    #   - i + 1 < N    (next bar exists for the target)
-    if N > lookback:
-        valid_mask[lookback : N - 1] = True
+    if M == 0:
+        raise ValueError(f"No valid windows found with lookback={lookback}")
 
-    # Vectorized check: no session start inside window [i-lookback .. i-1]
-    # idx_matrix rows correspond to positions lookback..N-2
-    n_candidates = N - 1 - lookback  # number of candidate end-positions
-    if n_candidates > 0:
-        end_positions = np.arange(lookback, N - 1)  # shape (n_candidates,)
-        idx_matrix = (
-            end_positions[:, None] - lookback + np.arange(lookback)
-        )  # (n_candidates, lookback)
-        window_session_ids = session_ids[idx_matrix]
-        window_valid = (window_session_ids == window_session_ids[:, 0:1]).all(axis=1)
-        valid_mask[lookback : N - 1] = window_valid
+    # Build windows
+    X_windowed = np.zeros((M, lookback, F), dtype=np.float32)
+    y = np.zeros(M, dtype=np.float32)
 
-    # --- Count valid windows ---
-    M = valid_mask.sum()
-    X = np.empty((M, lookback, F), dtype=np.float32)
-    y = np.empty(M, dtype=np.float32)
+    for idx, i in enumerate(valid_indices):
+        window_start = i - lookback + 1
+        X_windowed[idx] = X[window_start : i + 1]
+        # CRITICAL FIX: Predict next bar (i+1), not current bar (i)
+        y[idx] = returns[i + 1]
 
-    # --- Extract windows efficiently ---
-    # valid_indices[i] = end of window; target = returns[valid_indices[i] + 1]
-    valid_indices = np.flatnonzero(valid_mask)
-    window_starts = valid_indices - lookback
-
-    for i, start in enumerate(window_starts):
-        X[i] = features[start : start + lookback]
-        y[i] = returns[valid_indices[i] + 1]  # predict NEXT bar, not current
-
-    return X, y
+    return X_windowed, y
