@@ -371,8 +371,5 @@ class DataCleaner:
             n_session_starts,
             n_zero_returns,
         )
-        import sys
-
-        sys.exit(0)
 
         return df

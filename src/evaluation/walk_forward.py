@@ -16,10 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .metrics import (
-    compute_and_log_all_statistical_metrics,
-    compute_and_log_all_trading_metrics,
-)
+from .metrics import compute_and_log_all_statistical_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -67,79 +64,72 @@ class WalkForwardValidator:
         Returns:
             Dict with per-fold results and aggregate mean/std.
         """
+
         N = len(X)
         fold_starts = list(range(self.min_train, N - self.fold_size, self.fold_size))
+
         logger.info(
             "Walk-forward: %d folds, fold_size=%d bars",
             len(fold_starts),
             self.fold_size,
         )
 
-        fold_results: List[Dict] = []
+        fold_results: List[Dict[str, Any]] = []
 
         for fold_idx, start in enumerate(fold_starts):
             end = min(start + self.fold_size, N)
+
             X_train, y_train = X[:start], y[:start]
             X_test, y_test = X[start:end], y[start:end]
 
             logger.info(
-                "Fold %d/%d: train=%d  test=%d",
+                "Fold %d/%d: train=%d test=%d",
                 fold_idx + 1,
                 len(fold_starts),
                 len(X_train),
                 len(X_test),
             )
 
-            # Retrain
             model = self.retrain_fn(X_train, y_train, X_test, y_test)
-            y_pred = self.predict_fn(model, X_test)
+            y_pred = self.predict_fn(model, X_test).reshape(-1)
 
-            stat = compute_and_log_all_statistical_metrics(y_test, y_pred)
-            fold_result: Dict[str, Any] = {"fold": fold_idx + 1, **stat}
+            metrics = compute_and_log_all_statistical_metrics(y_test, y_pred)
 
-            # Trading metrics if prices are provided
-            if opens is not None and closes is not None and timestamps is not None:
-                from .backtester import Backtester
+            fold_results.append(
+                {
+                    "fold": fold_idx + 1,
+                    "start": int(start),
+                    "end": int(end),
+                    "y_true": y_test,
+                    "y_pred": y_pred,
+                    **metrics,
+                }
+            )
 
-                bt = Backtester()
-                bt_result = bt.run(
-                    y_pred.copy(),
-                    opens[start:end],
-                    closes[start:end],
-                    timestamps[start:end],
-                )
-                fold_result.update(
-                    {
-                        "sharpe": bt_result.sharpe,
-                        "mdd": bt_result.mdd,
-                        "cagr": bt_result.cagr_,
-                        "calmar": bt_result.calmar,
-                        "profit_factor": bt_result.profit_factor_,
-                        "win_rate": bt_result.win_rate_,
-                        "n_trades": bt_result.n_trades,
-                    }
-                )
-
-            fold_results.append(fold_result)
-
-        return self._aggregate(fold_results)
+        return self._aggregate(fold_results), fold_results
 
     # ------------------------------------------------------------------
 
     @staticmethod
     def _aggregate(fold_results: List[Dict]) -> Dict[str, Any]:
-        """Compute mean and std for each numeric metric across folds."""
         if not fold_results:
             return {}
 
         numeric_keys = [
             k
             for k in fold_results[0]
-            if k != "fold" and isinstance(fold_results[0][k], (int, float))
+            if k not in ("fold", "start", "end", "y_true", "y_pred")
+            and isinstance(fold_results[0][k], (int, float))
         ]
-        summary: Dict[str, Any] = {"folds": fold_results, "n_folds": len(fold_results)}
+
+        summary: Dict[str, Any] = {
+            "folds": fold_results,
+            "n_folds": len(fold_results),
+        }
+
         for key in numeric_keys:
-            vals = np.array([f[key] for f in fold_results if key in f])
+            vals = np.array([f[key] for f in fold_results])
             summary[f"{key}_mean"] = float(vals.mean())
             summary[f"{key}_std"] = float(vals.std())
+
         return summary

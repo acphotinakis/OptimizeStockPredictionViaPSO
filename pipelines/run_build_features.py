@@ -3,6 +3,7 @@
 is done once per ticker on training data and frozen for val/test."""
 
 import argparse
+from datetime import datetime
 import gc
 import hashlib
 import logging
@@ -25,38 +26,6 @@ from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
-
-
-def compute_checksum(path: Path) -> str:
-    """
-    Compute SHA256 checksum of file for integrity verification.
-
-    Args:
-        path: Path to file
-
-    Returns:
-        Hex digest of SHA256 hash
-    """
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(8192):  # Read in chunks to handle large files
-            sha.update(chunk)
-    return sha.hexdigest()
-
-
-def verify_checksum(path: Path, expected: str) -> bool:
-    """
-    Verify file matches expected checksum.
-
-    Args:
-        path: File to verify
-        expected: Expected SHA256 hex digest
-
-    Returns:
-        True if matches, False otherwise
-    """
-    actual = compute_checksum(path)
-    return actual == expected
 
 
 def process_ticker(
@@ -105,15 +74,6 @@ def process_ticker(
     out = output_dir / ticker
     out.mkdir(parents=True, exist_ok=True)
 
-    arrays_to_save = {
-        "X_train": X_train_s,
-        "y_train": y_train_s,
-        "X_val": X_val_s,
-        "y_val": y_val_s,
-        "X_test": X_test_s,
-        "y_test": y_test_s,
-    }
-
     artifacts = {
         "X_train": X_train_s,
         "y_train": y_train_s,
@@ -123,24 +83,13 @@ def process_ticker(
         "y_test": y_test_s,
     }
 
-    checksums = {}
-
     for name, arr in artifacts.items():
-        # Atomic write: write to temp then rename
-        temp_path = out / f"{name}.npy.tmp"
         final_path = out / f"{name}.npy"
 
         try:
-            np.save(temp_path, arr, allow_pickle=False)
-            temp_path.rename(final_path)  # Atomic rename
-            checksums[name] = compute_checksum(final_path)
-            logger.debug(
-                "[%s] Saved %s with checksum %s", ticker, name, checksums[name][:16]
-            )
+            np.save(final_path, arr, allow_pickle=False)
+            logger.debug("[%s] Saved %s with", ticker, name)
         except Exception as e:
-            # Clean up temp file if exists
-            if temp_path.exists():
-                temp_path.unlink()
             raise RuntimeError(f"Failed to save {name} for {ticker}: {e}")
 
     # Save scaler
@@ -148,12 +97,51 @@ def process_ticker(
 
     # Save metadata with checksums
     metadata = {
+        "nan_checks": {
+            "X_train_nan": bool(np.isnan(X_train_s).any()),
+            "X_val_nan": bool(np.isnan(X_val_s).any()),
+            "X_test_nan": bool(np.isnan(X_test_s).any()),
+        },
+        "inf_checks": {
+            "X_train_inf": bool(np.isinf(X_train_s).any()),
+            "X_val_inf": bool(np.isinf(X_val_s).any()),
+            "X_test_inf": bool(np.isinf(X_test_s).any()),
+        },
+        "data_fingerprint": hashlib.md5(str(X_train_s.tobytes()).encode()).hexdigest(),
+        "python_version": sys.version,
+        "numpy_version": np.__version__,
+        "timestamp": datetime.utcnow().isoformat(),
         "feature_names": feat_names,
+        "feature_count": len(feat_names),
         "n_features": len(feat_names),
+        "peer_tickers": peers,
         "train_samples": len(X_train_s),
         "val_samples": len(X_val_s),
         "test_samples": len(X_test_s),
-        "checksums": checksums,  # Store checksums for verification
+        "train_start": str(dfs_train[ticker].index.min()),
+        "train_end": str(dfs_train[ticker].index.max()),
+        "val_start": str(dfs_val[ticker].index.min()),
+        "val_end": str(dfs_val[ticker].index.max()),
+        "test_start": str(dfs_test[ticker].index.min()),
+        "test_end": str(dfs_test[ticker].index.max()),
+        "raw_shapes": {
+            "X_train": list(X_train.shape),
+            "X_val": list(X_val.shape),
+            "X_test": list(X_test.shape),
+        },
+        "scaled_shapes": {
+            "X_train": list(X_train_s.shape),
+            "X_val": list(X_val_s.shape),
+            "X_test": list(X_test_s.shape),
+        },
+        "scaler_type": "PipelineScaler",
+        "scaler_fitted_on": "train_only",
+        "scaled_features": feat_names,
+        "feature_columns_order": feat_names,
+        "scaler_stats": {
+            "center_median": scaler.feature_scaler.center_.tolist(),
+            "scale_iqr": scaler.feature_scaler.scale_.tolist(),
+        },
     }
 
     with open(out / "metadata.pkl", "wb") as f:

@@ -25,7 +25,7 @@ from src.data.aligner import TickerAligner
 from src.data.alpaca_ingestor import AlpacaIngestor
 from src.data.cleaner import DataCleaner
 from src.utils.logger import setup_logger
-from src.utils.config_loader import load_config
+from src.utils.config_loader import Config, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ def run_clean(args, cfg, tickers: list[str]) -> None:
 
     for ticker in tickers:
         raw_path = raw_dir / f"{ticker}.parquet"
+        logger.info(f"Raw Path --> {raw_path} || Raw Directory --> {ticker}")
         if not raw_path.exists():
             raise FileNotFoundError(
                 f"Raw data missing for {ticker}. Run --mode ingest first."
@@ -77,7 +78,7 @@ def run_clean(args, cfg, tickers: list[str]) -> None:
         _save_parquet(df, cleaned_dir / f"{ticker}.parquet")
 
 
-def run_align(args, cfg, tickers: list[str]) -> None:
+def run_align(args, cfg: Config, tickers: list[str]) -> None:
     ingestor = AlpacaIngestor()
     cleaner = DataCleaner(
         session_start=cfg.data.session_start,

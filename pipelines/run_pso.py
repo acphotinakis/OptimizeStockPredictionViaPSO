@@ -21,9 +21,13 @@ import numpy as np
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.models.lstm.trainer import LSTMTrainer
 from src.optimizer.ipso import IPSO
 from src.optimizer.fitness import CompositeFitness
-from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
+from src.experiment.run_context import RuntimeContext
+from src.models.lstm.inference import LSTMWrapper, DEFAULT_PARAMS as LSTM_DEFAULTS
+from src.models.xgboost.model import XGBoostWrapper
+from src.models.xgboost.trainer import XGBoostTuner
 from src.data.splitter import build_windows
 from src.utils.logger import setup_logger
 from src.utils.config_loader import load_config
@@ -44,7 +48,7 @@ def model_builder(params: dict, X_train, y_train, X_val, y_val, cfg=None, args=N
     if args and args.no_checkpointing:
         use_checkpointing = False
 
-    model = LSTMModel(
+    model = LSTMWrapper(
         input_size=input_size,
         num_layers=params["num_layers"],
         hidden_units=params["hidden_units"],
