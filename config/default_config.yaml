@@ -92,7 +92,7 @@ xgboost:
   optuna_trials: 20            # fewer HPO trials
   tree_method: "gpu_hist"      # or "hist" if GPU memory is limited
   # tree_method: "hist"      # or "hist" if GPU memory is limited
-  max_bin: 128                 # smaller bins → lower memory
+  max_bin: 128                 # smaller bins --> lower memory
   lookback: 30
 
 fitness:

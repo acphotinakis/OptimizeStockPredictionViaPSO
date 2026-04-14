@@ -158,8 +158,8 @@ def _walk_forward(
         n_train:     Number of original training samples — first fold starts here.
         fold_size:   Number of bars per OOS fold.
         max_folds:   Maximum folds to run (0 = unlimited).
-        retrain_fn:  Callable(X_train, y_train) → fitted model.
-        predict_fn:  Callable(model, X) → np.ndarray predictions.
+        retrain_fn:  Callable(X_train, y_train) --> fitted model.
+        predict_fn:  Callable(model, X) --> np.ndarray predictions.
 
     Returns:
         fold_metrics:     List of per-fold metric dicts.

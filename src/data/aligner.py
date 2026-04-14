@@ -104,7 +104,9 @@ class TickerAligner:
 
             # Session-aware forward-filling: only fill within the same trading session
             if "session_start" in df_sub.columns:
-                session_ids = df_sub["session_start"].fillna(False).astype(bool).cumsum()
+                session_ids = (
+                    df_sub["session_start"].fillna(False).astype(bool).cumsum()
+                )
                 df_sub = df_sub.groupby(session_ids, group_keys=False).apply(
                     lambda g: g.ffill(limit=self.max_ffill_bars)
                 )

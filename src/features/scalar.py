@@ -11,7 +11,7 @@ class PipelineScaler:
     """Fit on training data only; transform train / val / test.
 
     Features: RobustScaler (median + IQR — stable for financial data).
-    Target:   MinMaxScaler → [-1, 1] (preserves interpretability).
+    Target:   MinMaxScaler --> [-1, 1] (preserves interpretability).
     """
 
     def __init__(self) -> None:

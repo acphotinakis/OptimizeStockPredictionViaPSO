@@ -72,7 +72,7 @@ class FeaturePipeline:
         self._feature_names = names  # full names — needed by transform()
         self._fitted = True
         logger.info(
-            "[%s] fit_transform: %d → %d features, %d samples",
+            "[%s] fit_transform: %d --> %d features, %d samples",
             self.target_ticker,
             len(names),
             len(sel_names),

@@ -167,7 +167,7 @@ def main() -> None:
 
     peers_path = output_dir / "fitted_peers.json"
     universe_builder.save_peers(peers_path)
-    logger.info("Saved peers → %s", peers_path)
+    logger.info("Saved peers --> %s", peers_path)
     logger.info("✓ Feature engineering complete")
 
 

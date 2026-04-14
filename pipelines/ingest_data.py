@@ -109,7 +109,7 @@ def run_align(args, cfg, tickers: list[str]) -> None:
 
     for ticker, df in aligned.items():
         logger.info(
-            "%-6s  rows=%-6d  %s → %s  missing=%.4f%%",
+            "%-6s  rows=%-6d  %s --> %s  missing=%.4f%%",
             ticker,
             len(df),
             df.index.min(),

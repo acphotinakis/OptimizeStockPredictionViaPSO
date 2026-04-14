@@ -35,7 +35,7 @@ Paper attribution:
 
 from __future__ import annotations
 
-"""features/selector.py — Four-stage feature selection (variance → Pearson → VIF → MI)."""
+"""features/selector.py — Four-stage feature selection (variance --> Pearson --> VIF --> MI)."""
 
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -100,14 +100,14 @@ class FeatureSelector:
 
         # Stage 1 — variance
         X, names, indices = self._stage_variance(X, names, indices)
-        logger.info("Stage 1 (variance):   %d → %d", n_orig, len(names))
+        logger.info("Stage 1 (variance):   %d --> %d", n_orig, len(names))
 
         # Stage 2 — Pearson (MI computed once here; reused in stage 4)
         mi_scores = _compute_mi(X, y)
         n2 = len(names)
         X, names, indices = self._stage_pearson(X, names, indices, mi_scores)
         logger.info(
-            "Stage 2 (Pearson r>%.2f): %d → %d",
+            "Stage 2 (Pearson r>%.2f): %d --> %d",
             self.correlation_threshold,
             n2,
             len(names),
@@ -116,14 +116,16 @@ class FeatureSelector:
         # Stage 3 — VIF
         n3 = len(names)
         X, names, indices = self._stage_vif(X, names, indices)
-        logger.info("Stage 3 (VIF>%.1f):   %d → %d", self.vif_threshold, n3, len(names))
+        logger.info(
+            "Stage 3 (VIF>%.1f):   %d --> %d", self.vif_threshold, n3, len(names)
+        )
 
         # Stage 4 — MI ranking (recompute on VIF-filtered set)
         mi_final = _compute_mi(X, y)
         n4 = len(names)
         names, indices, mi_final = self._stage_mi(names, indices, mi_final)
         logger.info(
-            "Stage 4 (MI q>%.2f): %d → %d", self.mi_quantile_threshold, n4, len(names)
+            "Stage 4 (MI q>%.2f): %d --> %d", self.mi_quantile_threshold, n4, len(names)
         )
 
         self.selected_features_ = names
@@ -132,7 +134,7 @@ class FeatureSelector:
         self._is_fitted = True
 
         logger.info(
-            "FeatureSelector: %d → %d features (%.1f%% retained)",
+            "FeatureSelector: %d --> %d features (%.1f%% retained)",
             n_orig,
             len(names),
             100.0 * len(names) / max(n_orig, 1),

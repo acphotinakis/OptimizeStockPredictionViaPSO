@@ -32,7 +32,7 @@ class SymbolUniverseBuilder:
     def __init__(
         self,
         market_context: List[str],
-        sector_map: Dict[str, str],  # ticker → sector_etf
+        sector_map: Dict[str, str],  # ticker --> sector_etf
         market_internals: List[str],
         peer_config: Dict[str, Any],
     ) -> None:

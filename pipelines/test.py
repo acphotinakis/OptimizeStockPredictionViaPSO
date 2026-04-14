@@ -296,7 +296,7 @@ def _plot_equity(
     fig.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Equity plot saved → %s", save_path)
+    logger.info("Equity plot saved --> %s", save_path)
 
 
 def _log_results(

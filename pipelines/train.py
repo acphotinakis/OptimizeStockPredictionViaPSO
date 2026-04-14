@@ -186,7 +186,7 @@ def train_lstm(
     # ---- Persist ----
     model_path = results_dir / f"lstm_model_{tag}.pth"
     torch.save(model._trainer.model.state_dict(), model_path)
-    logger.info("Weights saved → %s", model_path)
+    logger.info("Weights saved --> %s", model_path)
 
     _save_json(
         results_dir / f"lstm_params_{tag}.json",
@@ -226,7 +226,7 @@ def train_lstm(
     plot_path = plots_dir / f"lstm_training_{tag}.png"
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
-    logger.info("Training plot saved → %s", plot_path)
+    logger.info("Training plot saved --> %s", plot_path)
 
     logger.info("=== LSTM TRAINING DONE ===")
 
@@ -343,7 +343,7 @@ def train_xgboost(
     # ---- Persist ----
     model_path = results_dir / f"xgb_model_{tag}.ubj"
     model.save(str(model_path))
-    logger.info("Booster saved → %s", model_path)
+    logger.info("Booster saved --> %s", model_path)
 
     _save_json(
         results_dir / f"xgb_params_{tag}.json",
@@ -407,7 +407,7 @@ def train_xgboost(
     plot_path = plots_dir / f"xgb_training_{tag}.png"
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
-    logger.info("Training plot saved → %s", plot_path)
+    logger.info("Training plot saved --> %s", plot_path)
 
     logger.info("=== XGBOOST TRAINING DONE ===")
 

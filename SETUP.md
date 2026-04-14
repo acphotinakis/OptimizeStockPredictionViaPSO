@@ -172,8 +172,8 @@ After running the pipeline, you should have:
 
 If you encounter OOM errors during PSO:
 
-1. Reduce `batch_size` in config (default: 256 → try 128 or 64)
-2. Reduce `n_particles` (default: 30 → try 20 or 15)
+1. Reduce `batch_size` in config (default: 256 --> try 128 or 64)
+2. Reduce `n_particles` (default: 30 --> try 20 or 15)
 3. Use CPU instead of GPU (slower but uses system RAM)
 
 ### Alpaca API Rate Limits
@@ -189,7 +189,7 @@ If data download is interrupted:
 If you get CUDA OOM during training:
 
 1. Reduce `batch_size` in the config
-2. Reduce `max_lookback` (default: 120 → try 60)
+2. Reduce `max_lookback` (default: 120 --> try 60)
 3. Set `CUDA_VISIBLE_DEVICES=""` to force CPU mode
 
 ---

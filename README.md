@@ -324,7 +324,7 @@ See `ai_outputs/reproducibility.md` for full instructions including Docker setup
 | `backtesting_framework.md` | Signal generation, risk management, metrics |
 | `reproducibility.md` | Environment setup, seeds, run commands |
 | `literature_review.md` | Synthesis of all provided research papers |
-| `application_study.md` | Full research paper (Abstract → Future Work) |
+| `application_study.md` | Full research paper (Abstract --> Future Work) |
 
 ---
 
