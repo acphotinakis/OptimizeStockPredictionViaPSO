@@ -159,12 +159,12 @@ def main():
     # Log memory optimizations
     lstm_cfg = getattr(cfg, "lstm", {})
     if lstm_cfg.get("use_amp") and not args.no_amp:
-        logger.info("✓ Mixed precision training enabled (FP16)")
+        logger.info("[SELECTED] Mixed precision training enabled (FP16)")
     if lstm_cfg.get("use_checkpointing") and not args.no_checkpointing:
-        logger.info("✓ Gradient checkpointing enabled")
+        logger.info("[SELECTED] Gradient checkpointing enabled")
     if lstm_cfg.get("accumulation_steps", 1) > 1:
         logger.info(
-            "✓ Gradient accumulation: %d steps (effective batch=%d)",
+            "[SELECTED] Gradient accumulation: %d steps (effective batch=%d)",
             lstm_cfg.get("accumulation_steps"),
             lstm_cfg.get("batch_size") * lstm_cfg.get("accumulation_steps"),
         )

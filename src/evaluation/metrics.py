@@ -257,7 +257,7 @@ TRADING_METRIC_ORDER = [
 # ----------------------------------------------------------------------
 
 
-def all_statistical_metrics(
+def compute_and_log_all_statistical_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     label: str = "Stats",
@@ -281,7 +281,7 @@ def all_statistical_metrics(
     return result
 
 
-def all_trading_metrics(
+def compute_and_log_all_trading_metrics(
     equity_curve: np.ndarray,
     bar_returns: np.ndarray,
     benchmark_returns: np.ndarray | None = None,
@@ -342,3 +342,27 @@ def _log_metrics(
                 parts.append(f"{k.upper()}={v:.4f}")
 
     logger.info(f"{label} — " + "  ".join(parts))
+
+
+def _log_results(
+    stat_metrics: dict,
+    result,
+    theta: float,
+) -> None:
+    logger.info("=" * 55)
+    logger.info("STATISTICAL METRICS")
+    logger.info("  RMSE : %.6f", stat_metrics["rmse"])
+    logger.info("  DA   : %.4f", stat_metrics["directional_accuracy"])
+    logger.info("  F1   : %.4f", stat_metrics["f1_ternary"])
+    logger.info("  R²   : %.4f", stat_metrics["r2"])
+    logger.info("TRADING METRICS (θ=%.5f)", theta)
+    logger.info("  Sharpe        : %.3f", result.sharpe)
+    logger.info("  Sortino       : %.3f", result.sortino)
+    logger.info("  Max Drawdown  : %.2f%%", result.mdd * 100)
+    logger.info("  CAGR          : %.2f%%", result.cagr_ * 100)
+    logger.info("  Calmar        : %.3f", result.calmar)
+    logger.info("  Profit Factor : %.3f", result.profit_factor_)
+    logger.info("  Win Rate      : %.2f%%", result.win_rate_ * 100)
+    logger.info("  Trades        : %d", result.n_trades)
+    logger.info("  Turnover      : %.4f", result.turnover)
+    logger.info("=" * 55)

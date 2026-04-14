@@ -22,7 +22,7 @@ def test_script_help():
         text=True,
         cwd=project_root,
     )
-    
+
     assert result.returncode == 0 or "numpy" in result.stderr.lower()
     if result.returncode == 0:
         assert "LSTM Baseline" in result.stdout
@@ -38,7 +38,7 @@ def test_script_syntax():
         text=True,
         cwd=project_root,
     )
-    
+
     assert result.returncode == 0, f"Syntax error: {result.stderr}"
 
 
@@ -46,7 +46,7 @@ def test_script_imports():
     """Test script can be imported (checks for import errors)."""
     script_path = project_root / "scripts" / "run_lstm_baseline.py"
     assert script_path.exists(), "Script file not found"
-    
+
     # Check file is not empty
     content = script_path.read_text()
     assert len(content) > 0
@@ -60,7 +60,7 @@ def test_config_has_lstm_baseline():
     """Test config file has lstm_baseline section."""
     config_path = project_root / "config" / "default_config.yaml"
     assert config_path.exists(), "Config file not found"
-    
+
     content = config_path.read_text()
     assert "lstm_baseline:" in content
     assert "num_layers:" in content
@@ -69,29 +69,29 @@ def test_config_has_lstm_baseline():
 
 if __name__ == "__main__":
     print("Running integration tests...")
-    
+
     try:
         test_script_help()
-        print("✓ Script help test passed")
+        print("[SELECTED] Script help test passed")
     except AssertionError as e:
         print(f"✗ Script help test failed: {e}")
-    
+
     try:
         test_script_syntax()
-        print("✓ Script syntax test passed")
+        print("[SELECTED] Script syntax test passed")
     except AssertionError as e:
         print(f"✗ Script syntax test failed: {e}")
-    
+
     try:
         test_script_imports()
-        print("✓ Script imports test passed")
+        print("[SELECTED] Script imports test passed")
     except AssertionError as e:
         print(f"✗ Script imports test failed: {e}")
-    
+
     try:
         test_config_has_lstm_baseline()
-        print("✓ Config test passed")
+        print("[SELECTED] Config test passed")
     except AssertionError as e:
         print(f"✗ Config test failed: {e}")
-    
+
     print("\nAll tests completed!")

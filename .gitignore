@@ -80,3 +80,5 @@ project_archive.zip
 data/
 
 _feature_opts/
+
+tests/

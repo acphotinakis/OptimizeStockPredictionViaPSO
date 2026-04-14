@@ -168,8 +168,8 @@ class VanillaLSTM:
         device: Optional[str] = None,
         **overrides,
     ) -> None:
-        params = {**self.DEFAULT_PARAMS, **overrides}
-        self.lookback = params["lookback"]
+        self.params = {**self.DEFAULT_PARAMS, **overrides}
+        self.lookback = self.params["lookback"]
 
         # ------------------------------------------------------------------
         # Log all resolved hyperparameters
@@ -180,28 +180,28 @@ class VanillaLSTM:
             "patience=%d | batch_size=%d",
             input_size,
             device,
-            params["num_layers"],
-            params["hidden_units"],
-            params["dropout"],
-            params["learning_rate"],
-            params["lookback"],
-            params["max_epochs"],
-            params["patience"],
-            params["batch_size"],
+            self.params["num_layers"],
+            self.params["hidden_units"],
+            self.params["dropout"],
+            self.params["learning_rate"],
+            self.params["lookback"],
+            self.params["max_epochs"],
+            self.params["patience"],
+            self.params["batch_size"],
         )
 
         model = LSTMModel(
             input_size=input_size,
-            num_layers=params["num_layers"],
-            hidden_units=params["hidden_units"],
-            dropout=params["dropout"],
+            num_layers=self.params["num_layers"],
+            hidden_units=self.params["hidden_units"],
+            dropout=self.params["dropout"],
         )
         self._trainer = LSTMTrainer(
             model=model,
-            lr=params["learning_rate"],
-            max_epochs=params["max_epochs"],
-            patience=params["patience"],
-            batch_size=params["batch_size"],
+            lr=self.params["learning_rate"],
+            max_epochs=self.params["max_epochs"],
+            patience=self.params["patience"],
+            batch_size=self.params["batch_size"],
             device=device,
         )
 
@@ -210,3 +210,6 @@ class VanillaLSTM:
 
     def predict(self, X) -> np.ndarray:
         return self._trainer.predict(X)
+
+    def evaluate(self, X: np.ndarray, y: np.ndarray, batch_size: int = 256):
+        return self._trainer.evaluate(X=X, y=y, batch_size=self.params["batch_size"])

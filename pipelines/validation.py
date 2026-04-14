@@ -39,7 +39,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.data.splitter import build_windows
-from src.evaluation.metrics import all_statistical_metrics
+from src.evaluation.metrics import (
+    compute_and_log_all_statistical_metrics,
+)
 from src.models.baselines import VanillaLSTM
 from src.models.xgboost.xgboost_model import XGBoostModel
 from src.optimizer.fitness import generate_signals, sharpe_from_signals
@@ -205,7 +207,7 @@ def _walk_forward(
         model = retrain_fn(X_tr, y_tr)
         y_pred = predict_fn(model, X_te)
 
-        m = all_statistical_metrics(y_te, y_pred)
+        m = compute_and_log_all_statistical_metrics(y_te, y_pred)
         m["fold"] = fold_idx + 1
         m["start"] = int(start)
         m["end"] = int(end)

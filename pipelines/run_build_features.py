@@ -52,7 +52,7 @@ def process_ticker(
     X_val, y_val = pipeline.transform(filter_dfs(dfs_val))
     X_test, y_test = pipeline.transform(filter_dfs(dfs_test))
 
-    # 3. Scaling — fit on train only
+    # 3. Scaling — fit on train only (features only; target is NOT scaled)
     def to_df(X, y):
         df = pd.DataFrame(X, columns=feat_names)
         df["log_return"] = y
@@ -62,7 +62,7 @@ def process_ticker(
 
     def scale(X, y):
         s = scaler.transform(to_df(X, y))
-        return s[feat_names].to_numpy(np.float32), s["log_return"].to_numpy(np.float32)
+        return s[feat_names].to_numpy(np.float32), y.astype(np.float32)
 
     X_train_s, y_train_s = scale(X_train, y_train)
     X_val_s, y_val_s = scale(X_val, y_val)
@@ -72,15 +72,29 @@ def process_ticker(
     out = output_dir / ticker
     out.mkdir(parents=True, exist_ok=True)
 
-    for name, arr in {
+    arrays_to_save = {
         "X_train": X_train_s,
         "y_train": y_train_s,
         "X_val": X_val_s,
         "y_val": y_val_s,
         "X_test": X_test_s,
         "y_test": y_test_s,
-    }.items():
+    }
+
+    for name, arr in arrays_to_save.items():
         np.save(out / f"{name}.npy", arr, allow_pickle=False)
+
+    # Compute SHA256 checksums after saving to detect silent corruption
+    import hashlib
+
+    def _sha256(path: Path) -> str:
+        sha = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(65536):
+                sha.update(chunk)
+        return sha.hexdigest()
+
+    checksums = {name: _sha256(out / f"{name}.npy") for name in arrays_to_save}
 
     scaler.save(out / "scaler.pkl")
     with open(out / "metadata.pkl", "wb") as f:
@@ -91,11 +105,12 @@ def process_ticker(
                 "train_samples": len(X_train_s),
                 "val_samples": len(X_val_s),
                 "test_samples": len(X_test_s),
+                "checksums": checksums,
             },
             f,
         )
 
-    logger.info("✓ %s: %d features", ticker, len(feat_names))
+    logger.info("[SELECTED] %s: %d features", ticker, len(feat_names))
     del X_train, X_val, X_test, y_train, y_val, y_test
     del X_train_s, X_val_s, X_test_s, y_train_s, y_val_s, y_test_s
     gc.collect()
@@ -168,7 +183,7 @@ def main() -> None:
     peers_path = output_dir / "fitted_peers.json"
     universe_builder.save_peers(peers_path)
     logger.info("Saved peers --> %s", peers_path)
-    logger.info("✓ Feature engineering complete")
+    logger.info("[SELECTED] Feature engineering complete")
 
 
 if __name__ == "__main__":

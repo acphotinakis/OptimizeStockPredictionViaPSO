@@ -26,12 +26,8 @@ import logging
 import sys
 import time
 from pathlib import Path
+import uuid
 
-import matplotlib
-
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -42,73 +38,17 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from plots.lstm_history_plot import plot_training_history
+from src.experiment.run_context import RuntimeContext
 from src.data.splitter import build_windows
-from src.evaluation.metrics import all_statistical_metrics
+from src.evaluation.metrics import (
+    compute_and_log_all_trading_metrics,
+    compute_and_log_all_statistical_metrics,
+)
 from src.models.baselines import VanillaLSTM
 from src.models.xgboost.xgboost_model import XGBoostModel, XGBoostTuner
-from src.utils.config_loader import load_config
-from src.utils.seed import set_all_seeds
+from src.experiment.usage_enums import ModelType, Phase, RunMode, ArtifactType
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
-def _setup_logging(log_file: str, level: str = "INFO") -> None:
-    Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-    fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s"
-    handlers = [
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_file),
-    ]
-    logging.basicConfig(level=getattr(logging, level), format=fmt, handlers=handlers)
-
-
-def _load_split(ticker_dir: Path, split: str):
-    """Load a single X/y split from disk."""
-    return (
-        np.load(ticker_dir / f"X_{split}.npy"),
-        np.load(ticker_dir / f"y_{split}.npy"),
-    )
-
-
-def _make_windows(X_flat: np.ndarray, y: np.ndarray, lookback: int):
-    """Apply sliding-window construction with no session boundaries."""
-    session_starts = np.zeros(len(X_flat), dtype=bool)
-    return build_windows(X_flat, y, session_starts, lookback)
-
-
-def _save_json(path: Path, obj: dict) -> None:
-    """JSON-serialise an object that may contain numpy scalars."""
-
-    def _default(o):
-        if isinstance(o, (np.integer,)):
-            return int(o)
-        if isinstance(o, (np.floating,)):
-            return float(o)
-        if isinstance(o, np.ndarray):
-            return o.tolist()
-        return str(o)
-
-    path.write_text(json.dumps(obj, indent=2, default=_default))
-
-
-def _make_tag(ticker: str, model: str, seed: int) -> str:
-    return f"{ticker}_{model}_seed{seed}"
-
-
-def _log_metrics(label: str, m: dict) -> None:
-    logger.info(
-        "%s  RMSE=%.6f  DA=%.4f  F1=%.4f  R²=%.4f",
-        label,
-        m["rmse"],
-        m["directional_accuracy"],
-        m["f1_ternary"],
-        m["r2"],
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,90 +83,54 @@ def _lstm_hyperparams(args: argparse.Namespace, cfg) -> dict:
     return base
 
 
-def train_lstm(
-    args: argparse.Namespace,
-    cfg,
-    ticker_dir: Path,
-    results_dir: Path,
-    tag: str,
-) -> None:
-    logger.info("=== LSTM TRAINING  ticker=%s ===", args.ticker)
+def train_lstm(ctx: RuntimeContext) -> None:
+    logger.info("=== LSTM TRAINING  ticker=%s ===", ctx.ticker)
 
-    X_train, y_train = _load_split(ticker_dir, "train")
-    X_val, y_val = _load_split(ticker_dir, "val")
-    logger.info("Train Data  — X_train=%s  X_val=%s", X_train.shape, X_val.shape)
-    logger.info("Val Data  — X_val=%s  y_val=%s", X_val.shape, y_val.shape)
+    X_train, y_train = ctx.tracker.load_split(Phase.TRAIN)
+    X_val, y_val = ctx.tracker.load_split(Phase.VAL)
 
-    hp = _lstm_hyperparams(args, cfg)
+    hp = _lstm_hyperparams(ctx.args, ctx.cfg)
     logger.info("Hyperparameters: %s", hp)
 
-    X_train, y_train_w = _make_windows(X_train, y_train, hp["lookback"])
-    X_val, y_val_w = _make_windows(X_val, y_val, hp["lookback"])
+    X_train, y_train_w = ctx.tracker._make_windows(X_train, y_train, hp["lookback"])
+    X_val, y_val_w = ctx.tracker._make_windows(X_val, y_val, hp["lookback"])
     logger.info("Windowed — [X] train=%s  val=%s", X_train.shape, X_val.shape)
     logger.info("Windowed — [y] train=%s  val=%s", y_train_w.shape, y_val_w.shape)
 
     # sys.exit(0)
-    model = VanillaLSTM(input_size=X_train.shape[2], device=args.device, **hp)
+    model = VanillaLSTM(input_size=X_train.shape[2], device=ctx.args.device, **hp)
 
     t0 = time.time()
     history = model.fit(X_train, y_train_w, X_val, y_val_w)
     elapsed = time.time() - t0
+
     logger.info("Training complete in %.1fs", elapsed)
 
-    plot_training_history(
-        history=history,
-        output_path="outputs/lstm_training_history.png",
-        title="LSTM Training Metrics",
+    ctx.tracker.save_history(Phase.TRAIN, history=history)
+
+    metrics, y_true, y_pred = model.evaluate(X_val, y_val_w)
+
+    ctx.tracker.save_metrics(Phase.VAL, metrics)
+    ctx.tracker.save_predictions(Phase.VAL, y_pred)
+    ctx.tracker.save_truth(Phase.VAL, y_true)
+
+    ctx.tracker.save_torch(
+        phase=Phase.TRAIN,
+        obj=model._trainer.model.state_dict(),
+        artifact=ArtifactType.MODEL,
     )
 
-    y_pred_val = model.predict(X_val)
-    val_metrics = all_statistical_metrics(y_val_w, y_pred_val)
-    _log_metrics("Val", val_metrics)
-
-    # ---- Persist ----
-    model_path = results_dir / f"lstm_model_{tag}.pth"
-    torch.save(model._trainer.model.state_dict(), model_path)
-    logger.info("Weights saved --> %s", model_path)
-
-    _save_json(
-        results_dir / f"lstm_params_{tag}.json",
+    ctx.tracker.save_json(
+        ctx.tracker.artifact_path(f"lstm_params_{ctx.ticker}.json"),
         {
-            "ticker": args.ticker,
+            "ticker": ctx.ticker,
             "model": "lstm",
-            "seed": args.seed,
+            "seed": ctx.seed,
             "hyperparameters": hp,
-            "val_metrics": val_metrics,
+            "val_metrics": metrics,
             "runtime_seconds": elapsed,
         },
     )
-    _save_json(results_dir / f"lstm_history_{tag}.json", history)
-    np.save(results_dir / f"lstm_val_predictions_{tag}.npy", y_pred_val)
-
-    # ---- Quick diagnostic plot ----
-    plots_dir = results_dir / "plots"
-    plots_dir.mkdir(exist_ok=True)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    ax1.plot(history["train_loss"], label="Train")
-    ax1.plot(history["val_loss"], label="Val")
-    ax1.set(title=f"{args.ticker} LSTM  Training Loss", xlabel="Epoch", ylabel="MSE")
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-
-    n = min(500, len(y_val_w))
-    ax2.plot(y_val_w[:n], label="True", alpha=0.7)
-    ax2.plot(y_pred_val[:n], label="Predicted", alpha=0.7)
-    ax2.set(
-        title=f"{args.ticker} LSTM  Val Predictions", xlabel="Sample", ylabel="Return"
-    )
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-
-    fig.tight_layout()
-    plot_path = plots_dir / f"lstm_training_{tag}.png"
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    logger.info("Training plot saved --> %s", plot_path)
 
     logger.info("=== LSTM TRAINING DONE ===")
 
@@ -308,106 +212,61 @@ def _xgb_train_tune(args, X_train, y_train, X_val, y_val) -> tuple[XGBoostModel,
     return best_model, best_params
 
 
-def train_xgboost(
-    args: argparse.Namespace,
-    cfg,
-    ticker_dir: Path,
-    results_dir: Path,
-    tag: str,
-) -> None:
-    logger.info(
-        "=== XGBOOST TRAINING  ticker=%s  mode=%s ===", args.ticker, args.train_mode
-    )
+def train_xgboost(ctx: RuntimeContext) -> None:
+    logger.info("=== XGBOOST TRAINING ticker=%s ===", ctx.ticker)
 
-    X_train_flat, y_train = _load_split(ticker_dir, "train")
-    X_val_flat, y_val = _load_split(ticker_dir, "val")
-    logger.info("Flat  — train=%s  val=%s", X_train_flat.shape, X_val_flat.shape)
+    X_train, y_train = ctx.tracker.load_split(Phase.TRAIN)
+    X_val, y_val = ctx.tracker.load_split(Phase.VAL)
 
-    lookback = args.lookback or getattr(getattr(cfg, "xgboost", None), "lookback", 30)
-    X_train, y_train_w = _make_windows(X_train_flat, y_train, lookback)
-    X_val, y_val_w = _make_windows(X_val_flat, y_val, lookback)
-    logger.info("Windowed — train=%s  val=%s", X_train.shape, X_val.shape)
+    hp = _xgb_hyperparams_from_cfg(ctx.cfg)
+    logger.info("Hyperparameters: %s", hp)
+
+    lookback = hp["lookback"]
+
+    X_train, y_train_w = ctx.tracker._make_windows(X_train, y_train, lookback)
+    X_val, y_val_w = ctx.tracker._make_windows(X_val, y_val, lookback)
+
+    logger.info("Windowed — [X] train=%s val=%s", X_train.shape, X_val.shape)
+    logger.info("Windowed — [y] train=%s val=%s", y_train_w.shape, y_val_w.shape)
 
     t0 = time.time()
-    if args.train_mode == "default":
-        model, hp = _xgb_train_default(cfg, X_train, y_train_w, X_val, y_val_w)
+
+    if ctx.args.train_mode == "default":
+        model, hp = _xgb_train_default(ctx.cfg, X_train, y_train_w, X_val, y_val_w)
     else:
-        model, hp = _xgb_train_tune(args, X_train, y_train_w, X_val, y_val_w)
+        model, hp = _xgb_train_tune(ctx.args, X_train, y_train_w, X_val, y_val_w)
+
     elapsed = time.time() - t0
     logger.info("Training complete in %.1fs", elapsed)
 
-    y_pred_val = model.predict(X_val)
-    val_metrics = all_statistical_metrics(y_val_w, y_pred_val)
-    _log_metrics("Val", val_metrics)
+    ctx.tracker.save_history(Phase.TRAIN, history=model.history)
 
-    # ---- Persist ----
-    model_path = results_dir / f"xgb_model_{tag}.ubj"
+    y_pred = model.predict(X_val)
+    metrics = compute_and_log_all_statistical_metrics(y_val_w, y_pred)
+
+    ctx.tracker.save_metrics(Phase.VAL, metrics)
+    ctx.tracker.save_predictions(Phase.VAL, y_pred)
+
+    # XGBoost uses its own binary format (.ubj), NOT torch.save()
+    model_filename = ctx.tracker.make_filename(
+        Phase.TRAIN, ArtifactType.MODEL, ext="ubj"
+    )
+    model_path = ctx.tracker.artifact_path(model_filename)
     model.save(str(model_path))
-    logger.info("Booster saved --> %s", model_path)
+    logger.info("XGBoost model saved to %s", model_path)
 
-    _save_json(
-        results_dir / f"xgb_params_{tag}.json",
+    ctx.tracker.save_json(
+        ctx.tracker.artifact_path(f"xgb_params_{ctx.ticker}.json"),
         {
-            "ticker": args.ticker,
+            "ticker": ctx.ticker,
             "model": "xgboost",
-            "train_mode": args.train_mode,
-            "seed": args.seed,
+            "seed": ctx.seed,
+            "train_mode": ctx.args.train_mode,
             "hyperparameters": hp,
-            "best_iteration": model.best_iteration,
-            "val_metrics": val_metrics,
+            "val_metrics": metrics,
             "runtime_seconds": elapsed,
         },
     )
-    _save_json(results_dir / f"xgb_history_{tag}.json", model.history)
-    np.save(
-        results_dir / f"xgb_importances_{tag}.npy",
-        model.get_feature_importances(),
-    )
-    np.save(results_dir / f"xgb_val_predictions_{tag}.npy", y_pred_val)
-
-    # ---- Quick diagnostic plot ----
-    plots_dir = results_dir / "plots"
-    plots_dir.mkdir(exist_ok=True)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    train_rmse = model.history.get("train_rmse", [])
-    val_rmse = model.history.get("val_rmse", [])
-    rounds = range(1, len(val_rmse) + 1)
-    if train_rmse:
-        ax1.plot(list(rounds)[: len(train_rmse)], train_rmse, label="Train")
-    if val_rmse:
-        ax1.plot(rounds, val_rmse, label="Val")
-        if model.best_iteration:
-            ax1.axvline(
-                model.best_iteration,
-                color="red",
-                linestyle="--",
-                label=f"Best iter {model.best_iteration}",
-            )
-    ax1.set(
-        title=f"{args.ticker} XGBoost  RMSE Curves",
-        xlabel="Boosting Round",
-        ylabel="RMSE",
-    )
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-
-    n = min(500, len(y_val_w))
-    ax2.plot(y_val_w[:n], label="True", alpha=0.7)
-    ax2.plot(y_pred_val[:n], label="Predicted", alpha=0.7)
-    ax2.set(
-        title=f"{args.ticker} XGBoost  Val Predictions",
-        xlabel="Sample",
-        ylabel="Return",
-    )
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-
-    fig.tight_layout()
-    plot_path = plots_dir / f"xgb_training_{tag}.png"
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    logger.info("Training plot saved --> %s", plot_path)
 
     logger.info("=== XGBOOST TRAINING DONE ===")
 
@@ -430,8 +289,12 @@ def parse_args() -> argparse.Namespace:
         choices=["lstm", "xgboost"],
         help="Model architecture to train",
     )
-    p.add_argument("--ticker", required=True, help="Ticker symbol (e.g. AAPL)")
+    p.add_argument(
+        "--run-id",
+        help="Model architecture to train",
+    )
 
+    p.add_argument("--ticker", required=True, help="Ticker symbol (e.g. AAPL)")
     # ---- Common ----
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--config", default="config/default_config.yaml")
@@ -481,31 +344,32 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    _setup_logging(args.log_file)
-    set_all_seeds(args.seed)
 
-    cfg = load_config(args.config)
+    # ---------------------------------------------------------
+    # Runtime initialization (single source of truth)
+    # ---------------------------------------------------------
+    ctx = RuntimeContext(
+        args=args,
+        model=ModelType(args.model),
+        ticker=args.ticker,
+        seed=args.seed,
+        config_path=args.config,
+        run_id=args.run_id,
+        run_mode=RunMode.CREATE,
+        log_file=args.log_file,
+    )
 
-    ticker_dir = Path(args.features_dir) / args.ticker
-    results_dir = Path(args.results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
-    Path("logs").mkdir(exist_ok=True)
-
-    if not ticker_dir.exists():
-        logger.error(
-            "Feature directory not found: %s\n" "Run build_features.py first.",
-            ticker_dir,
-        )
-        sys.exit(1)
-
-    tag = _make_tag(args.ticker, args.model, args.seed)
-    logger.info("tag=%s", tag)
-
-    if args.model == "lstm":
-        train_lstm(args, cfg, ticker_dir, results_dir, tag)
+    # ---------------------------------------------------------
+    # Dispatch training
+    # ---------------------------------------------------------
+    if ctx.model == ModelType.LSTM:
+        train_lstm(ctx)
     else:
-        train_xgboost(args, cfg, ticker_dir, results_dir, tag)
+        train_xgboost(ctx)
 
 
+# ---------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------
 if __name__ == "__main__":
     main()

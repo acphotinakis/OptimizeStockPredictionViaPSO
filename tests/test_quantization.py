@@ -60,7 +60,7 @@ def test_data_quantization():
     logger.info("Max numerical error: %.2e", max_error)
 
     assert reduction > 45, "Expected ~50% reduction"
-    logger.info("✓ Phase 1 test passed")
+    logger.info("[SELECTED] Phase 1 test passed")
 
 
 def test_model_quantization():
@@ -111,7 +111,7 @@ def test_model_quantization():
 
     assert reduction > 50, "Expected ~75% reduction"
     assert mae < 0.01, "Quantization error too large"
-    logger.info("✓ Phase 2 test passed")
+    logger.info("[SELECTED] Phase 2 test passed")
 
 
 def test_mixed_precision_training():
@@ -185,7 +185,7 @@ def test_mixed_precision_training():
         ) * 100
         logger.info("Memory reduction with AMP: %.1f%%", reduction)
 
-    logger.info("✓ Phase 3 test passed")
+    logger.info("[SELECTED] Phase 3 test passed")
 
 
 def test_gradient_checkpointing():
@@ -222,7 +222,7 @@ def test_gradient_checkpointing():
         )
         trainer_cp.fit(X_train, y_train, X_val, y_val)
 
-    logger.info("✓ Gradient checkpointing test passed")
+    logger.info("[SELECTED] Gradient checkpointing test passed")
 
 
 def test_memory_profiler():
@@ -249,7 +249,7 @@ def test_memory_profiler():
 
     _ = dummy_function()
 
-    logger.info("✓ Phase 4 test passed")
+    logger.info("[SELECTED] Phase 4 test passed")
 
 
 def main():
@@ -289,7 +289,7 @@ def main():
             test_memory_profiler()
 
         logger.info("\n" + "=" * 60)
-        logger.info("✓ All tests passed!")
+        logger.info("[SELECTED] All tests passed!")
         logger.info("=" * 60)
 
     except Exception as e:

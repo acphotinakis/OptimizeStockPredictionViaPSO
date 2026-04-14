@@ -116,6 +116,7 @@ class Backtester:
         entry_price = 0.0
         entry_equity = 0.0
         entry_time = None
+        n_shares_held = 0.0  # shares held — computed at entry, constant until exit
         session_open_equity = self.V0
         daily_halt = False
 
@@ -147,10 +148,9 @@ class Backtester:
                 # ---- Close existing position ----
                 if position != 0:
                     close_slip = fill * (1.0 - self.slip * np.sign(position))
-                    trade_value = self.f * equity[t]
-                    n_shares = trade_value / (entry_price + 1e-10)
-                    pnl = position * n_shares * (close_slip - entry_price)
-                    cost = self.tc * trade_value
+                    # Use share count locked in at entry — not recomputed at exit
+                    pnl = position * n_shares_held * (close_slip - entry_price)
+                    cost = self.tc * self.f * entry_equity
                     equity[t] = equity[t] + pnl - cost
                     trades.append(
                         {
@@ -165,6 +165,7 @@ class Backtester:
                         }
                     )
                     position = 0
+                    n_shares_held = 0.0
 
                 # ---- Open new position ----
                 if target != 0:
@@ -175,12 +176,12 @@ class Backtester:
                     entry_equity = equity[t]
                     entry_time = timestamps[t]
                     position = target
+                    # Lock in share count at entry based on entry price
+                    n_shares_held = (self.f * entry_equity) / (entry_price + 1e-10)
 
             # --- Mark-to-market unrealised P&L using close price ---
             if position != 0:
-                position_value = self.f * entry_equity
-                self.n_shares = position_value / (entry_price + 1e-10)
-                mtm_pnl = position * self.n_shares * (closes[t] - entry_price)
+                mtm_pnl = position * n_shares_held * (closes[t] - entry_price)
                 equity[t + 1] = equity[t] + mtm_pnl
                 # Stop-loss: if unrealised drawdown exceeds limit, force flat next bar
                 trade_dd = (entry_equity - equity[t + 1]) / (entry_equity + 1e-10)
@@ -272,7 +273,13 @@ class Backtester:
                 daily_loss_limit=self.daily_limit,
                 signal_threshold=theta,
             )
-            result = bt.run(y_pred_val.copy(), opens_val, closes_val, timestamps_val, session_starts_val)
+            result = bt.run(
+                y_pred_val.copy(),
+                opens_val,
+                closes_val,
+                timestamps_val,
+                session_starts_val,
+            )
             if result.sharpe > best_sr:
                 best_sr = result.sharpe
                 best_theta = theta

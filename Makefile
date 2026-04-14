@@ -7,7 +7,7 @@ ZIP_NAME := project_archive.zip
 DEBUG_DIR := debug_unzip
 
 # List of directories to zip
-DIRS := src pipelines config plots scripts
+DIRS := src pipelines config plots
 
 # Exclusions for each directory
 # Format: EXCLUDE_dir = pattern1 pattern2 ...

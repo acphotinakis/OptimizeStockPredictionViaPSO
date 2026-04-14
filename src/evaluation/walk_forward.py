@@ -16,7 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .metrics import all_statistical_metrics, all_trading_metrics
+from .metrics import (
+    compute_and_log_all_statistical_metrics,
+    compute_and_log_all_trading_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +94,7 @@ class WalkForwardValidator:
             model = self.retrain_fn(X_train, y_train, X_test, y_test)
             y_pred = self.predict_fn(model, X_test)
 
-            stat = all_statistical_metrics(y_test, y_pred)
+            stat = compute_and_log_all_statistical_metrics(y_test, y_pred)
             fold_result: Dict[str, Any] = {"fold": fold_idx + 1, **stat}
 
             # Trading metrics if prices are provided

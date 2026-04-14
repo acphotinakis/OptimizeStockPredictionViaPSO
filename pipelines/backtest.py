@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 
 import sys
 from pathlib import Path
+
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -154,14 +155,7 @@ def main():
     # Generate predictions on test set
     logger.info("Generating predictions on test set...")
 
-    # Phase 2: Quantize if requested
-    if args.quantize:
-        logger.info("Quantizing model for backtesting inference...")
-        quantized_wrapper = QuantizedLSTMModel(model)
-        quantized_wrapper.quantize()
-        y_pred = quantized_wrapper.predict(X_test)
-    else:
-        y_pred = trainer.predict(X_test)
+    y_pred = trainer.predict(X_test)
 
     # Load price data for backtesting
     logger.info("Loading price data...")

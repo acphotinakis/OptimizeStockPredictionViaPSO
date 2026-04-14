@@ -26,7 +26,10 @@ import numpy as np
 import pytest
 
 from src.models.xgboost.xgboost_model import XGBoostModel, XGBoostTuner
-from src.evaluation import all_statistical_metrics, all_trading_metrics
+from src.evaluation import (
+    compute_and_log_all_statistical_metrics,
+    compute_and_log_all_trading_metrics,
+)
 
 
 # ======================================================================
@@ -274,12 +277,12 @@ class TestSaveLoad:
 class TestMetricCompatibility:
     """XGBoost predictions flow through the SAME metric functions as LSTM."""
 
-    def test_all_statistical_metrics_keys(self, split_windows):
+    def test_compute_and_log_all_statistical_metrics_keys(self, split_windows):
         X_tr, y_tr, X_vl, y_vl, X_te, y_te = split_windows
         m = XGBoostModel(lookback=20, n_estimators=20, early_stopping_rounds=5)
         m.fit(X_tr, y_tr, X_vl, y_vl)
         preds = m.predict(X_te)
-        metrics = all_statistical_metrics(y_te, preds)
+        metrics = compute_and_log_all_statistical_metrics(y_te, preds)
 
         required_keys = {
             "rmse",
@@ -294,12 +297,12 @@ class TestMetricCompatibility:
             metrics.keys()
         ), f"Missing keys: {required_keys - set(metrics.keys())}"
 
-    def test_all_statistical_metrics_finite(self, split_windows):
+    def test_compute_and_log_all_statistical_metrics_finite(self, split_windows):
         X_tr, y_tr, X_vl, y_vl, X_te, y_te = split_windows
         m = XGBoostModel(lookback=20, n_estimators=20, early_stopping_rounds=5)
         m.fit(X_tr, y_tr, X_vl, y_vl)
         preds = m.predict(X_te)
-        metrics = all_statistical_metrics(y_te, preds)
+        metrics = compute_and_log_all_statistical_metrics(y_te, preds)
 
         for key, val in metrics.items():
             if val != val:  # NaN check — AUC can be NaN if only one class present
@@ -312,7 +315,7 @@ class TestMetricCompatibility:
         m = XGBoostModel(lookback=20, n_estimators=20, early_stopping_rounds=5)
         m.fit(X_tr, y_tr, X_vl, y_vl)
         preds = m.predict(X_te)
-        metrics = all_statistical_metrics(y_te, preds)
+        metrics = compute_and_log_all_statistical_metrics(y_te, preds)
         assert metrics["rmse"] >= 0.0
 
     def test_directional_accuracy_bounded(self, split_windows):
@@ -321,7 +324,7 @@ class TestMetricCompatibility:
         m = XGBoostModel(lookback=20, n_estimators=20, early_stopping_rounds=5)
         m.fit(X_tr, y_tr, X_vl, y_vl)
         preds = m.predict(X_te)
-        metrics = all_statistical_metrics(y_te, preds)
+        metrics = compute_and_log_all_statistical_metrics(y_te, preds)
         assert 0.0 <= metrics["directional_accuracy"] <= 1.0
 
     def test_backtester_accepts_xgb_predictions(self, split_windows):

@@ -1,3 +1,4 @@
+
 """
 src/models/lstm_model.py
 
@@ -103,6 +104,22 @@ class LSTMModel(nn.Module):
         out = self.fc(out)  # [B, 1]
         return out
 
+    def predict(self, X: np.ndarray, device: str = "cpu") -> np.ndarray:
+        """Numpy convenience wrapper for inference.
+
+        Args:
+            X: [N, T, F] input array.
+            device: Torch device string.
+
+        Returns:
+            [N] prediction array.
+        """
+        self.eval()
+        with torch.no_grad():
+            x_tensor = torch.FloatTensor(X).to(device)
+            preds = self.forward(x_tensor).squeeze(-1)
+        return preds.cpu().numpy()
+
 
 # ======================================================================
 # Trainer
@@ -144,6 +161,46 @@ class LSTMTrainer:
         self.criterion = nn.MSELoss()
         self.scaler = torch.amp.grad_scaler.GradScaler() if self.use_amp else None
         self._best_state: Optional[dict] = None
+        self.history: Dict[str, list] = {"train_loss": [], "val_loss": []}
+
+        if self.use_amp:
+            logger.info("Mixed precision training enabled (FP16)")
+        if self.accumulation_steps > 1:
+            logger.info(
+                "Gradient accumulation: %d steps (effective batch=%d)",
+                self.accumulation_steps,
+                self.batch_size * self.accumulation_steps,
+            )
+
+    def fit(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_val: np.ndarray,
+        y_val: np.ndarray,
+    ) -> Dict[str, list]:
+        """Train the model with early stopping."""
+
+        # TensorDatasets and DataLoaders
+        train_ds = TensorDataset(
+            torch.FloatTensor(X_train), torch.FloatTensor(y_train).unsqueeze(-1)
+        )
+        val_ds = TensorDataset(
+            torch.FloatTensor(X_val), torch.FloatTensor(y_val).unsqueeze(-1)
+        )
+
+        effective_batch = self.batch_size // self.accumulation_steps
+        train_dl = DataLoader(
+            train_ds,
+            batch_size=effective_batch,
+            shuffle=True,
+            generator=torch.Generator().manual_seed(self.seed),
+        )
+        val_dl = DataLoader(val_ds, batch_size=effective_batch, shuffle=False)
+
+        best_val_loss = float("inf")
+        patience_counter = 0
+        # self.history = {"train_loss": [], "val_loss": []}
         self.history = {
             k: []
             for k in [
@@ -158,102 +215,111 @@ class LSTMTrainer:
             ]
         }
 
-        if self.use_amp:
-            logger.info("Mixed precision training enabled (FP16)")
-        if self.accumulation_steps > 1:
-            logger.info(
-                "Gradient accumulation: %d steps (effective batch=%d)",
-                self.accumulation_steps,
-                self.batch_size * self.accumulation_steps,
-            )
-
-    # ------------------------------------------------------------------
-    # INTERNAL UTILS
-    # ------------------------------------------------------------------
-
-    def _to_tensor(self, arr: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(arr, dtype=torch.float32, device=self.device)
-
-    def _predict_batches(self, X: np.ndarray, batch_size: int) -> np.ndarray:
-        self.model.eval()
-        preds = []
-
-        with torch.no_grad():
-            for i in range(0, len(X), batch_size):
-                X_batch = self._to_tensor(X[i : i + batch_size])
-                pred = self.model(X_batch).detach().cpu().numpy()
-                preds.append(pred)
-
-        return np.concatenate(preds).reshape(-1)
-
-    # ------------------------------------------------------------------
-    # TRAIN
-    # ------------------------------------------------------------------
-
-    def fit(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-    ) -> Dict[str, list]:
-
-        train_ds = TensorDataset(
-            self._to_tensor(X_train), self._to_tensor(y_train).unsqueeze(-1)
-        )
-        val_ds = TensorDataset(
-            self._to_tensor(X_val), self._to_tensor(y_val).unsqueeze(-1)
-        )
-
-        train_dl = DataLoader(
-            train_ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            generator=torch.Generator().manual_seed(self.seed),
-        )
-
-        val_dl = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
-
-        best_val_loss = float("inf")
-        patience_counter = 0
-
-        for epoch in tqdm(range(self.max_epochs), desc="Epochs"):
+        for epoch in tqdm(range(self.max_epochs), desc="Epochs", unit="epoch"):
             self.model.train()
             epoch_loss = 0.0
 
-            for x_b, y_b in train_dl:
-                pred = self.model(x_b)
-                loss = self.criterion(pred, y_b)
+            # Batch-level progress bar
+            for batch_idx, (x_b, y_b) in enumerate(
+                tqdm(train_dl, desc=f"Epoch {epoch+1}", leave=False, unit="batch")
+            ):
+                x_b, y_b = x_b.to(self.device), y_b.to(self.device)
 
-                if not torch.isfinite(loss):
-                    raise ValueError(f"Non-finite loss: {loss.item()}")
+                # Forward + backward
+                if self.use_amp:
+                    with torch.amp.autocast_mode.autocast(device_type="cuda"):
+                        pred = self.model(x_b)
+                        loss = self.criterion(pred, y_b)
+                    loss = loss / self.accumulation_steps
+                    self.scaler.scale(loss).backward()
+                else:
+                    pred = self.model(x_b)
+                    loss = self.criterion(pred, y_b)
+                    loss = loss / self.accumulation_steps
 
-                loss.backward()
+                    # Check for NaN/Inf in loss
+                    if not torch.isfinite(loss):
+                        logger.error(f"Non-finite loss detected: {loss.item()}")
+                        raise ValueError(
+                            f"Training failed: non-finite loss {loss.item()}"
+                        )
 
+                    loss.backward()
+
+                # Update weights every accumulation_steps
+                if (batch_idx + 1) % self.accumulation_steps == 0:
+                    if self.use_amp:
+                        self.scaler.unscale_(self.optimizer)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                    if self.use_amp:
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        self.optimizer.step()
+                    self.optimizer.zero_grad()
+
+                epoch_loss += (
+                    loss.item() * len(x_b) * self.accumulation_steps
+                )  # restore true batch contribution
+
+            # Apply final partial accumulation step if needed
+            if (batch_idx + 1) % self.accumulation_steps != 0:
+                if self.use_amp:
+                    self.scaler.unscale_(self.optimizer)
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                self.optimizer.step()
+                if self.use_amp:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
                 self.optimizer.zero_grad()
-
-                epoch_loss += loss.item() * len(x_b)
 
             avg_train_loss = epoch_loss / len(train_ds)
 
-            # ---- VALIDATION (reused logic) ----
-            y_pred = self._predict_batches(X_val, self.batch_size)
+            # ---- Validation ----
+            # ---- Validation ----
+            self.model.eval()
+            val_loss = 0.0
+
+            y_val_true = []
+            y_val_pred = []
+
+            with torch.no_grad():
+                for x_val_b, y_val_b in val_dl:
+                    x_val_b, y_val_b = x_val_b.to(self.device), y_val_b.to(self.device)
+
+                    preds = self.model(x_val_b)
+
+                    # Loss accumulation
+                    val_loss += self.criterion(preds, y_val_b).item() * len(x_val_b)
+
+                    # Collect predictions for metrics
+                    y_val_pred.append(preds.detach().cpu().numpy().flatten())
+                    y_val_true.append(y_val_b.detach().cpu().numpy().flatten())
+
+            val_loss /= len(val_ds)
+
+            # Concatenate full validation predictions
+            y_val_true = np.concatenate(y_val_true)
+            y_val_pred = np.concatenate(y_val_pred)
+
+            # Compute metrics
             metrics = compute_and_log_all_statistical_metrics(
-                y_val, y_pred, label=f"LSTM Epoch {epoch+1}"
+                y_val_true,
+                y_val_pred,
+                label=f"LSTM Epoch {epoch+1}",
             )
 
-            val_loss = metrics["rmse"]
-
-            # ---- HISTORY ----
             self.history["train_loss"].append(avg_train_loss)
             self.history["val_loss"].append(val_loss)
+            self.history["rmse"].append(metrics["rmse"])
+            self.history["mae"].append(metrics["mae"])
+            self.history["mape"].append(metrics["mape"])
+            self.history["r2"].append(metrics["r2"])
+            self.history["directional_accuracy"].append(metrics["directional_accuracy"])
+            self.history["f1_ternary"].append(metrics["f1_ternary"])
 
-            for k in metrics:
-                if k in self.history:
-                    self.history[k].append(metrics[k])
-
+            # Log everything in one line
             logger.info(
                 "[EPOCH %d] train_loss=%.6f | val_loss=%.6f | RMSE=%.6f | MAE=%.6f | DA=%.4f | F1=%.4f | R2=%.4f",
                 epoch + 1,
@@ -266,7 +332,7 @@ class LSTMTrainer:
                 metrics["r2"],
             )
 
-            # ---- EARLY STOPPING ----
+            # ---- Early stopping ----
             if val_loss < best_val_loss - 1e-7:
                 best_val_loss = val_loss
                 patience_counter = 0
@@ -279,29 +345,54 @@ class LSTMTrainer:
                     logger.info(f"Early stopping at epoch {epoch+1}")
                     break
 
-        if self._best_state:
+        # Restore best weights
+        if self._best_state is not None:
             self.model.load_state_dict(
                 {k: v.to(self.device) for k, v in self._best_state.items()}
             )
 
         return self.history
 
-    # ------------------------------------------------------------------
-    # INFERENCE
-    # ------------------------------------------------------------------
-
     def predict(self, X: np.ndarray, batch_size: int = 256) -> np.ndarray:
-        return self._predict_batches(X, batch_size)
+        self.model.eval()
+        preds = []
+        with torch.no_grad():
+            for i in range(0, len(X), batch_size):
+                X_batch = torch.FloatTensor(X[i : i + batch_size]).to(self.device)
+                pred_batch = self.model(X_batch).cpu().numpy()
+                preds.append(pred_batch)
+        return np.vstack(preds)
 
     def evaluate(
         self, X: np.ndarray, y: np.ndarray, batch_size: int = 256
     ) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
 
-        y_pred = self._predict_batches(X, batch_size)
-        y_true = y.reshape(-1)
+        self.model.eval()
+
+        preds = []
+        trues = []
+
+        with torch.no_grad():
+            for i in range(0, len(X), batch_size):
+                X_batch = torch.FloatTensor(X[i : i + batch_size]).to(self.device)
+                y_batch = torch.FloatTensor(y[i : i + batch_size]).to(self.device)
+
+                pred_batch = self.model(X_batch)
+
+                preds.append(pred_batch.cpu().numpy())
+                trues.append(y_batch.cpu().numpy())
+
+
+        y_pred = np.vstack(preds).flatten()
+        y_true = np.vstack(trues).flatten()
 
         metrics = compute_and_log_all_statistical_metrics(
             y_true, y_pred, label="Evaluation"
         )
+
+        # optional: store evaluation run into history (if desired)
+        for k in metrics:
+            if k in self.history:
+                self.history[k].append(metrics[k])
 
         return metrics, y_true, y_pred

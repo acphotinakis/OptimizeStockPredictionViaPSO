@@ -20,7 +20,9 @@ sys.path.insert(0, str(project_root))
 
 from common import make_tag, make_windows, save_json, setup
 from src.data.splitter import build_windows
-from src.evaluation.metrics import all_statistical_metrics
+from src.evaluation.metrics import (
+    compute_and_log_all_statistical_metrics,
+)
 from src.models.lstm.lstm_model import LSTMModel, LSTMTrainer
 from src.models.baselines import PersistenceModel, VanillaLSTM, XGBoostBaseline
 
@@ -35,7 +37,9 @@ def _train_and_predict(name: str, model, X_tr, y_tr, X_va, y_va, X_te, y_te):
     else:
         model.fit(X_tr, y_tr, X_va, y_va)
         y_pred = model.predict(X_te)
-    metrics = all_statistical_metrics(y_te, y_pred, label=f"[{name}] Prediction Stats")
+    metrics = compute_and_log_all_statistical_metrics(
+        y_te, y_pred, label=f"[{name}] Prediction Stats"
+    )
 
     return y_pred, metrics
 

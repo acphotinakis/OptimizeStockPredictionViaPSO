@@ -133,26 +133,7 @@ def load_prices(
     raw_path = Path("data/raw") / f"{ticker}.parquet"
 
     if not raw_path.exists():
-        logger.info("Raw price file not found: %s. Using synthetic prices.", raw_path)
-
-        y_test = np.load(Path(features_dir) / ticker / "y_test.npy")
-
-        base_price = 100.0
-        closes = base_price * np.exp(np.cumsum(y_test))
-        closes = np.asarray(closes, dtype=np.float32)
-
-        rng = np.random.default_rng(42)
-        opens = np.roll(closes, 1)
-        opens[0] = base_price
-        opens = opens * (1 + rng.normal(0, 0.0001, len(opens)))
-        opens = np.asarray(opens, dtype=np.float32)
-
-        ts = pd.date_range(
-            "2023-01-03 14:30", periods=len(closes), freq="1min", tz="UTC"
-        )
-        ts = pd.DatetimeIndex(ts)
-
-        return opens, closes, ts
+        raise ValueError("Raw data doesn't exist")
 
     from src.data import AlpacaIngestor, DataCleaner, DataSplitter
 

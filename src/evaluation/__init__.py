@@ -14,8 +14,9 @@ from .metrics import (
     profit_factor,
     win_rate,
     information_ratio,
-    all_statistical_metrics,
-    all_trading_metrics,
+    compute_and_log_all_statistical_metrics,
+    compute_and_log_all_trading_metrics,
+    _log_results,
 )
 from .backtester import Backtester, BacktestResult
 from .walk_forward import WalkForwardValidator
@@ -36,9 +37,10 @@ __all__ = [
     "profit_factor",
     "win_rate",
     "information_ratio",
-    "all_statistical_metrics",
-    "all_trading_metrics",
+    "compute_and_log_all_statistical_metrics",
+    "compute_and_log_all_trading_metrics",
     "Backtester",
     "BacktestResult",
     "WalkForwardValidator",
+    "_log_results",
 ]

@@ -43,7 +43,7 @@ def plot_ohlcv_with_signals(df, ticker, save_path=None):
         # Determine number of panels (add PnL if available)
         n_panels = 4 if has_pnl else 3
         height_ratios = [3, 1, 1.5, 1.5] if has_pnl else [3, 1, 1.5]
-        
+
         # Full chart with OHLCV (+ optional PnL)
         fig, axes = plt.subplots(
             n_panels,
@@ -52,7 +52,7 @@ def plot_ohlcv_with_signals(df, ticker, save_path=None):
             gridspec_kw={"height_ratios": height_ratios},
             sharex=True,
         )
-        
+
         if has_pnl:
             ax_price, ax_vol, ax_pred, ax_pnl = axes
         else:
@@ -236,62 +236,96 @@ def plot_ohlcv_with_signals(df, ticker, save_path=None):
         ax_pred.grid(True, alpha=0.3)
 
         # Format y-axis as percentage
-        ax_pred.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y*100:.2f}%"))
-        
+        ax_pred.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda y, _: f"{y*100:.2f}%")
+        )
+
         # --- Panel 4: PnL / Equity Curve (if available) ---
         if has_pnl:
             equity = df["equity"].values
             pnl = df["pnl"].values
             initial_capital = equity[0] - pnl[0] if len(equity) > 0 else 100000
-            
+
             # Plot equity curve
-            ax_pnl.plot(x, equity, label="Equity Curve", linewidth=2, color='blue', alpha=0.8)
-            ax_pnl.axhline(y=initial_capital, color='k', linestyle='--', alpha=0.5, 
-                          label=f'Initial Capital (${initial_capital:,.0f})')
-            
+            ax_pnl.plot(
+                x, equity, label="Equity Curve", linewidth=2, color="blue", alpha=0.8
+            )
+            ax_pnl.axhline(
+                y=initial_capital,
+                color="k",
+                linestyle="--",
+                alpha=0.5,
+                label=f"Initial Capital (${initial_capital:,.0f})",
+            )
+
             # Shade profitable/unprofitable regions
-            ax_pnl.fill_between(x, initial_capital, equity, 
-                               where=(equity >= initial_capital), 
-                               color='green', alpha=0.2, label='Profit')
-            ax_pnl.fill_between(x, initial_capital, equity, 
-                               where=(equity < initial_capital), 
-                               color='red', alpha=0.2, label='Loss')
-            
+            ax_pnl.fill_between(
+                x,
+                initial_capital,
+                equity,
+                where=(equity >= initial_capital),
+                color="green",
+                alpha=0.2,
+                label="Profit",
+            )
+            ax_pnl.fill_between(
+                x,
+                initial_capital,
+                equity,
+                where=(equity < initial_capital),
+                color="red",
+                alpha=0.2,
+                label="Loss",
+            )
+
             # Calculate metrics
             final_pnl = pnl[-1]
-            final_return = (equity[-1] / initial_capital - 1) if initial_capital > 0 else 0
-            
+            final_return = (
+                (equity[-1] / initial_capital - 1) if initial_capital > 0 else 0
+            )
+
             # Calculate Sharpe and Max Drawdown
             if "strategy_return" in df.columns:
                 strategy_returns = df["strategy_return"].values
-                sharpe = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-10) * np.sqrt(252 * 390)
+                sharpe = (
+                    np.mean(strategy_returns)
+                    / (np.std(strategy_returns) + 1e-10)
+                    * np.sqrt(252 * 390)
+                )
             else:
                 sharpe = 0.0
-            
+
             running_max = np.maximum.accumulate(equity)
             drawdown = (equity - running_max) / (running_max + 1e-10)
             max_dd = np.min(drawdown)
-            
+
             # Add final PnL annotation
             ax_pnl.annotate(
-                f'Final PnL: ${final_pnl:,.2f} ({final_return:+.2%})',
-                xy=(len(equity)-1, equity[-1]),
-                xytext=(len(equity)*0.7, equity[-1]),
+                f"Final PnL: ${final_pnl:,.2f} ({final_return:+.2%})",
+                xy=(len(equity) - 1, equity[-1]),
+                xytext=(len(equity) * 0.7, equity[-1]),
                 fontsize=12,
-                fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.5', 
-                         facecolor='lightgreen' if final_pnl > 0 else 'lightcoral', 
-                         alpha=0.8),
-                arrowprops=dict(arrowstyle='->', color='black', lw=1.5)
+                fontweight="bold",
+                bbox=dict(
+                    boxstyle="round,pad=0.5",
+                    facecolor="lightgreen" if final_pnl > 0 else "lightcoral",
+                    alpha=0.8,
+                ),
+                arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
             )
-            
-            ax_pnl.set_title(f"{ticker} Equity Curve | Sharpe: {sharpe:.3f} | Max DD: {max_dd:.2%}", 
-                           fontsize=14, fontweight='bold')
+
+            ax_pnl.set_title(
+                f"{ticker} Equity Curve | Sharpe: {sharpe:.3f} | Max DD: {max_dd:.2%}",
+                fontsize=14,
+                fontweight="bold",
+            )
             ax_pnl.set_xlabel("Time (Bar Index)", fontsize=12)
             ax_pnl.set_ylabel("Equity ($)", fontsize=12)
-            ax_pnl.legend(loc='upper left', fontsize=10)
+            ax_pnl.legend(loc="upper left", fontsize=10)
             ax_pnl.grid(True, alpha=0.3)
-            ax_pnl.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+            ax_pnl.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda x, p: f"${x:,.0f}")
+            )
 
     else:
         # Simplified 2-panel chart without OHLCV
@@ -404,7 +438,7 @@ def plot_ohlcv_with_signals(df, ticker, save_path=None):
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"✓ Saved plot to {save_path}")
+        print(f"[SELECTED] Saved plot to {save_path}")
 
     return fig
 
@@ -415,19 +449,19 @@ def generate_signal_summary(df, ticker):
     summary.append(f"\n{'='*60}")
     summary.append(f"LSTM Trading Signal Summary for {ticker}")
     summary.append(f"{'='*60}")
-    
+
     # Signal counts
     n_buy = (df["signal"] == 1).sum()
     n_sell = (df["signal"] == -1).sum()
     n_hold = (df["signal"] == 0).sum()
     total = len(df)
-    
+
     summary.append(f"\nSignal Distribution:")
     summary.append(f"  Buy signals:  {n_buy:5d} ({n_buy/total*100:5.2f}%)")
     summary.append(f"  Sell signals: {n_sell:5d} ({n_sell/total*100:5.2f}%)")
     summary.append(f"  Hold signals: {n_hold:5d} ({n_hold/total*100:5.2f}%)")
     summary.append(f"  Total:        {total:5d}")
-    
+
     # Prediction statistics
     if "predicted_return" in df.columns:
         pred_valid = df["predicted_return"].notna()
@@ -436,24 +470,24 @@ def generate_signal_summary(df, ticker):
             pred_std = df.loc[pred_valid, "predicted_return"].std()
             pred_min = df.loc[pred_valid, "predicted_return"].min()
             pred_max = df.loc[pred_valid, "predicted_return"].max()
-            
+
             summary.append(f"\nPrediction Statistics:")
             summary.append(f"  Mean:   {pred_mean*100:7.4f}%")
             summary.append(f"  Std:    {pred_std*100:7.4f}%")
             summary.append(f"  Min:    {pred_min*100:7.4f}%")
             summary.append(f"  Max:    {pred_max*100:7.4f}%")
-    
+
     # Actual return statistics (if available)
     if "actual_return" in df.columns:
         actual_valid = df["actual_return"].notna()
         if actual_valid.any():
             actual_mean = df.loc[actual_valid, "actual_return"].mean()
             actual_std = df.loc[actual_valid, "actual_return"].std()
-            
+
             summary.append(f"\nActual Return Statistics:")
             summary.append(f"  Mean:   {actual_mean*100:7.4f}%")
             summary.append(f"  Std:    {actual_std*100:7.4f}%")
-    
+
     # PnL statistics (if available)
     if "equity" in df.columns and "pnl" in df.columns:
         equity = df["equity"].values
@@ -461,19 +495,25 @@ def generate_signal_summary(df, ticker):
         initial_capital = equity[0] - pnl[0] if len(equity) > 0 else 100000
         final_equity = equity[-1]
         final_pnl = pnl[-1]
-        total_return = (final_equity / initial_capital - 1) if initial_capital > 0 else 0
-        
+        total_return = (
+            (final_equity / initial_capital - 1) if initial_capital > 0 else 0
+        )
+
         # Calculate Sharpe and Max Drawdown
         if "strategy_return" in df.columns:
             strategy_returns = df["strategy_return"].values
-            sharpe = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-10) * np.sqrt(252 * 390)
+            sharpe = (
+                np.mean(strategy_returns)
+                / (np.std(strategy_returns) + 1e-10)
+                * np.sqrt(252 * 390)
+            )
         else:
             sharpe = 0.0
-        
+
         running_max = np.maximum.accumulate(equity)
         drawdown = (equity - running_max) / (running_max + 1e-10)
         max_dd = np.min(drawdown)
-        
+
         # Count trades
         if "signal" in df.columns:
             position = df["signal"].values
@@ -481,7 +521,7 @@ def generate_signal_summary(df, ticker):
             n_trades = (np.abs(position_changes) > 0).sum()
         else:
             n_trades = 0
-        
+
         summary.append(f"\nPnL Statistics:")
         summary.append(f"  Initial Capital:  ${initial_capital:12,.2f}")
         summary.append(f"  Final Equity:     ${final_equity:12,.2f}")
@@ -490,9 +530,9 @@ def generate_signal_summary(df, ticker):
         summary.append(f"  Sharpe Ratio:     {sharpe:12.3f}")
         summary.append(f"  Max Drawdown:     {max_dd:12.2%}")
         summary.append(f"  Number of Trades: {n_trades:12d}")
-    
+
     summary.append(f"{'='*60}\n")
-    
+
     return "\n".join(summary)
 
 
@@ -527,7 +567,7 @@ if __name__ == "__main__":
 
     try:
         df = load_and_align(args.ticker, results_dir, seed=args.seed)
-        print(f"✓ Loaded {len(df)} predictions")
+        print(f"[SELECTED] Loaded {len(df)} predictions")
 
         # Generate and print summary
         summary = generate_signal_summary(df, args.ticker)
@@ -537,13 +577,13 @@ if __name__ == "__main__":
         summary_path = Path(args.output).with_suffix(".txt")
         with open(summary_path, "w") as f:
             f.write(summary)
-        print(f"✓ Saved summary to {summary_path}")
+        print(f"[SELECTED] Saved summary to {summary_path}")
 
         # Create plot
         print(f"\nGenerating plot...")
         plot_ohlcv_with_signals(df, args.ticker, args.output)
 
-        print(f"\n✓ Complete! Plot saved to {args.output}")
+        print(f"\n[SELECTED] Complete! Plot saved to {args.output}")
 
     except FileNotFoundError as e:
         print(f"\n✗ Error: {e}")

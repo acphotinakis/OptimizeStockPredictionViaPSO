@@ -45,9 +45,12 @@ import torch
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.evaluation.metrics import _log_results
 from src.data.splitter import build_windows
 from src.evaluation.backtester import Backtester
-from src.evaluation.metrics import all_statistical_metrics
+from src.evaluation.metrics import (
+    compute_and_log_all_statistical_metrics,
+)
 from src.models.baselines import VanillaLSTM
 from src.models.xgboost.xgboost_model import XGBoostModel
 from src.utils.config_loader import load_config
@@ -299,30 +302,6 @@ def _plot_equity(
     logger.info("Equity plot saved --> %s", save_path)
 
 
-def _log_results(
-    stat_metrics: dict,
-    result,
-    theta: float,
-) -> None:
-    logger.info("=" * 55)
-    logger.info("STATISTICAL METRICS")
-    logger.info("  RMSE : %.6f", stat_metrics["rmse"])
-    logger.info("  DA   : %.4f", stat_metrics["directional_accuracy"])
-    logger.info("  F1   : %.4f", stat_metrics["f1_ternary"])
-    logger.info("  R²   : %.4f", stat_metrics["r2"])
-    logger.info("TRADING METRICS (θ=%.5f)", theta)
-    logger.info("  Sharpe        : %.3f", result.sharpe)
-    logger.info("  Sortino       : %.3f", result.sortino)
-    logger.info("  Max Drawdown  : %.2f%%", result.mdd * 100)
-    logger.info("  CAGR          : %.2f%%", result.cagr_ * 100)
-    logger.info("  Calmar        : %.3f", result.calmar)
-    logger.info("  Profit Factor : %.3f", result.profit_factor_)
-    logger.info("  Win Rate      : %.2f%%", result.win_rate_ * 100)
-    logger.info("  Trades        : %d", result.n_trades)
-    logger.info("  Turnover      : %.4f", result.turnover)
-    logger.info("=" * 55)
-
-
 # ---------------------------------------------------------------------------
 # LSTM test
 # ---------------------------------------------------------------------------
@@ -363,7 +342,7 @@ def test_lstm(
     y_pred = model.predict(X_test).flatten()
 
     # ---- Statistical metrics ----
-    stat_metrics = all_statistical_metrics(y_test_w, y_pred)
+    stat_metrics = compute_and_log_all_statistical_metrics(y_test_w, y_pred)
 
     # ---- Backtest ----
     theta = _load_threshold(results_dir, args.ticker, "lstm", args.seed)
@@ -447,7 +426,7 @@ def test_xgboost(
     y_pred = model.predict(X_test).flatten()
 
     # ---- Statistical metrics ----
-    stat_metrics = all_statistical_metrics(y_test_w, y_pred)
+    stat_metrics = compute_and_log_all_statistical_metrics(y_test_w, y_pred)
 
     # ---- Backtest ----
     theta = _load_threshold(results_dir, args.ticker, "xgboost", args.seed)
