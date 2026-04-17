@@ -18,8 +18,21 @@ from typing import Dict
 
 import pandas as pd
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+from pathlib import Path
+
+# Resolve project root (adjust depth if needed)
+CURRENT_FILE = Path(__file__).resolve()
+PROJECT_ROOT = CURRENT_FILE.parents[1]  # adjust if structure changes
+
+# Ensure only the project root (not file paths) is added
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Debug prints (optional)
+print("Current file:", CURRENT_FILE)
+print("Project root:", PROJECT_ROOT)
+print("sys.path updated:")
+print(sys.path)
 
 from src.data.aligner import TickerAligner
 from src.data.alpaca_ingestor import AlpacaIngestor

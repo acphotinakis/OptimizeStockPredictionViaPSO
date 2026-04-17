@@ -15,14 +15,32 @@ import numpy as np
 import pandas as pd
 import yaml
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# project_root = Path(__file__).parent.parent
+# sys.path.insert(0, str(project_root))
+
+# print(sys.path)
+import sys
+from pathlib import Path
+
+# Resolve project root (adjust depth if needed)
+CURRENT_FILE = Path(__file__).resolve()
+PROJECT_ROOT = CURRENT_FILE.parents[1]  # adjust if structure changes
+
+# Ensure only the project root (not file paths) is added
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Debug prints (optional)
+print("Current file:", CURRENT_FILE)
+print("Project root:", PROJECT_ROOT)
+print("sys.path updated:")
+print(sys.path)
 
 from src.features.pipeline import FeaturePipeline
 from src.features.universe_builder import SymbolUniverseBuilder
 from src.features.scalar import PipelineScaler
 from src.data.splitter import DataSplitter
-from src.utils.logger import setup_logger
+from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
@@ -50,15 +68,19 @@ def process_ticker(
 
     # 2. Feature pipeline
     pipeline = FeaturePipeline(target_ticker=ticker, peer_tickers=peers)
-    X_train, y_train, feat_names = pipeline.fit_transform(filter_dfs(dfs_train))
-    X_val, y_val = pipeline.transform(filter_dfs(dfs_val))
-    X_test, y_test = pipeline.transform(filter_dfs(dfs_test))
+    X_train, y_train, feat_names, train_idx = pipeline.fit_transform(
+        filter_dfs(dfs_train)
+    )
+    X_val, y_val, val_idx = pipeline.transform(filter_dfs(dfs_val))
+    X_test, y_test, test_idx = pipeline.transform(filter_dfs(dfs_test))
 
     # 3. Scaling — fit on train only (features only; target is NOT scaled)
     def to_df(X, y):
         df = pd.DataFrame(X, columns=feat_names)
         df["log_return"] = y
         return df
+
+    logger.info(f"Feature Names [SELECTED FOR {ticker}]: {feat_names}")
 
     scaler = PipelineScaler().fit(to_df(X_train, y_train), feature_cols=feat_names)
 
@@ -81,6 +103,9 @@ def process_ticker(
         "y_val": y_val_s,
         "X_test": X_test_s,
         "y_test": y_test_s,
+        "train_index": train_idx.values.astype("datetime64[ns]"),
+        "val_index": val_idx.values.astype("datetime64[ns]"),
+        "test_index": test_idx.values.astype("datetime64[ns]"),
     }
 
     for name, arr in artifacts.items():
@@ -118,6 +143,15 @@ def process_ticker(
         "train_samples": len(X_train_s),
         "val_samples": len(X_val_s),
         "test_samples": len(X_test_s),
+        "train_index_range": (
+            [str(train_idx[0]), str(train_idx[-1])] if len(train_idx) > 0 else []
+        ),
+        "val_index_range": (
+            [str(val_idx[0]), str(val_idx[-1])] if len(val_idx) > 0 else []
+        ),
+        "test_index_range": (
+            [str(test_idx[0]), str(test_idx[-1])] if len(test_idx) > 0 else []
+        ),
         "train_start": str(dfs_train[ticker].index.min()),
         "train_end": str(dfs_train[ticker].index.max()),
         "val_start": str(dfs_val[ticker].index.min()),
@@ -134,6 +168,12 @@ def process_ticker(
             "X_val": list(X_val_s.shape),
             "X_test": list(X_test_s.shape),
         },
+        "index_shapes": {
+            "train_index": len(train_idx),
+            "val_index": len(val_idx),
+            "test_index": len(test_idx),
+        },
+        "index_dtype": "datetime64[ns]",
         "scaler_type": "PipelineScaler",
         "scaler_fitted_on": "train_only",
         "scaled_features": feat_names,
@@ -161,16 +201,37 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/default_config.yaml")
     parser.add_argument("--output", default="data/features")
-    parser.add_argument("--tickers", default="config/tickers.txt")
+    parser.add_argument("--ticker", type=str, default=None)
+    parser.add_argument("--tickers", nargs="+", default=None)
+    parser.add_argument("--tickers-file", default="config/tickers.txt")
     parser.add_argument("--universe-config", default="config/symbol_universe.yaml")
+
+    def load_tickers(args) -> list[str]:
+        # Priority 1: single ticker
+        if args.ticker:
+            return [args.ticker]
+
+        # Priority 2: CLI list
+        if args.tickers:
+            return args.tickers
+
+        # Priority 3: file
+        with open(args.tickers_file) as f:
+            return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+
     args = parser.parse_args()
 
-    load_config(args.config)
-    setup_logger(log_file="logs/02_build_features.log", level="INFO")
+    if args.ticker and args.tickers:
+        raise ValueError("Use either --ticker or --tickers, not both.")
 
-    # Load tickers
-    with open(args.tickers) as f:
-        all_tickers = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    setup_logger(
+        log_file="logs/02_build_features.log", level="INFO", mode=LogFileMode.OVERWRITE
+    )
+    load_config(args.config)
+
+    logger.info(f"Arguments: \n {args}")
+
+    all_tickers = load_tickers(args)
     logger.info("Loaded %d tickers", len(all_tickers))
 
     # Universe builder
@@ -212,6 +273,8 @@ def main() -> None:
     with open(args.universe_config) as f:
         u_cfg = yaml.safe_load(f)
     targets = u_cfg.get("prediction_targets", all_tickers)
+
+    logger.info(f"Prediction Targets: {targets}")
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
