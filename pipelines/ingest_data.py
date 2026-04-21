@@ -61,7 +61,7 @@ def _save_parquet(df: pd.DataFrame, path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_ingest(args, cfg, tickers: list[str]) -> None:
+def run_ingest(args, cfg: Config, tickers: list[str]) -> None:
     AlpacaIngestor().download_universe(
         tickers,
         args.raw_dir,
@@ -71,12 +71,8 @@ def run_ingest(args, cfg, tickers: list[str]) -> None:
     )
 
 
-def run_clean(args, cfg, tickers: list[str]) -> None:
-    ingestor = AlpacaIngestor()
-    cleaner = DataCleaner(
-        session_start=cfg.data.session_start,
-        session_end=cfg.data.session_end,
-    )
+def run_clean(args, cfg: Config, tickers: list[str]) -> None:
+    cleaner = DataCleaner()
     raw_dir = Path(args.raw_dir)
     cleaned_dir = Path(args.cleaned_dir)
 
@@ -87,20 +83,13 @@ def run_clean(args, cfg, tickers: list[str]) -> None:
             raise FileNotFoundError(
                 f"Raw data missing for {ticker}. Run --mode ingest first."
             )
-        df = cleaner.clean(ingestor.load_bars(raw_path))
+        df = cleaner.clean(AlpacaIngestor._load_bars(raw_path))
         _save_parquet(df, cleaned_dir / f"{ticker}.parquet")
 
 
 def run_align(args, cfg: Config, tickers: list[str]) -> None:
-    ingestor = AlpacaIngestor()
-    cleaner = DataCleaner(
-        session_start=cfg.data.session_start,
-        session_end=cfg.data.session_end,
-    )
     aligner = TickerAligner(
         benchmark_ticker=cfg.data.benchmark_ticker,
-        max_missing_fraction=cfg.data.max_missing_fraction,
-        max_ffill_bars=cfg.data.max_ffill_bars,
     )
     cleaned_dir = Path(args.cleaned_dir)
     processed_dir = Path(args.processed_dir)
@@ -112,14 +101,15 @@ def run_align(args, cfg: Config, tickers: list[str]) -> None:
             raise FileNotFoundError(
                 f"Cleaned data missing for {ticker}. Run --mode clean first."
             )
-        dfs[ticker] = ingestor.load_bars(path)
+        dfs[ticker] = AlpacaIngestor._load_bars(path)
 
     # Determine field list from SPY
-    spy_raw = ingestor.load_bars(Path(args.raw_dir) / "SPY.parquet")
-    fields = cleaner.clean(spy_raw).columns.tolist()
+    spy_clean = AlpacaIngestor._load_bars(Path(args.cleaned_dir) / "SPY.parquet")
+    fields = spy_clean.columns.tolist()
+    logger.info("Aligning on fields: %s", fields)
 
     aligned = aligner.align(dfs=dfs, fields=fields)
-    aligner.save_aligned_tickers(aligned_df=aligned, output_dir=str(processed_dir))
+    aligner.save_aligned(aligned_df=aligned, output_dir=str(processed_dir))
 
     for ticker, df in aligned.items():
         logger.info(
@@ -139,7 +129,11 @@ def run_align(args, cfg: Config, tickers: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest, clean, and align OHLCV data")
-    parser.add_argument("--mode", choices=["ingest", "clean", "align"], required=True)
+    parser.add_argument(
+        "--mode",
+        choices=["ingest", "clean", "align", "all", "clean_and_align"],
+        required=True,
+    )
     parser.add_argument("--config", default="config/default_config.yaml")
     parser.add_argument("--tickers", default="config/tickers.txt")
     parser.add_argument("--raw-dir", default="data/raw")
@@ -160,6 +154,16 @@ def main() -> None:
         run_clean(args, cfg, tickers)
     elif args.mode == "align":
         run_align(args, cfg, tickers)
+    elif args.mode == "all":
+        run_ingest(args, cfg, tickers)
+        run_clean(args, cfg, tickers)
+        run_align(args, cfg, tickers)
+    elif args.mode == "clean_and_align":
+        run_clean(args, cfg, tickers)
+        run_align(args, cfg, tickers)
+    else:
+        logger.error("Invalid mode: %s", args.mode)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

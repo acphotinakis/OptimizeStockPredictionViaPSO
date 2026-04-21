@@ -1,20 +1,24 @@
 """
 src/data/cleaner.py
 
-Session filtering, missing value imputation, OHLC consistency checks,
-zero-volume removal, and return outlier clipping for 1-minute OHLCV data.
+TRD Stage 2: Data Cleaning (STRICT)
+
+Guarantees:
+- Causal (no look-ahead bias)
+- Observation-based gap classification
+- Bounded forward-fill (≤ MAX_GAP)
+- Deterministic long-gap removal
+- Strict OHLCV validity
+- No NaNs in output OHLCV
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import logging
-from typing import Optional
-
+from typing import Any, Dict, List, Optional
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
-from datetime import datetime
-
 import logging
 import sys
 from pathlib import Path
@@ -24,42 +28,29 @@ sys.path.insert(0, str(project_root))
 
 logger = logging.getLogger(__name__)
 
-from constants import (
-    SESSION_START,
-    SESSION_END,
-    MAX_GAP_FILL_BARS,
-    OUTLIER_ROLLING_WINDOW,
-    OUTLIER_ZSCORE_THRESHOLD,
-)
+from constants import MAX_GAP_FILL_BARS
 
 
 class DataCleaner:
-    """Cleans a single-ticker 1-minute OHLCV DataFrame.
+    """
+    Cleans a single-ticker 1-minute OHLCV DataFrame.
 
-    Steps applied in order:
-        1. Session filtering (09:30 – 16:00 ET)
-        2. Zero-volume bar removal
-        3. OHLC consistency check
-        4. Reindex to full session minute grid
-        5. Forward-fill short gaps (≤ 5 bars)
-        6. Drop long gaps (> 5 bars) and flag post-gap bars
-        7. Return outlier clipping (±5σ rolling)
-        8. Add derived columns: log_return, session_minute, session_start flag
+    TRD Stage 2 Cleaner (STRICT IMPLEMENTATION)
+
+    INPUT ASSUMPTIONS:
+    - Data is already:
+        * UTC normalized
+        * Sorted by time
+        * Schema validated (Stage 1)
+    - NO calendar reindexing exists at this stage
     """
 
     def __init__(
         self,
-        session_start: str = SESSION_START,
-        session_end: str = SESSION_END,
         max_gap_fill: int = MAX_GAP_FILL_BARS,
-        outlier_z: float = OUTLIER_ZSCORE_THRESHOLD,
-        outlier_window: int = OUTLIER_ROLLING_WINDOW,
     ) -> None:
-        self.session_start = pd.Timestamp(session_start).time()
-        self.session_end = pd.Timestamp(session_end).time()
         self.max_gap_fill = max_gap_fill
-        self.outlier_z = outlier_z
-        self.outlier_window = outlier_window
+        self.validation_errors: List[str] = []
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -72,304 +63,305 @@ class DataCleaner:
             logger.info("Empty DataFrame provided to clean(); returning as-is")
             return df
 
-        df = self._ensure_utc(df)
-        df = self._remove_duplicates(df)
-        df = self._session_filter(df)
-        df = self._remove_zero_volume(df)
-        df = self._ohlc_consistency(df)
-        df = self._reindex_and_fill(df)
-        df = self._clip_outliers(df)
-        df = self._add_derived(df)
+        if df.empty:
+            return df
+
+        # -----------------------------
+        # 1. Ensure ordering invariant
+        # -----------------------------
+        df = df.sort_index()
+        # Enforce strict chronological monotonicity (ascending)
+        if not df.index.is_monotonic_increasing:
+            logger.warning("Index not monotonic increasing, sorting...")
+            df = df.sort_index()
+        assert df.index.is_monotonic_increasing, "Index must be sorted"
+
+        # -----------------------------
+        # 2. Remove duplicate timestamps
+        # -----------------------------
+        before = len(df)
+        df = df[~df.index.duplicated(keep="first")]
+        after = len(df)
+        if before - after > 0:
+            logger.info("Removed %d duplicate timestamp bars", before - after)
+        else:
+            logger.info("No duplicate timestamps found")
+
+        # -----------------------------
+        # 3. Strict OHLCV validation
+        # -----------------------------
+        df = self._validate_ohlcv(df)
+
+        # -----------------------------
+        # 4. Gap classification (OBSERVATION-BASED)
+        # -----------------------------
+        gap_info = self._compute_observation_gaps(df)
+
+        # -----------------------------
+        # 5. Apply bounded causal forward fill
+        # -----------------------------
+        df = self._bounded_forward_fill(df, gap_info)
+
+        # -----------------------------
+        # 6. Remove long gaps (> 5)
+        # -----------------------------
+        df = self._remove_long_gaps(df, gap_info)
+
+        # -----------------------------
+        # 7. Final invariant enforcement
+        # -----------------------------
+        df = self._final_validation(df)
+
         logger.info("Cleaned DataFrame: %d rows", len(df))
         return df
 
-    # ------------------------------------------------------------------
-    # Private steps
-    # ------------------------------------------------------------------
+    # =========================================================
+    # STEP 3: OHLCV VALIDATION
+    # =========================================================
 
-    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-        before = len(df)
-        df = df[~df.index.duplicated(keep="first")]
-        return df
-
-    def _ensure_utc(self, df: pd.DataFrame) -> pd.DataFrame:
-        if df.index.tzinfo is None:
-            df.index = df.index.tz_localize("UTC")
-        else:
-            df.index = df.index.tz_convert("UTC")
-        return df
-
-    def _session_filter(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Keep only bars within NYSE regular trading hours (ET)."""
-        # Build mask without copying full DataFrame
-        et_index = df.index.tz_convert("America/New_York")
-
-        mask = (et_index.time >= self.session_start) & (
-            et_index.time <= self.session_end
-        )
-
-        before = len(df)
-        df = df.loc[mask]
-
-        if before - len(df) != 0:
-            logger.info(
-                "Session filter: dropped %d pre/post-market bars", before - len(df)
-            )
-        return df
-
-    def _remove_zero_volume(self, df: pd.DataFrame) -> pd.DataFrame:
-        before = len(df)
-        df = df[df["volume"] > 0]
-        logger.info("Zero-volume removal: dropped %d bars", before - len(df))
-        return df
-
-    def _ohlc_consistency(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove bars where OHLC ordering is violated."""
-        mask = (
-            (df["low"] <= df["open"])
-            & (df["open"] <= df["high"])
-            & (df["low"] <= df["close"])
-            & (df["close"] <= df["high"])
-            & (df[["open", "high", "low", "close"]] > 0).all(axis=1)
-        )
-        dropped = (~mask).sum()
-        if dropped:
-            logger.info("OHLC consistency: dropped %d invalid bars", dropped)
-        return df[mask]
-
-    def _reindex_and_fill(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Optimized reindex and gap-filling for OHLCV DataFrame.
-
-        Steps:
-            1. Build NYSE trading minute index for the date range
-            2. Reindex OHLCV DataFrame to full trading minutes
-            3. Identify gaps and classify as short (<= max_gap_fill) or long
-            4. Forward-fill short gaps
-            5. Drop long gaps
-            6. Flag first bar after long gaps as post_long_gap
-        """
-        if df.empty:
-            logger.info("DataFrame is empty, skipping reindex.")
-            return df
-
-        import pandas_market_calendars as mcal
-
-        # -----------------------------------------------------------------
-        # 1. Trading calendar
-        # -----------------------------------------------------------------
-        start_date = df.index.min().date()
-        end_date = df.index.max().date()
-        logger.info("Reindexing from %s to %s", start_date, end_date)
-
-        nyse = mcal.get_calendar("NYSE")
-        schedule = nyse.schedule(start_date=start_date, end_date=end_date)
-        trading_minutes = mcal.date_range(schedule, frequency="1min")
-
-        logger.info("Generated NYSE trading minutes: %d bars", len(trading_minutes))
-
-        # -----------------------------------------------------------------
-        # 2. Reindex
-        # -----------------------------------------------------------------
-        df_re = df.reindex(trading_minutes)
-        logger.info("After reindex: %d bars (original %d)", len(df_re), len(df))
-
-        # -----------------------------------------------------------------
-        # 3. Identify missing gaps
-        # -----------------------------------------------------------------
-        is_missing = df_re["close"].isna()
-        df_re["gap_flag"] = is_missing
-
-        # Run-length encoding using shift & cumsum
-        run_id = (is_missing != is_missing.shift()).cumsum()
-        gap_lengths = is_missing.astype(int).groupby(run_id).transform("sum")
-        gap_lengths = gap_lengths.where(is_missing, 0)
-        df_re["gap_length"] = gap_lengths
-
-        num_short_gaps = ((is_missing) & (gap_lengths <= self.max_gap_fill)).sum()
-        num_long_gaps = ((is_missing) & (gap_lengths > self.max_gap_fill)).sum()
+    def _validate_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
         logger.info(
-            "Detected %d short-gap bars and %d long-gap bars",
-            num_short_gaps,
-            num_long_gaps,
+            "STEP 3 | OHLCV validation started | rows=%d | cols=%d",
+            len(df),
+            len(df.columns),
         )
 
-        # -----------------------------------------------------------------
-        # 4. Forward-fill short gaps
-        # -----------------------------------------------------------------
-        short_gap_mask = is_missing & (gap_lengths <= self.max_gap_fill)
+        required = ["open", "high", "low", "close", "volume"]
+
+        missing = set(required) - set(df.columns)
+        if missing:
+            logger.error("OHLCV validation failed | missing_columns=%s", missing)
+            raise ValueError(f"Missing required columns: {missing}")
+
+        logger.info("OHLCV validation | required columns present=%s", required)
+
+        initial_rows = len(df)
+
+        mask = (
+            (df["high"] >= df["low"])
+            & (df["open"] > 0)
+            & (df["high"] > 0)
+            & (df["low"] > 0)
+            & (df["close"] > 0)
+            & (df["volume"] >= 0)
+            & (df["close"] >= df["low"])
+            & (df["close"] <= df["high"])
+        )
+
+        invalid_count = (~mask).sum()
+
+        logger.info(
+            "OHLCV validation | invalid_rows_detected=%d | valid_rows=%d",
+            invalid_count,
+            mask.sum(),
+        )
+
+        if invalid_count > 0:
+            # Optional breakdown for debugging
+            logger.debug(
+                "Invalid OHLCV breakdown | high<low=%d | open<=0=%d | high<=0=%d | low<=0=%d | close<=0=%d | volume<0=%d | close_out_of_bounds=%d",
+                (df["high"] < df["low"]).sum(),
+                (df["open"] <= 0).sum(),
+                (df["high"] <= 0).sum(),
+                (df["low"] <= 0).sum(),
+                (df["close"] <= 0).sum(),
+                (df["volume"] < 0).sum(),
+                ((df["close"] < df["low"]) | (df["close"] > df["high"])).sum(),
+            )
+
+            logger.info(
+                "Dropping invalid OHLCV rows | dropped=%d | remaining=%d",
+                invalid_count,
+                mask.sum(),
+            )
+
+        df = df[mask]
+
+        logger.info(
+            "STEP 3 | OHLCV validation complete | rows_before=%d | rows_after=%d | dropped=%d",
+            initial_rows,
+            len(df),
+            initial_rows - len(df),
+        )
+
+        return df
+
+    # =========================================================
+    # STEP 4: GAP CLASSIFICATION (OBSERVATION-BASED)
+    # =========================================================
+
+    def _compute_observation_gaps(self, df: pd.DataFrame) -> dict:
+        logger.info("STEP 4 | Gap classification started | rows=%d", len(df))
+
+        time_deltas = df.index.to_series().diff()
+
+        expected = time_deltas.median()
+
+        logger.info("Gap classification | inferred_expected_interval=%s", expected)
+
+        gap_sizes = (time_deltas / expected).fillna(0).astype(int)
+
+        gap_start = gap_sizes > 1
+
+        gap_lengths = gap_sizes.cumsum()
+
+        total_gaps = gap_start.sum()
+        max_gap = gap_sizes.max()
+
+        logger.info(
+            "Gap classification summary | total_gap_starts=%d | max_gap_size=%d",
+            total_gaps,
+            max_gap,
+        )
+
+        # Optional deeper diagnostics
+        if total_gaps > 0:
+            logger.debug(
+                "Gap sizes distribution | min=%d | median=%.2f | max=%d",
+                gap_sizes.min(),
+                gap_sizes.median(),
+                gap_sizes.max(),
+            )
+
+            logger.debug("Gap start indices sample=%s", list(df.index[gap_start][:10]))
+
+        return {
+            "gap_start": gap_start,
+            "gap_sizes": gap_sizes,
+            "gap_lengths": gap_lengths,
+            "expected_interval": expected,
+        }
+
+    # =========================================================
+    # STEP 5: BOUNDED CAUSAL FORWARD FILL
+    # =========================================================
+
+    def _bounded_forward_fill(
+        self,
+        df: pd.DataFrame,
+        gap_info: dict,
+    ) -> pd.DataFrame:
+
+        logger.info(
+            "STEP 5 | Bounded forward fill started | max_gap_fill=%d | rows=%d",
+            self.max_gap_fill,
+            len(df),
+        )
+
         cols = ["open", "high", "low", "close", "volume"]
 
-        ffilled = df_re[cols].ffill()
-        df_re.loc[short_gap_mask, cols] = ffilled.loc[short_gap_mask]
-        logger.info("Forward-filled %d short-gap bars", short_gap_mask.sum())
+        result = df.copy()
 
-        # -----------------------------------------------------------------
-        # 5. Drop long gaps
-        # -----------------------------------------------------------------
-        long_gap_mask = is_missing & (gap_lengths > self.max_gap_fill)
-        long_gap_indices = df_re.index[long_gap_mask]
+        for col in cols:
+            logger.info("Forward-fill processing column=%s", col)
 
-        df_re = df_re[df_re["close"].notna()]
-        logger.info("Dropped %d long-gap bars", long_gap_mask.sum())
+            values = result[col].values
 
-        # -----------------------------------------------------------------
-        # 6. Flag first bar after long gap as post_long_gap
-        # -----------------------------------------------------------------
-        df_re["post_long_gap"] = False
-        if len(long_gap_indices) > 0:
-            # Get locations of bars immediately after long gaps
-            post_gap_indices = df_re.index.searchsorted(long_gap_indices) + 1
-            post_gap_indices = post_gap_indices[post_gap_indices < len(df_re)]
-            df_re.iloc[post_gap_indices, df_re.columns.get_loc("post_long_gap")] = True
-        logger.info("Flagged %d bars as post_long_gap", df_re["post_long_gap"].sum())
+            last_valid = None
+            gap_count = 0
 
-        # -----------------------------------------------------------------
-        # 7. Final check
-        # -----------------------------------------------------------------
-        if df_re.isna().sum().sum() > 0:
+            filled = 0
+            skipped = 0
+
+            for i in range(len(values)):
+                if not np.isnan(values[i]):
+                    last_valid = values[i]
+                    gap_count = 0
+                else:
+                    if last_valid is not None and gap_count < self.max_gap_fill:
+                        values[i] = last_valid
+                        gap_count += 1
+                        filled += 1
+                    else:
+                        values[i] = np.nan
+                        skipped += 1
+
+            result[col] = values
+
             logger.info(
-                "NaNs remain after reindex/fill: %d total", df_re.isna().sum().sum()
+                "Forward-fill column complete | column=%s | filled=%d | left_as_nan=%d",
+                col,
+                filled,
+                skipped,
             )
-            df_re = df_re.dropna()
 
-        logger.info("Final DataFrame length after reindex/fill: %d", len(df_re))
+        logger.info("STEP 5 complete | bounded forward fill finished")
 
-        return df_re
+        return result
 
-    def _clip_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty:
-            logger.info("DataFrame empty, skipping outlier clipping.")
-            return df
+    # =========================================================
+    # STEP 6: LONG GAP REMOVAL (> 5 OBSERVATIONS)
+    # =========================================================
+
+    def _remove_long_gaps(
+        self,
+        df: pd.DataFrame,
+        gap_info: dict,
+    ) -> pd.DataFrame:
+
+        logger.info("STEP 6 | Long gap removal started | rows=%d", len(df))
+
+        is_missing = df["close"].isna()
+
+        run_id = (is_missing != is_missing.shift()).cumsum()
+        gap_lengths = is_missing.groupby(run_id).transform("sum")
+
+        long_gap_mask = is_missing & (gap_lengths > self.max_gap_fill)
+
+        long_gap_count = long_gap_mask.sum()
 
         logger.info(
-            "Starting outlier clipping | window=%d | z=%.2f",
-            self.outlier_window,
-            self.outlier_z,
+            "Long gap detection | long_gap_rows=%d | threshold=%d",
+            long_gap_count,
+            self.max_gap_fill,
         )
 
-        # ------------------------------------------------------------------
-        # 1. Log returns (pandas Series)
-        # ------------------------------------------------------------------
-        r = np.log(df["close"] / df["close"].shift(1))
-        logger.info("Computed %d valid log returns", r.notna().sum())
+        if long_gap_count > 0:
+            logger.debug(
+                "Long gap indices sample=%s", list(df.index[long_gap_mask][:10])
+            )
 
-        # ------------------------------------------------------------------
-        # 2. Rolling stats (pandas, simpler + stable)
-        # ------------------------------------------------------------------
-        rolling_mean = r.rolling(self.outlier_window, min_periods=10).mean()
-        rolling_std = r.rolling(self.outlier_window, min_periods=10).std()
+        df = df[~long_gap_mask]
 
-        logger.info("Computed rolling mean/std")
         logger.info(
-            "Rolling stats -> mean(avg): %.6f | std(avg): %.6f | mean(min/max): [%.6f, %.6f] | std(min/max): [%.6f, %.6f]",
-            np.nanmean(rolling_mean),
-            np.nanmean(rolling_std),
-            np.nanmin(rolling_mean),
-            np.nanmax(rolling_mean),
-            np.nanmin(rolling_std),
-            np.nanmax(rolling_std),
+            "STEP 6 complete | rows_after_removal=%d | removed=%d",
+            len(df),
+            long_gap_count,
         )
-        # ------------------------------------------------------------------
-        # 3. Z-score
-        # ------------------------------------------------------------------
-        z = (r - rolling_mean) / (rolling_std + 1e-10)
-
-        # ------------------------------------------------------------------
-        # 4. Detect outliers
-        # ------------------------------------------------------------------
-        outlier_mask = z.abs() > self.outlier_z
-        num_outliers = int(outlier_mask.sum())
-        df["outlier_flag"] = outlier_mask
-
-        logger.info("Detected %d outliers", num_outliers)
-
-        if num_outliers == 0:
-            return df
-
-        # ------------------------------------------------------------------
-        # 5. Clip safely
-        # ------------------------------------------------------------------
-        outlier_locs = np.where(outlier_mask.values)[0]
-        outlier_locs = outlier_locs[outlier_locs > 0]  # avoid first index
-
-        if len(outlier_locs) == 0:
-            logger.info("No valid outliers after removing first index")
-            return df
-
-        prev_close = df["close"].values[outlier_locs - 1]
-        signs = np.sign(r.values[outlier_locs])
-        std_vals = rolling_std.values[outlier_locs]
-
-        clipped_r = signs * self.outlier_z * std_vals
-
-        df.loc[df.index[outlier_locs], "close"] = prev_close * np.exp(clipped_r)
-
-        logger.info("Clipped %d outliers", len(outlier_locs))
 
         return df
 
-    # @staticmethod
-    # def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
-    #     """Add log_return, session_minute, session_start flag."""
-    #     df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
+    # =========================================================
+    # STEP 7: FINAL INVARIANT ENFORCEMENT
+    # =========================================================
 
-    #     et_index = df.index.tz_convert("America/New_York")
-    #     session_open_time = pd.Timestamp(SESSION_START).time()
-    #     session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
+    def _final_validation(self, df: pd.DataFrame) -> pd.DataFrame:
 
-    #     # Convert to Series to allow clip
-    #     session_minutes = pd.Series(
-    #         et_index.hour * 60 + et_index.minute - session_open_minutes, index=df.index
-    #     )
-    #     df["session_minute"] = session_minutes.clip(lower=0)
+        logger.info("STEP 7 | Final invariant validation started | rows=%d", len(df))
 
-    #     df["session_start"] = (df["session_minute"] == 0).astype(bool)
-    #     return df
+        cols = ["open", "high", "low", "close", "volume"]
 
-    @staticmethod
-    def _add_derived(df: pd.DataFrame) -> pd.DataFrame:
-        """Add log_return, session_minute, session_start flag."""
+        null_count = df[cols].isna().sum().sum()
 
-        n = len(df)
+        if null_count > 0:
+            logger.error("Final validation failed | NaNs_remaining=%d", null_count)
+            raise ValueError(f"NaNs present in OHLCV after cleaning: {null_count}")
 
-        # --- log return ---
-        df["log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0.0)
-        n_nan_lr = df["log_return"].isna().sum()
+        logger.info("No NaNs in OHLCV confirmed")
 
-        # --- timezone conversion ---
-        et_index = df.index.tz_convert("America/New_York")
-
-        session_open_time = pd.Timestamp(SESSION_START).time()
-        session_open_minutes = session_open_time.hour * 60 + session_open_time.minute
-
-        logger.info(f"Session Open Time: {session_open_time}")
-        logger.info(f"Session Open Minutes: {session_open_minutes}")
-
-        # --- session minute ---
-        session_minutes = pd.Series(
-            et_index.hour * 60 + et_index.minute - session_open_minutes,
-            index=df.index,
-        )
-
-        logger.info(f"Session Minutes: {session_minutes}")
-
-        df["session_minute"] = session_minutes.clip(lower=0)
-
-        # --- session start flag ---
-        df["session_start"] = df["session_minute"] == 0
-
-        # --- diagnostics ---
-        n_session_starts = int(df["session_start"].sum())
-        n_zero_returns = int((df["log_return"] == 0).sum())
+        # value sanity checks
+        close_invalid = (df["close"] <= 0).sum()
+        volume_invalid = (df["volume"] < 0).sum()
 
         logger.info(
-            "Derived features added | rows=%d | log_return NaNs=%d | "
-            "session_starts=%d | zero_log_returns=%d",
-            n,
-            n_nan_lr,
-            n_session_starts,
-            n_zero_returns,
+            "Value validation | close_invalid=%d | volume_invalid=%d",
+            close_invalid,
+            volume_invalid,
         )
+
+        assert (df["close"] > 0).all()
+        assert (df["volume"] >= 0).all()
+
+        logger.info("STEP 7 complete | dataset is TRD-compliant")
 
         return df

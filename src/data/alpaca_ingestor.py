@@ -7,6 +7,7 @@ Handles pagination, rate-limiting, caching, and split adjustments.
 
 from __future__ import annotations
 
+from datetime import datetime
 import os
 import time
 import logging
@@ -16,6 +17,7 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.timeframe import TimeFrame
+from datetime import timezone
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -45,16 +47,17 @@ class AlpacaIngestor:
         api_key = api_key or os.getenv("ALPACA_API_KEY")
         secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY")
 
-        logger.info("Alpaca API credentials loaded from environment")
-
         if not api_key or not secret_key:
             logger.error(
                 "Alpaca API credentials missing. Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are in .env."
             )
             raise EnvironmentError("Missing Alpaca API credentials.")
 
+        logger.info("Alpaca API credentials loaded from environment")
+
         # Initialize the historical data client
         self.client = StockHistoricalDataClient(api_key, secret_key)
+        self.base_url = base_url
         logger.info("Initialized Alpaca StockHistoricalDataClient")
 
         # Map configuration strings to alpaca-py TimeFrame objects
@@ -64,8 +67,6 @@ class AlpacaIngestor:
             "1Day": TimeFrame.Day,
         }
         logger.info("TimeFrame mapping initialized")
-
-        self.base_url = base_url
 
     # ------------------------------------------------------------------
     # Public interface
@@ -90,12 +91,29 @@ class AlpacaIngestor:
             adjustment: Price adjustment type ("split", "dividend", "all", "raw").
 
         Returns:
-            DataFrame with DatetimeIndex (UTC) and columns
-            [open, high, low, close, volume, ticker].
-            Empty DataFrame on failure.
-        """
+        --------
+        pd.DataFrame
+            Validated DataFrame with monotonic DatetimeIndex, float64 dtype
 
-        from datetime import datetime, timezone
+        Validations:
+        ------------
+        - Parse timestamps; enforce ascending chronological order
+        - Assert high ≥ low for all rows
+        - Assert open, high, low, close, volume > 0
+        - Log data provenance: source, date range, row count, ticker symbol
+
+        Constraints:
+        ------------
+        - Missing values preserved as NaN; no imputation at this stage
+        - Must support daily and intraday (minute) frequencies
+
+        OUTPUT INVARIANTS:
+        - DatetimeIndex (UTC, timezone-aware)
+        - Strict ascending order
+        - Raw OHLCV schema preserved
+        - Missing values preserved (NaN allowed)
+
+        """
 
         start_dt = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
         end_dt = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
@@ -120,14 +138,18 @@ class AlpacaIngestor:
             else:
                 logger.info(f"Df head:\n{df.head()}")
 
-            # Flatten MultiIndex
-            # if isinstance(df.index, pd.MultiIndex):
-            #     df = df.xs(ticker, level=0)
+            # =====================================================
+            # STAGE 1.1: STRUCTURAL NORMALIZATION ONLY
+            # =====================================================
 
             # Flatten MultiIndex if present
             if isinstance(df.index, pd.MultiIndex):
                 if "symbol" in df.index.names:
                     df = df.xs(ticker, level="symbol")
+
+            # REQUIREMENT: Must be DatetimeIndex
+            if not isinstance(df.index, pd.DatetimeIndex):
+                raise TypeError("Index must be DatetimeIndex from provider")
 
             assert isinstance(df.index, pd.DatetimeIndex), "Expected DatetimeIndex"
 
@@ -139,18 +161,55 @@ class AlpacaIngestor:
             else:
                 df.index = df.index.tz_convert("UTC")  # Convert any tz-aware to UTC
 
-            df.index = df.index.round("1min")  # Optional rounding
+            # REMOVED THE BELOW LINE
+            # df.index = df.index.round("1min")  # Optional rounding
             df.index.name = "timestamp"
 
+            # =====================================================
+            # STAGE 1.2: SCHEMA VALIDATION (STRICT)
+            # =====================================================
+
+            required_cols = {"open", "high", "low", "close", "volume"}
+            missing_cols = required_cols - set(df.columns)
+
+            if missing_cols:
+                raise ValueError(f"Missing required columns: {missing_cols}")
+
+            # OHLCV VALIDATION (NO CORRECTIONS ALLOWED)
+            invalid_ohlc = (
+                (df["high"] < df["low"])
+                | (df["open"] <= 0)
+                | (df["close"] <= 0)
+                | (df["volume"] < 0)
+            )
+
+            if invalid_ohlc.any():
+                raise ValueError(
+                    f"Invalid OHLCV detected for {ticker}. "
+                    f"Rows failing validation: {invalid_ohlc.sum()}"
+                )
+            # =====================================================
+            # STAGE 1.3: TEMPORAL ORDER GUARANTEE
+            # =====================================================
+
+            df = df.sort_index()
+
+            if not df.index.is_monotonic_increasing:
+                raise ValueError("Timestamp ordering invariant violated")
+
+            # =====================================================
+            # STAGE 1.4: FINAL STRUCTURAL OUTPUT CONTRACT
+            # =====================================================
             df = df[["open", "high", "low", "close", "volume"]].copy()
             df["ticker"] = ticker
 
             logger.info(f"Index of data (UTC): {df.index}")
             logger.info(f"Index dtype: {df.index.dtype}")
 
+            # IMPORTANT: No rounding, no scaling, no casting here
             # Downcast to reduce memory usage (Phase 1: Data Quantization)
-            df = self.downcast_ohlcv(df)
-            logger.info("Downcasted %s to float32/int32", ticker)
+            # df = self.downcast_ohlcv(df)
+            # logger.info("Downcasted %s to float32/int32", ticker)
 
             return df
 
@@ -162,9 +221,9 @@ class AlpacaIngestor:
         self,
         tickers: List[str],
         output_dir: str | Path,
-        start: str = "2019-01-02",
-        end: str = "2024-01-01",
-        skip_existing: bool = True,
+        start: str,
+        end: str,
+        skip_existing: bool = False,
     ) -> None:
         """Download all tickers and persist each as a Parquet file.
 
@@ -175,6 +234,22 @@ class AlpacaIngestor:
             end: Download end date (ISO string).
             skip_existing: If True, skip tickers already on disk.
         """
+
+        def _validate_dates(start: Optional[str], end: Optional[str]) -> None:
+            if not start or not end:
+                raise ValueError("start and end must be non-empty strings")
+
+            try:
+                start_dt = datetime.fromisoformat(start)
+                end_dt = datetime.fromisoformat(end)
+            except ValueError as e:
+                raise ValueError(f"Invalid date format: {e}")
+
+            if start_dt > end_dt:
+                raise ValueError("start date must be <= end date")
+
+        _validate_dates(start, end)
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -189,7 +264,9 @@ class AlpacaIngestor:
             logger.info("[%d/%d] Downloading %s ...", idx, len(tickers), ticker)
             df = self.download_bars(ticker, start=start, end=end)
             if not df.empty:
-                df.to_parquet(out_path)
+                df.to_parquet(
+                    out_path, engine="pyarrow", compression="zstd", index=True
+                )
                 logger.info("  Saved %d bars to %s", len(df), out_path)
             else:
                 logger.info("  No data for %s — file not written", ticker)
@@ -197,32 +274,25 @@ class AlpacaIngestor:
             time.sleep(self.RATE_LIMIT_SLEEP)
 
     def load_bars(self, path: str | Path) -> pd.DataFrame:
-        """Load a previously saved Parquet file.
-
-        Args:
-            path: Path to the Parquet file.
-
-        Returns:
-            DataFrame with DatetimeIndex (UTC).
-        """
         df = pd.read_parquet(path)
-        # if not isinstance(df.index, pd.DatetimeIndex):
-        #     df.index = pd.to_datetime(df.index, utc=True)
+
+        df.index = pd.to_datetime(df.index, utc=True)
+
+        df = df.sort_index()
+
+        if not df.index.is_monotonic_increasing:
+            raise ValueError("Timestamp ordering violated on load")
+
         return df
 
     @staticmethod
     def _load_bars(path: str | Path) -> pd.DataFrame:
-        """Load a previously saved Parquet file.
-
-        Args:
-            path: Path to the Parquet file.
-
-        Returns:
-            DataFrame with DatetimeIndex (UTC).
-        """
         df = pd.read_parquet(path)
-        # if not isinstance(df.index, pd.DatetimeIndex):
-        #     df.index = pd.to_datetime(df.index, utc=True)
+
+        df.index = pd.to_datetime(df.index, utc=True)
+
+        df = df.sort_index()
+
         return df
 
     def downcast_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:

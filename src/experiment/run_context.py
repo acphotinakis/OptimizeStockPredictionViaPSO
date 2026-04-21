@@ -52,6 +52,7 @@ class RuntimeContext:
     results_dir: str = "results"
     log_file: Optional[str] = None
     args: Optional[argparse.Namespace] = None
+    device: str = "cuda"
 
     # populated in __post_init__
     cfg: Optional[Config] = field(default=None, init=False, repr=False)
@@ -60,23 +61,12 @@ class RuntimeContext:
     def __post_init__(self) -> None:
         set_all_seeds(self.seed)
         self._load_config()
-        self._setup_logging()
         self._init_store()
 
     # ------------------------------------------------------------------
 
     def _load_config(self) -> None:
         object.__setattr__(self, "cfg", load_config(self.config_path))
-
-    def _setup_logging(self) -> None:
-        fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s"
-        handlers = [logging.StreamHandler()]
-        if self.log_file:
-            Path(self.log_file).parent.mkdir(parents=True, exist_ok=True)
-            handlers.append(logging.FileHandler(self.log_file))
-        logging.basicConfig(
-            level=logging.INFO, format=fmt, handlers=handlers, force=True
-        )
 
     def _init_store(self) -> None:
         store = ArtifactStore(

@@ -1,6 +1,30 @@
 from pathlib import Path
 import pandas as pd
-from prettytable import PrettyTable
+import logging
+from src.utils import logger
+from src.utils.logger import setup_logger
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
+
+# Resolve project root (adjust depth if needed)
+CURRENT_FILE = Path(__file__).resolve()
+PROJECT_ROOT = CURRENT_FILE.parents[0]  # adjust if structure changes
+
+# Ensure only the project root (not file paths) is added
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Debug prints (optional)
+print("Current file:", CURRENT_FILE)
+print("Project root:", PROJECT_ROOT)
+print("sys.path updated:")
+print(sys.path)
+
+logger = logging.getLogger(__name__)
+setup_logger(log_file="logs/ingest_data.log", level="INFO")
 
 
 def format_columns(cols, max_len=6):
@@ -22,233 +46,6 @@ def extract_index_info(df: pd.DataFrame):
     }
 
 
-def print_dataset_summary(dfs: dict) -> None:
-    table = PrettyTable()
-    table.title = "DATASET SUMMARY"
-
-    table.field_names = [
-        "Ticker",
-        "Rows",
-        "Cols",
-        "Index Name",
-        "Index Type",
-        "Datetime",
-        "Sorted",
-        "DupIdx",
-        "NaNIdx",
-        "Columns",
-    ]
-
-    for ticker in sorted(dfs.keys()):
-        df = dfs[ticker]
-        rows, cols = df.shape
-        col_names = list(df.columns)
-
-        idx_info = extract_index_info(df)
-
-        table.add_row(
-            [
-                ticker,
-                rows,
-                cols,
-                idx_info["idx_name"],
-                idx_info["idx_dtype"],
-                idx_info["is_datetime"],
-                idx_info["is_monotonic"],
-                idx_info["has_duplicates"],
-                idx_info["has_nan"],
-                format_columns(col_names),
-            ]
-        )
-
-    print(table)
-
-
-def inspect_parquet_directory(
-    data_dir: str = "data/processed",
-    n_head: int = 3,
-    n_tail: int = 3,
-) -> None:
-    """
-    Iterates through all parquet files in a directory and prints:
-    - number of tickers (files)
-    - per-ticker shape
-    - columns
-    - index metadata
-    - head (first n rows)
-    - tail (last n rows)
-    - consolidated summary table
-    """
-
-    data_path = Path(data_dir)
-    parquet_files = sorted(data_path.glob("*.parquet"))
-
-    header = (
-        f"\n{'=' * 80}\nPARQUET INSPECTION | files={len(parquet_files)}\n{'=' * 80}"
-    )
-    print(header)
-
-    dfs = {}
-
-    for file_path in parquet_files:
-        ticker = file_path.stem
-        df = pd.read_parquet(file_path)
-        dfs[ticker] = df
-
-        print(f"\n[{ticker}] shape={df.shape}")
-
-        # columns
-        cols = list(df.columns)
-        print(f"Columns ({len(cols)}): {cols}")
-
-        # index info
-        idx_info = extract_index_info(df)
-        print(
-            f"Index -> name={idx_info['idx_name']} "
-            f"dtype={idx_info['idx_dtype']} "
-            f"datetime={idx_info['is_datetime']} "
-            f"sorted={idx_info['is_monotonic']} "
-            f"dup={idx_info['has_duplicates']} "
-            f"nan={idx_info['has_nan']}"
-        )
-
-        # head / tail tables
-        head = df.head(n_head)
-        tail = df.tail(n_tail)
-
-        head_table = PrettyTable()
-        head_table.title = f"{ticker} | FIRST {n_head} ROWS"
-        head_table.field_names = ["index"] + cols
-
-        for idx, row in head.iterrows():
-            head_table.add_row([idx] + list(row.values))
-
-        tail_table = PrettyTable()
-        tail_table.title = f"{ticker} | LAST {n_tail} ROWS"
-        tail_table.field_names = ["index"] + cols
-
-        for idx, row in tail.iterrows():
-            tail_table.add_row([idx] + list(row.values))
-
-        print(head_table)
-        print()
-        print(tail_table)
-        print()
-
-    # consolidated summary
-    print_dataset_summary(dfs)
-
-
-import pandas as pd
-import matplotlib.pyplot as plt
-
-
-def inspect_and_plot_datetime_index(dfs: dict) -> None:
-    """
-    Validates and visualizes datetime indices across multiple DataFrames.
-
-    Checks:
-    - timezone consistency
-    - min/max timestamps
-    - missing timestamps (gaps)
-    - alignment across tickers
-
-    Plot:
-    - Overlapping time index curves (as ordinal positions)
-    """
-
-    print("\n" + "=" * 80)
-    print("DATETIME INDEX INSPECTION")
-    print("=" * 80)
-
-    index_sets = {}
-    global_min = None
-    global_max = None
-
-    # ---- Inspect each ticker ----
-    for ticker, df in dfs.items():
-        idx = df.index
-
-        if not isinstance(idx, pd.DatetimeIndex):
-            print(f"[{ticker}] ERROR: Not a DatetimeIndex")
-            continue
-
-        # timezone
-        tz = idx.tz
-
-        # bounds
-        idx_min = idx.min()
-        idx_max = idx.max()
-
-        # monotonic
-        is_sorted = idx.is_monotonic_increasing
-
-        # duplicates
-        has_dupes = not idx.is_unique
-
-        # gaps (assumes regular freq)
-        inferred_freq = pd.infer_freq(idx)
-        if inferred_freq:
-            expected = pd.date_range(
-                start=idx_min, end=idx_max, freq=inferred_freq, tz=tz
-            )
-            missing = len(expected.difference(idx))
-        else:
-            missing = "unknown"
-
-        print(
-            f"[{ticker}] "
-            f"tz={tz} "
-            f"range=({idx_min} → {idx_max}) "
-            f"sorted={is_sorted} "
-            f"dupes={has_dupes} "
-            f"freq={inferred_freq} "
-            f"missing={missing}"
-        )
-
-        index_sets[ticker] = set(idx)
-
-        # track global bounds
-        global_min = idx_min if global_min is None else min(global_min, idx_min)
-        global_max = idx_max if global_max is None else max(global_max, idx_max)
-
-    # ---- Alignment check ----
-    print("\n" + "-" * 80)
-    print("INDEX ALIGNMENT CHECK")
-    print("-" * 80)
-
-    all_indices = list(index_sets.values())
-    intersection = set.intersection(*all_indices)
-    union = set.union(*all_indices)
-
-    print(f"Common timestamps: {len(intersection)}")
-    print(f"Total unique timestamps: {len(union)}")
-    print(f"Alignment ratio: {len(intersection) / len(union):.4f}")
-
-    # ---- Plot overlapping indices ----
-    print("\n" + "-" * 80)
-    print("PLOTTING INDEX ALIGNMENT")
-    print("-" * 80)
-
-    plt.figure(figsize=(12, 6))
-
-    for ticker, df in dfs.items():
-        idx = df.index
-
-        # convert datetime to numeric for plotting
-        x = idx.view("int64")  # nanoseconds since epoch
-        y = [ticker] * len(x)
-
-        plt.scatter(x, y, s=1, label=ticker)
-
-    plt.title("Datetime Index Alignment Across Tickers")
-    plt.xlabel("Time (ns since epoch)")
-    plt.ylabel("Ticker")
-    plt.tight_layout()
-    plt.savefig("out.png")
-    plt.show()
-
-
 def load_parquet_files(data_dir: str = "data/processed") -> dict:
     data_path = Path(data_dir)
     dfs = {}
@@ -261,7 +58,235 @@ def load_parquet_files(data_dir: str = "data/processed") -> dict:
     return dfs
 
 
+# =========================================================
+# SPY-ANCHORED INSPECTION (TRD-CORRECT)
+# =========================================================
+
+
+def inspect_and_plot_datetime_index(dfs: dict) -> None:
+    """
+    TRD-CORRECT:
+    - SPY defines canonical time index
+    - missingness is informational, not error
+    - observability mask is first-class output
+    """
+
+    print("\n" + "=" * 80)
+    print("SPY-ANCHORED DATASET DIAGNOSTICS (TRD MODE)")
+    print("=" * 80)
+
+    # -----------------------------
+    # 1. CANONICAL INDEX (SPY)
+    # -----------------------------
+    if "SPY" not in dfs:
+        raise ValueError("SPY must exist as canonical index anchor")
+
+    spy_df = dfs["SPY"]
+
+    if not isinstance(spy_df.index, pd.DatetimeIndex):
+        raise ValueError("SPY index must be DatetimeIndex")
+
+    canonical_index = spy_df.index.sort_values()
+
+    logger.info(
+        "SPY canonical index | rows=%d | start=%s | end=%s",
+        len(canonical_index),
+        canonical_index.min(),
+        canonical_index.max(),
+    )
+
+    # -----------------------------
+    # 2. OBSERVABILITY MATRIX
+    # -----------------------------
+    observability = {}
+
+    alignment_report = {}
+
+    for ticker, df in dfs.items():
+
+        if not isinstance(df.index, pd.DatetimeIndex):
+            print(f"[{ticker}] ERROR: invalid index type")
+            continue
+
+        idx = df.index
+
+        # -------------------------------------------------
+        # ALIGNMENT IS GIVEN (NOT MEASURED)
+        # -------------------------------------------------
+        # We DO NOT validate overlap as correctness metric.
+        # We measure observability instead.
+
+        aligned_mask = canonical_index.isin(idx)
+
+        observed_count = aligned_mask.sum()
+        missing_count = (~aligned_mask).sum()
+
+        observed_ratio = observed_count / len(canonical_index)
+        missing_ratio = missing_count / len(canonical_index)
+
+        observability[ticker] = aligned_mask.astype(int)
+
+        # -----------------------------
+        # REPORT (TRD CORRECT VIEW)
+        # -----------------------------
+        print(
+            f"[{ticker}] "
+            f"observed={observed_ratio:.4f} | "
+            f"missing={missing_ratio:.4f} | "
+            f"raw_rows={len(idx)}"
+        )
+
+        # -----------------------------
+        # ADDITIONAL STRUCTURE METRICS
+        # -----------------------------
+        alignment_report[ticker] = {
+            "observed_ratio": observed_ratio,
+            "missing_ratio": missing_ratio,
+            "raw_rows": len(idx),
+        }
+
+    # -----------------------------
+    # 3. GLOBAL OBSERVABILITY STATS
+    # -----------------------------
+    print("\n" + "-" * 80)
+    print("OBSERVABILITY SUMMARY (MODEL RELEVANT)")
+    print("-" * 80)
+
+    ratios = [v["observed_ratio"] for v in alignment_report.values()]
+
+    print(f"Tickers: {len(alignment_report)}")
+    print(f"Mean observability: {np.mean(ratios):.4f}")
+    print(f"Min observability: {np.min(ratios):.4f}")
+    print(f"Max observability: {np.max(ratios):.4f}")
+
+    # -----------------------------
+    # 4. BUILD OBSERVABILITY MATRIX DF
+    # -----------------------------
+    obs_df = pd.DataFrame(observability, index=canonical_index)
+
+    missing_by_time = 1 - obs_df.mean(axis=1)
+
+    print("\n" + "-" * 80)
+    print("SYSTEM-WIDE MISSINGNESS PROFILE")
+    print("-" * 80)
+
+    print(f"Global missing rate: {missing_by_time.mean():.4f}")
+    print(f"Worst timestamp missingness: {missing_by_time.max():.4f}")
+
+    # -----------------------------
+    # 5. PLOT OBSERVABILITY (NOT INDEX SETS)
+    # -----------------------------
+    plt.figure(figsize=(12, 6))
+
+    for ticker in obs_df.columns:
+        plt.plot(
+            obs_df.index.view("int64"),
+            obs_df[ticker] + np.random.uniform(-0.01, 0.01, len(obs_df)),
+            linewidth=0.5,
+        )
+
+    plt.title("Observability Across SPY-Aligned Time Grid")
+    plt.xlabel("Time (ns since epoch)")
+    plt.ylabel("Observability (1=present, 0=missing)")
+    plt.tight_layout()
+    plt.savefig("observability.png")
+    plt.show()
+
+    # -----------------------------
+    # 6. STORE OUTPUT FOR MODEL PIPELINE
+    # -----------------------------
+    dfs["_observability_matrix"] = obs_df
+
+    logger.info(
+        "Observability matrix built | shape=(%d,%d)",
+        obs_df.shape[0],
+        obs_df.shape[1],
+    )
+
+
+def plot_ohlcv_overlap(
+    data_dir: str = "data/cleaned",
+    output_file: str = "out/ohlcv_overlap.png",
+    normalize: bool = True,
+    max_points: int = 5000,
+) -> None:
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from pathlib import Path
+    import pandas as pd
+
+    data_path = Path(data_dir)
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fields = ["open", "high", "low", "close", "volume"]
+    dfs = {}
+
+    # -----------------------------
+    # LOAD + PREPROCESS ONCE
+    # -----------------------------
+    for file in sorted(data_path.glob("*.parquet")):
+        ticker = file.stem
+        df = pd.read_parquet(file)
+
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index, utc=True)
+
+        df = df[fields]
+
+        dfs[ticker] = df
+
+    tickers = list(dfs.keys())
+
+    fig, axes = plt.subplots(5, 1, figsize=(16, 14), sharex=True)
+
+    # -----------------------------
+    # FIELD LOOP
+    # -----------------------------
+    for i, field in enumerate(fields):
+        ax = axes[i]
+
+        for ticker in tickers:
+            df = dfs[ticker]
+
+            series = df[field].astype("float32")
+
+            # -----------------------------
+            # DOWN SAMPLE (KEY SPEEDUP)
+            # -----------------------------
+            if len(series) > max_points:
+                series = series.iloc[:: len(series) // max_points]
+
+            # -----------------------------
+            # TRANSFORMS (FAST VECTOR OPS)
+            # -----------------------------
+            if normalize and field != "volume":
+                mean = series.mean()
+                std = series.std() + 1e-8
+                series = (series - mean) / std
+
+            elif normalize and field == "volume":
+                series = np.log1p(series)
+
+            ax.plot(series.index, series.values, linewidth=0.6, alpha=0.5)
+
+        ax.set_title(field.upper())
+        ax.grid(True, alpha=0.2)
+
+    axes[-1].set_xlabel("Time")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=120)  # lower DPI = faster write
+    plt.close()
+
+    logger.info(
+        "Saved optimized OHLCV plot | tickers=%d | file=%s",
+        len(tickers),
+        str(output_path),
+    )
+
+
 if __name__ == "__main__":
-    inspect_parquet_directory("data/processed")
     dfs = load_parquet_files("data/processed")
-    inspect_and_plot_datetime_index(dfs)
+    # inspect_and_plot_datetime_index(dfs)
+    plot_ohlcv_overlap(data_dir="data/processed", output_file="out/ohlcv_overlap.png")
