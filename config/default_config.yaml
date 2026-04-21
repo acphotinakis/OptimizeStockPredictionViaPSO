@@ -3,97 +3,140 @@
 # March 2026
 
 pso:
-  n_particles: 30
+  # ============================================================
+  # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
+  # ============================================================
+  enabled: false             # Set to true for hyperparameter optimization
+  
+  # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
+  n_particles: 20
   n_iterations: 50
-  w_min: 0.4
-  w_max: 0.9
-  c1: 1.5
-  c2: 1.5
-  v_clamp_fraction: 0.20
+  w_min: 0.4                 # Inertia weight minimum (adaptive)
+  w_max: 0.9                 # Inertia weight maximum
+  c1: 1.5                    # Cognitive coefficient
+  c2: 1.5                    # Social coefficient
+  v_clamp_fraction: 0.20     # Velocity clamping
   seed: 42
+  
+  # Search Space (LSTM Hyperparameters)
+  search_space:
+    lstm_units_1:
+      min: 50
+      max: 300
+      step: 32
+    lstm_units_2:
+      min: 20
+      max: 200
+      step: 20
+    dropout_rate:
+      min: 0.0
+      max: 0.5
+    learning_rate:
+      min: 1.0e-5
+      max: 1.0e-1
+      scale: "log"
+    batch_size:
+      choices: [32, 64]
+    epochs:
+      min: 50
+      max: 300
+  
+  # PSO Runtime
   checkpoint_dir: "results/checkpoints"
   n_workers: 1
 
 lstm:
-  # Search space bounds
-  num_layers:
-    min: 1
-    max: 4
-  hidden_units:
-    min: 32
-    max: 512
-    step: 32
-  dropout:
-    min: 0.0
-    max: 0.5
-  learning_rate:
-    min: 1.0e-5
-    max: 1.0e-1
-    scale: "log"
-  lookback:
-    choices: [10, 30, 60, 120]
+  # ============================================================
+  # CANONICAL LSTM CONFIGURATION (Unified TRD-Compliant)
+  # ============================================================
+  # Model Architecture
+  name: "LSTM-Baseline-v1.0"
+  framework: "pytorch"
   
-  # Training settings
-  use_amp: True
-  max_epochs: 100
-  batch_size: 256
-  early_stopping_patience: 10
-  grad_clip: 1.0
-  accumulation_steps: 1
-
-lstm_baseline:
-  # Fixed hyperparameters (no PSO optimization)
-  # input_size: 10
-  num_layers: 2
-  hidden_units: 128
-  dropout: 0.2
-  learning_rate: 0.001
-  lookback: 30
-  # lookback: 60
-  max_epochs: 100
-  patience: 10
-  batch_size: 256
-  use_checkpointing: True
+  # Architecture (2-layer stack per TRD)
+  lstm_units_1: 128          # Layer 1 hidden size (range: 50-300)
+  lstm_units_2: 64           # Layer 2 hidden size (range: 20-200)
+  activation: "relu"         # Zeng et al. 2025 constraint
+  dropout_rate: 0.2          # Deng & Peng 2025 regularization
   
-  # Training settings
+  # Output Layer
+  output_units: 1
+  output_activation: "linear"  # Regression: next-period return
+  
+  # Training Parameters
+  optimizer: "adam"
+  learning_rate: 0.001       # Standard Adam baseline
+  loss: "mse"                # Mean Squared Error
+  epochs: 100                # Mid-range baseline (50-300)
+  batch_size: 32             # Standard baseline {32, 64}
+  
+  # Early Stopping
+  early_stopping:
+    enabled: true
+    monitor: "val_loss"
+    patience: 10
+    restore_best_weights: true
+  
+  # Data Handling
+  shuffle: false             # MANDATORY: time-series constraint
+  validation_split: 0.10     # 10% chronological validation
+  
+  # Input Specification
+  lookback: 20               # Ji et al. 2021 canonical window
+  prediction_horizon: 1      # Predict t+1 (next-period return)
+  expected_features: 17      # Typical post-selection count (12-23)
+  
+  # Preprocessing (applied upstream in feature pipeline)
+  scaler: "minmax"
+  scaler_range: [-1.0, 1.0]  # TRD-mandated
+  
+  # Reproducibility
+  random_seed: 42
+  deterministic: true
+  
+  # Advanced Training
   grad_clip: 1.0
   use_amp: true
   accumulation_steps: 1
-  
-  # Walk-forward validation
-  wfv_fold_size: 252
-  wfv_folds: 10
-  
-  output_size: 1
-  # Backtesting
-  # initial_capital: 100000.0
-  # position_fraction: 0.02
-  # transaction_cost: 0.001
-  # slippage: 0.0005
-  # stop_loss: 0.02
-  # daily_loss_limit: 0.05
 
-# --- XGBoost (Memory-Safe) ---
+# ============================================================
+# CANONICAL XGBOOST CONFIGURATION (Unified TRD-Compliant)
+# ============================================================
 xgboost:
-  objective: "reg:squarederror"
-  # num_class: 3
-  n_estimators: 200            # smaller model
-  max_depth: 4                 # shallower trees
-  learning_rate: 0.01
-  subsample: 0.7               # reduce rows per tree
-  colsample_bytree: 0.6        # reduce features per tree
-  min_child_weight: 5          # avoid tiny leaf nodes
-  gamma: 0.1                   # require gain to split
-  reg_alpha: 0.0
-  reg_lambda: 1.0
-  early_stopping_rounds: 50
-  use_optuna: true
-  importance_type: "gain"
-  optuna_trials: 20            # fewer HPO trials
-  tree_method: "gpu_hist"      # or "hist" if GPU memory is limited
-  # tree_method: "hist"      # or "hist" if GPU memory is limited
-  max_bin: 128                 # smaller bins --> lower memory
-  lookback: 30
+  # Model Architecture
+  name: "XGBoost-Baseline-v1.0"
+  objective: "reg:squarederror"  # Regression: next-period return
+  
+  # Tree Parameters
+  n_estimators: 200              # Number of boosting rounds
+  max_depth: 4                   # Tree depth (shallower = regularization)
+  learning_rate: 0.01            # Boosting learning rate
+  
+  # Sampling Parameters
+  subsample: 0.7                 # Row sampling per tree
+  colsample_bytree: 0.6          # Feature sampling per tree
+  min_child_weight: 5            # Minimum sum of instance weight in leaf
+  
+  # Regularization
+  gamma: 0.1                     # Minimum loss reduction for split
+  reg_alpha: 0.0                 # L1 regularization
+  reg_lambda: 1.0                # L2 regularization
+  
+  # Early Stopping
+  early_stopping_rounds: 50      # Stop if no improvement
+  
+  # Feature Importance
+  importance_type: "gain"        # Diagnostic only, NOT for selection
+  
+  # Performance Optimization
+  tree_method: "hist"            # Histogram-based method (CPU/GPU)
+  max_bin: 128                   # Histogram bin count (memory control)
+  
+  # Input Specification (for lag-based representation)
+  lookback: 20                   # Number of lags to create
+  
+  # Reproducibility
+  random_seed: 42
 
 fitness:
   rmse_weight: 0.4
@@ -122,15 +165,31 @@ data:
   max_ffill_bars: 5
 
 features:
+  # ============================================================
+  # UNIFIED FEATURE ENGINEERING CONFIGURATION
+  # ============================================================
+  # Wavelet Denoising (TRD-required)
+  wavelet:
+    enabled: true            # Apply wavelet denoising (TRD §4.1)
+    wavelet: "haar"
+    level: 3
+    mode: "symmetric"
+  
+  # Feature Selection (4-stage pipeline)
   selector:
-    method: "xgboost"
-    importance_threshold: 0.70
-    xgb_params:
-      n_estimators: 100
-      max_depth: 4
-      learning_rate: 0.1
-      subsample: 0.8
-      colsample_bytree: 0.8
+    variance_threshold: 1.0e-6
+    correlation_threshold: 0.95      # Zeng et al. 2025
+    vif_threshold: 10.0               # Standard econometric
+    mi_quantile_threshold: 0.25       # Keep top 75%
+  
+  # Cross-ticker Features
+  cross_ticker:
+    enabled: true
+    spy_features: true
+    peer_features: true
+    peer_count: 3
+    peer_corr_threshold: 0.3
+    peer_corr_window: 252
 
 backtesting:
   transaction_cost: 0.001

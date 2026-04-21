@@ -68,7 +68,7 @@ def _load_prices(ticker: str, n_test: int):
     return opens, closes, ts
 
 
-def _run_backtest(ctx, y_pred, opens, closes, ts, theta):
+def _run_backtest(ctx: RuntimeContext, y_pred, opens, closes, ts, theta):
     bt = Backtester(
         initial_capital=ctx.cfg.backtesting.initial_capital,
         position_fraction=ctx.cfg.backtesting.position_fraction,

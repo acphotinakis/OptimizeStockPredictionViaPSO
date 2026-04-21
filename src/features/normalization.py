@@ -159,20 +159,22 @@ def transform_features(
     Execute Stage 4 Feature Transformation pipeline.
 
     Pipeline steps:
-    1. Wavelet denoising (3-level Haar, soft threshold, symmetric padding)
+    1. Wavelet denoising (OPTIONAL - only if 'close' column exists)
+       - 3-level Haar, soft threshold, symmetric padding
        - Threshold computed on training data only
        - Applied identically to train/val/test
        - Column 'close' -> 'close_denoised'
+       - If 'close' not present, skip this step (already denoised or not selected)
     2. MinMax normalization to [-1, 1]
        - Parameters fit on training data only
-       - Applied to all columns including close_denoised
+       - Applied to all columns
     3. Validation (no NaNs, range [-1, 1])
     4. State extraction for inference reuse
 
     Args:
-        train_df: Training data with 'close' column (no NaNs)
-        val_df: Validation data with 'close' column (no NaNs)
-        test_df: Test data with 'close' column (no NaNs)
+        train_df: Training data (no NaNs required)
+        val_df: Validation data (no NaNs required)
+        test_df: Test data (no NaNs required)
 
     Returns:
         Tuple of:
@@ -183,14 +185,11 @@ def transform_features(
 
     Raises:
         AssertionError: If validation checks fail (NaNs or out-of-range values)
-        KeyError: If 'close' column is missing from any input
     """
     logger.info("Stage 4: Starting Feature Transformation")
 
     # Validate input schema
     for split_name, df in [("train", train_df), ("val", val_df), ("test", test_df)]:
-        if "close" not in df.columns:
-            raise KeyError(f"Required column 'close' not found in {split_name}_df")
         if df.isna().any().any():
             logger.warning(
                 f"NaN values detected in {split_name}_df input - caller should have cleaned these"
@@ -212,25 +211,31 @@ def transform_features(
     test_work = test_work[feature_cols]
 
     # =====================================================================
-    # PART 1: WAVELET DENOISING (close -> close_denoised)
+    # PART 1: WAVELET DENOISING (close -> close_denoised) - OPTIONAL
     # =====================================================================
-    logger.info("Wavelet: Computing universal threshold from training data...")
+    # Only apply wavelet denoising if 'close' column exists
+    # (It may have been removed during feature selection or already denoised upstream)
+    if "close" in train_work.columns:
+        logger.info("Wavelet: 'close' column found, applying denoising...")
+        logger.info("Wavelet: Computing universal threshold from training data...")
 
-    threshold = _compute_wavelet_threshold(train_work["close"].values)
-    logger.info(f"Wavelet: Universal threshold = {threshold:.8f}")
+        threshold = _compute_wavelet_threshold(train_work["close"].values)
+        logger.info(f"Wavelet: Universal threshold = {threshold:.8f}")
 
-    # Apply denoising to all splits using SAME threshold
-    logger.info("Wavelet: Applying denoising to train/val/test...")
-    train_work["close"] = _wavelet_denoise_1d(train_work["close"].values, threshold)
-    val_work["close"] = _wavelet_denoise_1d(val_work["close"].values, threshold)
-    test_work["close"] = _wavelet_denoise_1d(test_work["close"].values, threshold)
+        # Apply denoising to all splits using SAME threshold
+        logger.info("Wavelet: Applying denoising to train/val/test...")
+        train_work["close"] = _wavelet_denoise_1d(train_work["close"].values, threshold)
+        val_work["close"] = _wavelet_denoise_1d(val_work["close"].values, threshold)
+        test_work["close"] = _wavelet_denoise_1d(test_work["close"].values, threshold)
 
-    # Rename to indicate denoising
-    train_work = train_work.rename(columns={"close": "close_denoised"})
-    val_work = val_work.rename(columns={"close": "close_denoised"})
-    test_work = test_work.rename(columns={"close": "close_denoised"})
+        # Rename to indicate denoising
+        train_work = train_work.rename(columns={"close": "close_denoised"})
+        val_work = val_work.rename(columns={"close": "close_denoised"})
+        test_work = test_work.rename(columns={"close": "close_denoised"})
 
-    logger.info("Wavelet: Denoising complete")
+        logger.info("Wavelet: Denoising complete")
+    else:
+        logger.info("Wavelet: 'close' column not found, skipping wavelet denoising")
 
     # =====================================================================
     # PART 2: MINMAX NORMALIZATION to [-1, 1]

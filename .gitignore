@@ -84,3 +84,5 @@ _feature_opts/
 tests/
 
 ac
+
+streamlit/

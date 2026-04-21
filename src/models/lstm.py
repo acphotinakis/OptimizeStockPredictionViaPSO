@@ -336,8 +336,8 @@ class LSTMModel:
         self._validate_inputs(X_train, y_train, "train")
         self._validate_inputs(X_val, y_val, "val")
 
-        if self.model is None:
-            raise RuntimeError("Model not initialized")
+        # if self.model is None:
+        #     raise RuntimeError("Model not initialized")
 
         # Convert to float32 tensors
         X_train_t = torch.from_numpy(X_train.astype(np.float32))

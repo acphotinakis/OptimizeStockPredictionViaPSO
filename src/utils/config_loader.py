@@ -15,10 +15,30 @@ logger = logging.getLogger(__name__)
 
 
 # =========================
-# PSO
+# PSO (Unified)
 # =========================
 @dataclass
+class PSOSearchSpaceParam:
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[int] = None
+    scale: Optional[str] = None
+    choices: Optional[List[int]] = None
+
+
+@dataclass
+class PSOSearchSpace:
+    lstm_units_1: Optional[PSOSearchSpaceParam] = None
+    lstm_units_2: Optional[PSOSearchSpaceParam] = None
+    dropout_rate: Optional[PSOSearchSpaceParam] = None
+    learning_rate: Optional[PSOSearchSpaceParam] = None
+    batch_size: Optional[PSOSearchSpaceParam] = None
+    epochs: Optional[PSOSearchSpaceParam] = None
+
+
+@dataclass
 class PSOConfig:
+    enabled: bool
     n_particles: int
     n_iterations: int
     w_min: float
@@ -29,101 +49,130 @@ class PSOConfig:
     seed: int
     checkpoint_dir: str
     n_workers: int
+    search_space: Optional[PSOSearchSpace] = None
 
 
 # =========================
-# LSTM Search Space
+# LSTM (Unified Canonical)
 # =========================
 @dataclass
-class RangeInt:
-    min: int
-    max: int
-    step: Optional[int] = None
-
-
-@dataclass
-class RangeFloat:
-    min: float
-    max: float
-    scale: Optional[str] = None
-
-
-@dataclass
-class LookbackConfig:
-    choices: List[int]
+class EarlyStoppingConfig:
+    enabled: bool
+    monitor: str
+    patience: int
+    restore_best_weights: bool
 
 
 @dataclass
 class LSTMConfig:
-    num_layers: RangeInt
-    hidden_units: RangeInt
-    dropout: RangeFloat
-    learning_rate: RangeFloat
-    lookback: LookbackConfig
-    use_amp: bool
-    max_epochs: int
+    # Model metadata
+    name: str
+    framework: str
+    
+    # Architecture (2-layer TRD-compliant)
+    lstm_units_1: int
+    lstm_units_2: int
+    activation: str
+    dropout_rate: float
+    
+    # Output layer
+    output_units: int
+    output_activation: str
+    
+    # Training parameters
+    optimizer: str
+    learning_rate: float
+    loss: str
+    epochs: int
     batch_size: int
-    early_stopping_patience: int
+    
+    # Early stopping
+    early_stopping: EarlyStoppingConfig
+    
+    # Data handling
+    shuffle: bool
+    validation_split: float
+    
+    # Input specification
+    lookback: int
+    prediction_horizon: int
+    expected_features: int
+    
+    # Preprocessing
+    scaler: str
+    scaler_range: List[float]
+    
+    # Reproducibility
+    random_seed: int
+    deterministic: bool
+    
+    # Advanced training
     grad_clip: float
+    use_amp: bool
     accumulation_steps: int
 
 
 # =========================
-# LSTM Baseline
+# LSTM Baseline (Deprecated - kept for backward compatibility)
 # =========================
 @dataclass
 class LSTMBaselineConfig:
-    input_size: int
-    num_layers: int
-    hidden_units: int
-    dropout: float
-    learning_rate: float
-    lookback: int
-
-    max_epochs: int
-    patience: int
-    batch_size: int
-    use_checkpointing: bool
-
-    grad_clip: float
-    use_amp: bool
-    accumulation_steps: int
-
-    wfv_fold_size: int
-    wfv_folds: int
-
-    output_size: int
-
-    # initial_capital: float
-    # position_fraction: float
-    # transaction_cost: float
-    # slippage: float
-    # stop_loss: float
-    # daily_loss_limit: float
+    """Deprecated: Use LSTMConfig instead. Kept for backward compatibility."""
+    input_size: Optional[int] = None
+    num_layers: Optional[int] = None
+    hidden_units: Optional[int] = None
+    dropout: Optional[float] = None
+    learning_rate: Optional[float] = None
+    lookback: Optional[int] = None
+    max_epochs: Optional[int] = None
+    patience: Optional[int] = None
+    batch_size: Optional[int] = None
+    use_checkpointing: Optional[bool] = None
+    grad_clip: Optional[float] = None
+    use_amp: Optional[bool] = None
+    accumulation_steps: Optional[int] = None
+    wfv_fold_size: Optional[int] = None
+    wfv_folds: Optional[int] = None
+    output_size: Optional[int] = None
 
 
 # =========================
-# XGBoost
+# =========================
+# XGBoost (Unified TRD-Compliant)
 # =========================
 @dataclass
 class XGBoostConfig:
-    objective: str
-    n_estimators: int
-    max_depth: int
-    learning_rate: float
-    subsample: float
-    colsample_bytree: float
-    min_child_weight: float
-    gamma: float
-    reg_alpha: float
-    reg_lambda: float
-    early_stopping_rounds: int
-    use_optuna: bool
-    optuna_trials: int
-    tree_method: str
-    max_bin: int
-    lookback: int
-    importance_type: str
+    """
+    Canonical XGBoost configuration (TRD-aligned).
+    
+    Architecture:
+    - Gradient boosted trees for regression
+    - Next-period return prediction
+    - Early stopping on validation RMSE
+    
+    Constraints:
+    - Consumes features from unified pipeline
+    - No internal feature engineering
+    - No normalization in model layer
+    - Deterministic training
+    """
+    name: str                      # Model identifier
+    objective: str                 # "reg:squarederror"
+    n_estimators: int              # Number of boosting rounds
+    max_depth: int                 # Tree depth
+    learning_rate: float           # Boosting learning rate
+    subsample: float               # Row sampling fraction
+    colsample_bytree: float        # Feature sampling fraction
+    min_child_weight: float        # Minimum leaf weight
+    gamma: float                   # Minimum split loss reduction
+    reg_alpha: float               # L1 regularization
+    reg_lambda: float              # L2 regularization
+    early_stopping_rounds: int     # Early stopping patience
+    importance_type: str           # Feature importance metric (diagnostic)
+    tree_method: str               # Tree construction algorithm
+    max_bin: int                   # Histogram bins
+    lookback: int                  # Number of lags for lag-based features
+    random_seed: int               # Reproducibility seed
 
 
 # =========================
@@ -164,27 +213,39 @@ class DataConfig:
 
 
 # =========================
-# Features
+# Features (Unified)
 # =========================
 @dataclass
-class XGBParams:
-    n_estimators: int
-    max_depth: int
-    learning_rate: float
-    subsample: float
-    colsample_bytree: float
+class WaveletConfig:
+    enabled: bool
+    wavelet: str
+    level: int
+    mode: str
 
 
 @dataclass
 class SelectorConfig:
-    method: str
-    importance_threshold: float
-    xgb_params: XGBParams
+    variance_threshold: float
+    correlation_threshold: float
+    vif_threshold: float
+    mi_quantile_threshold: float
+
+
+@dataclass
+class CrossTickerConfig:
+    enabled: bool
+    spy_features: bool
+    peer_features: bool
+    peer_count: int
+    peer_corr_threshold: float
+    peer_corr_window: int
 
 
 @dataclass
 class FeaturesConfig:
+    wavelet: WaveletConfig
     selector: SelectorConfig
+    cross_ticker: CrossTickerConfig
 
 
 # =========================
@@ -234,19 +295,19 @@ class SymbolUniverseConfig:
 
 
 # =========================
-# ROOT CONFIG
+# ROOT CONFIG (Unified)
 # =========================
 @dataclass
 class Config:
     pso: PSOConfig
     lstm: LSTMConfig
-    lstm_baseline: LSTMBaselineConfig
     xgboost: XGBoostConfig
     fitness: FitnessConfig
     data: DataConfig
     features: FeaturesConfig
     backtesting: BacktestingConfig
     logging: LoggingConfig
+    lstm_baseline: Optional[LSTMBaselineConfig] = None  # Deprecated, kept for compatibility
     symbol_universe: Optional[SymbolUniverseConfig] = None
 
 
@@ -275,7 +336,23 @@ def _safe_instantiate(cls, raw: dict):
 
 
 def load_config(path: str | Path | None = None) -> Config:
-    """Load a Config object from a YAML file. Uses defaults if path missing."""
+    """
+    Load a Config object from a YAML file. Uses defaults if path missing.
+    
+    Updated to support unified configuration structure with:
+    - Unified LSTM config (replaces lstm + lstm_baseline)
+    - Expanded PSO config with search_space
+    - Unified features config (wavelet + selector + cross_ticker)
+    
+    Args:
+        path: Path to YAML config file
+    
+    Returns:
+        Config object with all nested dataclasses
+    
+    Raises:
+        FileNotFoundError: If config file not found
+    """
     path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
 
     if not path.exists():
@@ -288,16 +365,24 @@ def load_config(path: str | Path | None = None) -> Config:
         raw = yaml.safe_load(f) or {}
 
     # Instantiate all nested dataclasses safely
-    return Config(
+    config = Config(
         pso=_safe_instantiate(PSOConfig, raw.get("pso", {})),
         lstm=_safe_instantiate(LSTMConfig, raw.get("lstm", {})),
-        lstm_baseline=_safe_instantiate(
-            LSTMBaselineConfig, raw.get("lstm_baseline", {})
-        ),
         xgboost=_safe_instantiate(XGBoostConfig, raw.get("xgboost", {})),
         fitness=_safe_instantiate(FitnessConfig, raw.get("fitness", {})),
         data=_safe_instantiate(DataConfig, raw.get("data", {})),
         features=_safe_instantiate(FeaturesConfig, raw.get("features", {})),
         backtesting=_safe_instantiate(BacktestingConfig, raw.get("backtesting", {})),
         logging=_safe_instantiate(LoggingConfig, raw.get("logging", {})),
+        lstm_baseline=_safe_instantiate(
+            LSTMBaselineConfig, raw.get("lstm_baseline", {})
+        ) if "lstm_baseline" in raw else None,
     )
+    
+    logger.info(f"Loaded config from {path}")
+    logger.info(f"  LSTM: {config.lstm.name} (framework={config.lstm.framework})")
+    logger.info(f"  PSO: {'enabled' if config.pso.enabled else 'disabled'}")
+    logger.info(f"  Wavelet: {'enabled' if config.features.wavelet.enabled else 'disabled'}")
+    logger.info(f"  Cross-ticker: {'enabled' if config.features.cross_ticker.enabled else 'disabled'}")
+    
+    return config

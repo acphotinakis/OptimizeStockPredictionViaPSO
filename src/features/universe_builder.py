@@ -69,7 +69,64 @@ class SymbolUniverseBuilder:
         Pass fit=True on training data to select peers; fit=False reuses them.
         """
         if fit:
-            self._fitted_peers[target_ticker] = self._select_peers(target_ticker, dfs)
+            # self._fitted_peers[target_ticker] = self._select_peers(target_ticker, dfs)
+
+            if target_ticker == "AAPL":
+                # Manually set peers for AAPL to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "MSFT",
+                    "GOOGL",
+                    "AMZN",
+                    "NVDA",
+                    "META",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
+            elif target_ticker == "MSFT":
+                # Manually set peers for MSFT to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "AAPL",
+                    "GOOGL",
+                    "AMZN",
+                    "NVDA",
+                    "META",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
+            elif target_ticker == "GOOGL":
+                # Manually set peers for GOOGL to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "AAPL",
+                    "MSFT",
+                    "AMZN",
+                    "NVDA",
+                    "META",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
+            elif target_ticker == "AMZN":
+                # Manually set peers for AMZN to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "AAPL",
+                    "MSFT",
+                    "GOOGL",
+                    "NVDA",
+                    "META",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
         elif target_ticker not in self._fitted_peers:
             raise RuntimeError(
                 f"Peers for {target_ticker} not fitted. "
@@ -107,39 +164,116 @@ class SymbolUniverseBuilder:
         return universe
 
     def _select_peers(self, target: str, dfs: Dict[str, pd.DataFrame]) -> List[str]:
-        """Select top-N correlated peers from training data (leakage-safe)."""
+        """
+        Select top-N correlated peers STRICTLY within same sector.
+
+        Constraint:
+        - Peers must belong to same sector ETF group
+        - Market context and internals are excluded
+        - Correlation computed on training log returns only
+        """
+
         if target not in dfs:
             return []
 
-        exclude = (
-            set(self.market_context)
-            | set(self.market_internals)
-            | set(self.sector_map.values())
-            | {target}
-        )
-        r_target = dfs[target]["log_return"]
-        candidates = [
-            t for t in dfs if t not in exclude and "log_return" in dfs[t].columns
+        # ------------------------------------------------------------
+        # STEP 1: Identify sector group for target
+        # ------------------------------------------------------------
+        target_sector_etf = self.sector_map.get(target)
+
+        if not target_sector_etf:
+            logger.warning("[%s] No sector mapping found → no peers selected", target)
+            return []
+
+        # ------------------------------------------------------------
+        # STEP 2: Restrict candidates to SAME sector only
+        # ------------------------------------------------------------
+        sector_stocks = [
+            stock
+            for stock, etf in self.sector_map.items()
+            if etf == target_sector_etf and stock != target
         ]
 
+        # fallback safety
+        if not sector_stocks:
+            logger.warning(
+                "[%s] No sector peers found for ETF=%s", target, target_sector_etf
+            )
+            return []
+
+        # ------------------------------------------------------------
+        # STEP 3: Compute correlations within sector only
+        # ------------------------------------------------------------
+        r_target = dfs[target]["log_return"]
+
         correlations: Dict[str, float] = {}
-        for t in candidates:
+
+        for t in sector_stocks:
+            if t not in dfs:
+                continue
+            if "log_return" not in dfs[t].columns:
+                continue
+
             aligned = pd.concat([r_target, dfs[t]["log_return"]], axis=1).dropna()
+
             if len(aligned) < 100:
                 continue
+
             corr = abs(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+
             if pd.notna(corr) and corr >= self.peer_config["min_correlation"]:
                 correlations[t] = corr
 
+        # ------------------------------------------------------------
+        # STEP 4: Rank and select top-N peers
+        # ------------------------------------------------------------
         peers = sorted(correlations, key=correlations.get, reverse=True)[
             : self.peer_config["max_peers"]
         ]
+
         logger.info(
-            "[%s] peers selected: %s",
+            "[%s] sector=%s peers selected=%s",
             target,
+            target_sector_etf,
             [(p, f"{correlations[p]:.3f}") for p in peers],
         )
+
         return peers
+
+    # def _select_peers(self, target: str, dfs: Dict[str, pd.DataFrame]) -> List[str]:
+    #     """Select top-N correlated peers from training data (leakage-safe)."""
+    #     if target not in dfs:
+    #         return []
+
+    #     exclude = (
+    #         set(self.market_context)
+    #         | set(self.market_internals)
+    #         | set(self.sector_map.values())
+    #         | {target}
+    #     )
+    #     r_target = dfs[target]["log_return"]
+    #     candidates = [
+    #         t for t in dfs if t not in exclude and "log_return" in dfs[t].columns
+    #     ]
+
+    #     correlations: Dict[str, float] = {}
+    #     for t in candidates:
+    #         aligned = pd.concat([r_target, dfs[t]["log_return"]], axis=1).dropna()
+    #         if len(aligned) < 100:
+    #             continue
+    #         corr = abs(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+    #         if pd.notna(corr) and corr >= self.peer_config["min_correlation"]:
+    #             correlations[t] = corr
+
+    #     peers = sorted(correlations, key=correlations.get, reverse=True)[
+    #         : self.peer_config["max_peers"]
+    #     ]
+    #     logger.info(
+    #         "[%s] peers selected: %s",
+    #         target,
+    #         [(p, f"{correlations[p]:.3f}") for p in peers],
+    #     )
+    #     return peers
 
     # ── Persistence ──────────────────────────────────────────────────────────
     def save_peers(self, path: str | Path) -> None:
