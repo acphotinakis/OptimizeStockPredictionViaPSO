@@ -40,11 +40,12 @@ TRD Compliance:
 Version: 1.0.0 UNIFIED CANONICAL
 """
 
-from .lstm import LSTMModel, LSTMNetwork, set_seeds, create_lstm_model
+from .ipso_optimizer import IPSOOptimizer
+from .lstm import LSTMModel, LSTMNetwork, create_lstm_model, set_seeds
 from .trainer import LSTMTrainer
+from .utils import build_lstm_windows, load_model_weights, save_model_weights
 from .xgboost_model import XGBoostModel, create_xgboost_model
 from .xgboost_trainer import XGBoostTrainer, build_xgboost_lag_features
-from .utils import build_lstm_windows, save_model_weights, load_model_weights
 
 __all__ = [
     # LSTM
@@ -57,6 +58,9 @@ __all__ = [
     "XGBoostModel",
     "XGBoostTrainer",
     "create_xgboost_model",
+    
+    # PSO
+    "IPSOOptimizer",
     
     # Utilities
     "build_lstm_windows",
