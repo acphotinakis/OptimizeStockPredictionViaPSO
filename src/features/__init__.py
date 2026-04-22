@@ -13,7 +13,6 @@ Public API:
 Version: 1.0.0 UNIFIED
 """
 
-from .pipeline import FeaturePipeline
 from .feature_creators_funcs import (
     compute_statistical_features,
     compute_volume_features,
@@ -23,27 +22,18 @@ from .feature_creators_funcs import (
 )
 from .wavelet import apply_wavelet_denoising, denoise_pipeline
 from .selector import FeatureSelector
-from .normalization import transform_features, save_transformer_state
-from .cross_ticker import compute_cross_ticker_features
-from .base_features import FeatureGenerator
 
 __all__ = [
-    # Primary API
-    "FeaturePipeline",
-    "FeatureGenerator",
     # Feature computation
     "compute_target",
     "compute_trd_technical_features",
     "compute_price_features",
-    "compute_cross_ticker_features",
     "compute_statistical_features",
     "compute_volume_features",
     # Feature transformation
     "apply_wavelet_denoising",
     "denoise_pipeline",
     "FeatureSelector",
-    "transform_features",
-    "save_transformer_state",
 ]
 
 __version__ = "1.0.0"

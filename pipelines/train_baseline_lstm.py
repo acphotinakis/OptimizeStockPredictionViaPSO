@@ -25,6 +25,7 @@ Source: FINAL_PLAN.md Section 4.1
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -109,9 +110,9 @@ def train_baseline_lstm(
     logger.info("=" * 80)
 
     # Extract config
-    lstm_config = config.lstm
-    lookback = config.lstm.lookback
-    seed = config.lstm.random_seed
+    lstm_config = config.lstm_baseline
+    lookback = config.lstm_baseline.lookback
+    seed = config.lstm_baseline.random_seed
 
     # Set seeds for reproducibility
     set_seeds(seed)
@@ -188,15 +189,15 @@ def train_baseline_lstm(
     logger.info(f"Model saved to {model_path}")
 
     # Save training history
-    history_path = output_dir / "training_history.yaml"
+    history_path = output_dir / "training_history.json"
     with open(history_path, "w") as f:
-        yaml.dump(history, f, default_flow_style=False)
+        json.dump(history, f, indent=4)
     logger.info(f"Training history saved to {history_path}")
 
     # Save model configuration
-    config_path = output_dir / "model_config.yaml"
+    config_path = output_dir / "model_config.json"
     with open(config_path, "w") as f:
-        yaml.dump(model_config, f, default_flow_style=False)
+        json.dump(model_config, f, indent=4)
     logger.info(f"Model config saved to {config_path}")
 
     # Save metadata
@@ -209,9 +210,9 @@ def train_baseline_lstm(
         "features": X_train.shape[1],
         "lookback": lookback,
         "hyperparameters": {
-            "units_1": lstm_config.lstm_units_1,
-            "units_2": lstm_config.lstm_units_2,
-            "dropout": lstm_config.dropout_rate,
+            "lstm_units_1": lstm_config.lstm_units_1,
+            "lstm_units_2": lstm_config.lstm_units_2,
+            "dropout_rate": lstm_config.dropout_rate,
             "learning_rate": lstm_config.learning_rate,
             "batch_size": lstm_config.batch_size,
             "epochs": lstm_config.epochs,
@@ -221,9 +222,9 @@ def train_baseline_lstm(
         "retraining_allowed": False,
     }
 
-    metadata_path = output_dir / "metadata.yaml"
+    metadata_path = output_dir / "metadata.json"
     with open(metadata_path, "w") as f:
-        yaml.dump(metadata, f, default_flow_style=False)
+        json.dump(metadata, f, indent=4)
     logger.info(f"Metadata saved to {metadata_path}")
 
     return model

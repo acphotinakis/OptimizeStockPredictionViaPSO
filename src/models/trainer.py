@@ -110,16 +110,6 @@ class LSTMTrainer:
         self._validate_inputs(X_train, y_train, "train")
         self._validate_inputs(X_val, y_val, "val")
 
-        # Extract configuration
-        batch_size = int(self.config.get("batch_size", 32))
-
-        # Early stopping config
-        early_stopping_config = self.config.get("early_stopping", {})
-        if isinstance(early_stopping_config, dict):
-            patience = int(early_stopping_config.get("patience", 10))
-        else:
-            patience = 10
-
         input_size = X_train.shape[2]
 
         logger.info("=" * 80)

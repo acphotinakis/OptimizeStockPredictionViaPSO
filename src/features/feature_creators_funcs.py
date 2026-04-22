@@ -155,15 +155,17 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     # CATEGORY B: TREND-FOLLOWING INDICATORS (TRD1 §3.2)
     # ========================================================================
     # EMA indicators (Lanbouri & Achchab 2020, Zeng et al. 2025)
-    out["ema12"] = C.ewm(span=12, adjust=False, min_periods=1).mean()
-    out["ema20"] = C.ewm(span=20, adjust=False, min_periods=1).mean()
-    out["ema25"] = C.ewm(span=25, adjust=False, min_periods=1).mean()
-    ema26 = C.ewm(span=26, adjust=False, min_periods=1).mean()
+    # FIX Issue #10: Use min_periods=span for proper warm-up
+    out["ema12"] = C.ewm(span=12, adjust=False, min_periods=12).mean()
+    out["ema20"] = C.ewm(span=20, adjust=False, min_periods=20).mean()
+    out["ema25"] = C.ewm(span=25, adjust=False, min_periods=25).mean()
+    ema26 = C.ewm(span=26, adjust=False, min_periods=26).mean()
 
     # Simple Moving Averages (Zeng et al. 2025)
-    out["ma5"] = C.rolling(5, min_periods=1).mean()
-    out["ma10"] = C.rolling(10, min_periods=1).mean()
-    out["ma20"] = C.rolling(20, min_periods=1).mean()
+    # Use min_periods=window for proper warm-up
+    out["ma5"] = C.rolling(5, min_periods=5).mean()
+    out["ma10"] = C.rolling(10, min_periods=10).mean()
+    out["ma20"] = C.rolling(20, min_periods=20).mean()
 
     # MACD (Lanbouri & Achchab 2020)
     # Note: Only MACD line is included per TRD ambiguity resolution
@@ -174,7 +176,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     # ========================================================================
     # Bollinger Bands (Lanbouri & Achchab 2020)
     sma20 = out["ma20"]
-    std20 = C.rolling(20, min_periods=1).std()
+    std20 = C.rolling(20, min_periods=20).std()
     out["boll_upper"] = sma20 + 2 * std20
     out["boll_lower"] = sma20 - 2 * std20
     out["boll_mid"] = sma20  # Zeng et al. 2025 explicit requirement
@@ -184,15 +186,19 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         out["boll_upper"] - out["boll_lower"] + 1e-10
     )
 
-    # Average True Range (Zeng et al. 2025)
+    # Average True Range (TRD1 §3.3 - Wilder's Smoothing)
     # TR calculation: max(H-L, |H-C_prev|, |L-C_prev|)
     prev_C = C.shift(1)
     tr = pd.DataFrame(
         {"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}
     ).max(axis=1)
 
-    # ATR14: Standard 14-period Wilder's smoothed average
-    out["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+    # ATR14: Correct Wilder's smoothing implementation
+    # Formula: ATR[t] = (13*ATR[t-1] + TR[t]) / 14
+    # Initial ATR = mean(TR[1:14])
+    atr_init = tr.rolling(14, min_periods=14).mean()
+    # Apply Wilder's smoothing (RMA) using EWM
+    out["atr_14"] = atr_init.ewm(alpha=1 / 14, adjust=False).mean()
 
     # ========================================================================
     # CATEGORY D: MOMENTUM/OSCILLATOR INDICATORS (TRD1 §3.4)
@@ -323,7 +329,9 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
         f"Computed {len(out.columns)} price features for {len(out)} samples "
         f"(columns: {list(out.columns.tolist())}...)"
     )
-    return out.ffill().fillna(0.0)
+    out = out.ffill(limit=5)
+    # return out.ffill().fillna(0.0)
+    return out
 
 
 def compute_target(df: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:

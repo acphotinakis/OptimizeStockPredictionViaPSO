@@ -191,6 +191,16 @@ class DataCleaner:
     # =========================================================
 
     def _compute_observation_gaps(self, df: pd.DataFrame) -> dict:
+        """
+        Classify gaps in time series data (observation-based).
+        
+        FIX Issue #3: For daily data, median time delta correctly handles
+        weekends/holidays (2-4 day gaps are common and expected).
+        Gap sizes are measured in multiples of the expected interval.
+        
+        The max_gap_fill=5 parameter means: 5 consecutive MISSING observations,
+        not 5 days. For daily data with weekends, this typically means ~2 weeks.
+        """
         logger.info("STEP 4 | Gap classification started | rows=%d", len(df))
 
         time_deltas = df.index.to_series().diff()
@@ -365,3 +375,72 @@ class DataCleaner:
         logger.info("STEP 7 complete | dataset is TRD-compliant")
 
         return df
+    
+    # =========================================================
+    # SYNCHRONIZED CLEANING SUPPORT (Issue #2 Fix)
+    # =========================================================
+    
+    def get_invalid_mask(self, df: pd.DataFrame, after_forward_fill: bool = True) -> pd.Series:
+        """
+        Return boolean mask of invalid rows (without removing them).
+        
+        Used for synchronized cleaning across multiple tickers.
+        Returns True for rows that should be removed.
+        
+        Args:
+            df: DataFrame to check
+            after_forward_fill: If True, mark ALL remaining NaN as invalid.
+                              If False, only mark gaps > max_gap_fill as invalid.
+        
+        Returns:
+            Boolean Series (True = invalid row, should be dropped)
+        """
+        # Start with all False
+        invalid_mask = pd.Series(False, index=df.index)
+        
+        # OHLCV validation failures
+        ohlcv_invalid = (
+            (df["high"] < df["low"])
+            | (df["open"] <= 0)
+            | (df["high"] <= 0)
+            | (df["low"] <= 0)
+            | (df["close"] <= 0)
+            | (df["volume"] < 0)
+            | (df["close"] < df["low"])
+            | (df["close"] > df["high"])
+        )
+        
+        invalid_mask |= ohlcv_invalid
+        
+        # Missing data handling
+        is_missing = df["close"].isna()
+        
+        if is_missing.any():
+            if after_forward_fill:
+                # After forward-fill, ANY remaining NaN is invalid
+                # (either initial NaN before first valid, or gap > max_gap_fill)
+                invalid_mask |= is_missing
+                logger.info(
+                    "Marked ALL remaining NaN as invalid (post-forward-fill) | count=%d",
+                    is_missing.sum()
+                )
+            else:
+                # Before forward-fill, only mark gaps > max_gap_fill
+                run_id = (is_missing != is_missing.shift()).cumsum()
+                gap_lengths = is_missing.groupby(run_id).transform("sum")
+                long_gap_mask = is_missing & (gap_lengths > self.max_gap_fill)
+                
+                invalid_mask |= long_gap_mask
+                logger.info(
+                    "Marked long gaps (>%d) as invalid | count=%d",
+                    self.max_gap_fill,
+                    long_gap_mask.sum()
+                )
+        
+        logger.info(
+            "Invalid mask computed | total_invalid=%d (%.2f%%)",
+            invalid_mask.sum(),
+            100 * invalid_mask.sum() / len(df) if len(df) > 0 else 0
+        )
+        
+        return invalid_mask

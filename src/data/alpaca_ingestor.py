@@ -16,10 +16,12 @@ from typing import List, Optional
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.enums import Adjustment, DataFeed
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from datetime import timezone
 import pandas as pd
 from dotenv import load_dotenv
+
+from src.utils.config_loader import Config
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,8 @@ class AlpacaIngestor:
         # Map configuration strings to alpaca-py TimeFrame objects
         self.timeframe_map = {
             "1Min": TimeFrame.Minute,
+            "5Min": TimeFrame(5, TimeFrameUnit.Minute),
+            "15Min": TimeFrame(15, TimeFrameUnit.Minute),
             "1Hour": TimeFrame.Hour,
             "1Day": TimeFrame.Day,
         }
@@ -75,9 +79,9 @@ class AlpacaIngestor:
     def download_bars(
         self,
         ticker: str,
-        start: str = "2021-04-05",
-        end: str = "2026-04-05",
-        timeframe: str = "1Min",
+        start: str,
+        end: str,
+        timeframe: str,
         adjustment: str = "all",
         data_feed: str = "sip",
     ) -> pd.DataFrame:
@@ -120,13 +124,22 @@ class AlpacaIngestor:
 
         request_params = StockBarsRequest(
             symbol_or_symbols=ticker,
-            timeframe=self.timeframe_map.get(timeframe, TimeFrame.Minute),
+            timeframe=self.timeframe_map.get(timeframe, -1),
             start=start_dt,
             end=end_dt,
             adjustment=Adjustment(adjustment),
             feed=DataFeed(data_feed),
         )
 
+        logger.info(
+            "Request Params | ticker=%s timeframe=%s start=%s end=%s adjustment=%s feed=%s",
+            ticker,
+            request_params.timeframe,
+            request_params.start,
+            request_params.end,
+            request_params.adjustment,
+            request_params.feed,
+        )
         try:
             bars = self.client.get_stock_bars(request_params)
             df: pd.DataFrame = bars.df
@@ -181,6 +194,8 @@ class AlpacaIngestor:
                 | (df["open"] <= 0)
                 | (df["close"] <= 0)
                 | (df["volume"] < 0)
+                | (df["close"] < df["low"])
+                | (df["close"] > df["high"])
             )
 
             if invalid_ohlc.any():
@@ -223,6 +238,7 @@ class AlpacaIngestor:
         output_dir: str | Path,
         start: str,
         end: str,
+        config: Config,
         skip_existing: bool = False,
     ) -> None:
         """Download all tickers and persist each as a Parquet file.
@@ -262,7 +278,9 @@ class AlpacaIngestor:
                 continue
 
             logger.info("[%d/%d] Downloading %s ...", idx, len(tickers), ticker)
-            df = self.download_bars(ticker, start=start, end=end)
+            df = self.download_bars(
+                ticker, start=start, end=end, timeframe=config.data.freq
+            )
             if not df.empty:
                 df.to_parquet(
                     out_path, engine="pyarrow", compression="zstd", index=True

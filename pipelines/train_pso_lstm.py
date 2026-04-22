@@ -45,46 +45,42 @@ from src.models import (
     build_lstm_windows,
     set_seeds,
 )
-from src.utils.config_loader import load_config
+from src.utils.config_loader import Config, load_config
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+
 logger = logging.getLogger(__name__)
 
 
 def load_preprocessed_data(data_path: Path) -> dict:
     """
     Load preprocessed features from canonical feature pipeline.
-    
+
     Args:
         data_path: Directory containing X_train.npy, y_train.npy, etc.
-    
+
     Returns:
         Dictionary with train/val/test splits
     """
     logger.info(f"Loading preprocessed data from {data_path}")
-    
+
     data = {}
     for split in ["train", "val", "test"]:
         X_path = data_path / f"X_{split}.npy"
         y_path = data_path / f"y_{split}.npy"
-        
+
         if not X_path.exists() or not y_path.exists():
             raise FileNotFoundError(
                 f"Missing {split} data: {X_path} or {y_path}\n"
                 f"Run canonical feature pipeline first."
             )
-        
+
         data[f"X_{split}"] = np.load(X_path)
         data[f"y_{split}"] = np.load(y_path)
-        
+
         logger.info(
             f"  {split}: X={data[f'X_{split}'].shape}, y={data[f'y_{split}'].shape}"
         )
-    
+
     return data
 
 
@@ -100,9 +96,9 @@ def fitness_function(
 ) -> float:
     """
     Fitness function for PSO: Train LSTM and return validation MSE.
-    
+
     FINAL_PLAN.md Section 4.2: PSO Fitness Function
-    
+
     Args:
         params: Hyperparameters proposed by PSO
         X_train_win: Training features (windowed)
@@ -112,7 +108,7 @@ def fitness_function(
         lookback: Window size
         n_features: Number of features
         seed: Random seed
-    
+
     Returns:
         Fitness value (validation MSE)
     """
@@ -128,27 +124,30 @@ def fitness_function(
         "learning_rate": params["learning_rate"],
         "loss": "mse",
     }
-    
+
     # Create and train model
-    model = LSTMModel(model_config, seed=seed)
+    model = LSTMModel(seed=seed)
     trainer = LSTMTrainer(model_config, seed=seed)
-    
+
     model, _ = trainer.train(
         X_train_win,
         y_train_win,
         X_val_win,
         y_val_win,
-        epochs=params["epochs"],
-        batch_size=params["batch_size"],
-        patience=10,
-        shuffle=False,
-        verbose=0,
+        epochs=lstm_config.epochs,
+        batch_size=lstm_config.batch_size,
+        patience=lstm_config.early_stopping.patience,
+        shuffle=False,  # MUST be False
+        lstm_units_1=lstm_config.lstm_units_1,
+        lstm_units_2=lstm_config.lstm_units_2,
+        dropout_rate=lstm_config.dropout_rate,
+        learning_rate=lstm_config.learning_rate,
     )
-    
+
     # Compute validation MSE
     y_pred = model.predict(X_val_win, verbose=0)
     mse = np.mean((y_val_win - y_pred.flatten()) ** 2)
-    
+
     return float(mse)
 
 
@@ -157,17 +156,17 @@ def phase1_pso_search(
     y_train: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
-    config: dict,
+    config: Config,
     lookback: int,
     output_dir: Path,
 ) -> dict:
     """
     Phase 1: PSO hyperparameter search.
-    
+
     FINAL_PLAN.md Section 4.2: PSO Phase 1
-    
+
     Search on 70% train, validate on 10% val.
-    
+
     Args:
         X_train: Training features (70%)
         y_train: Training targets (70%)
@@ -176,7 +175,7 @@ def phase1_pso_search(
         config: Configuration dict
         lookback: Window size
         output_dir: Directory to save results
-    
+
     Returns:
         Dictionary of best hyperparameters
     """
@@ -185,20 +184,20 @@ def phase1_pso_search(
     logger.info("=" * 80)
     logger.info("Searching on 70% train, validating on 10% val")
     logger.info("=" * 80)
-    
+
     # Extract PSO config
-    pso_config = config.pso_lstm.pso
+    pso_config = config.pso
     seed = pso_config.random_seed
-    
+
     # Build LSTM windows
     logger.info(f"Building LSTM windows (lookback={lookback})...")
     X_train_win, y_train_win = build_lstm_windows(X_train, y_train, lookback)
     X_val_win, y_val_win = build_lstm_windows(X_val, y_val, lookback)
-    
+
     logger.info(f"Windowed shapes:")
     logger.info(f"  X_train: {X_train_win.shape}, y_train: {y_train_win.shape}")
     logger.info(f"  X_val:   {X_val_win.shape}, y_val:   {y_val_win.shape}")
-    
+
     # Define search space
     search_space = {
         "epochs": {
@@ -206,12 +205,12 @@ def phase1_pso_search(
             "max": pso_config.search_space.epochs.max,
         },
         "units_1": {
-            "min": pso_config.search_space.units_1.min,
-            "max": pso_config.search_space.units_1.max,
+            "min": pso_config.search_space.lstm_units_1.min,
+            "max": pso_config.search_space.lstm_units_1.max,
         },
         "units_2": {
-            "min": pso_config.search_space.units_2.min,
-            "max": pso_config.search_space.units_2.max,
+            "min": pso_config.search_space.lstm_units_2.min,
+            "max": pso_config.search_space.lstm_units_2.max,
         },
         "learning_rate": {
             "min": pso_config.search_space.learning_rate.min,
@@ -219,14 +218,14 @@ def phase1_pso_search(
             "scale": pso_config.search_space.learning_rate.scale,
         },
         "dropout": {
-            "min": pso_config.search_space.dropout.min,
-            "max": pso_config.search_space.dropout.max,
+            "min": pso_config.search_space.dropout_rate.min,
+            "max": pso_config.search_space.dropout_rate.max,
         },
         "batch_size": {
             "choices": pso_config.search_space.batch_size.choices,
         },
     }
-    
+
     # Define fitness function wrapper
     def fitness_wrapper(params):
         return fitness_function(
@@ -239,7 +238,7 @@ def phase1_pso_search(
             X_train.shape[1],
             seed,
         )
-    
+
     # Initialize IPSO
     optimizer = IPSOOptimizer(
         n_particles=pso_config.n_particles,
@@ -253,10 +252,10 @@ def phase1_pso_search(
         v_clamp_fraction=pso_config.v_clamp_fraction,
         seed=seed,
     )
-    
+
     # Run optimization
     best_params, best_fitness = optimizer.optimize()
-    
+
     # Save PSO results
     pso_results = {
         "best_hyperparameters": best_params,
@@ -268,13 +267,13 @@ def phase1_pso_search(
             "seed": seed,
         },
     }
-    
+
     pso_results_path = output_dir / "pso_phase1_results.yaml"
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(pso_results_path, "w") as f:
         yaml.dump(pso_results, f, default_flow_style=False)
     logger.info(f"PSO results saved to {pso_results_path}")
-    
+
     logger.info("=" * 80)
     logger.info("PHASE 1 COMPLETE")
     logger.info("=" * 80)
@@ -283,7 +282,7 @@ def phase1_pso_search(
         logger.info(f"  {key}: {value}")
     logger.info(f"Best validation MSE: {best_fitness:.6f}")
     logger.info("=" * 80)
-    
+
     return best_params
 
 
@@ -293,18 +292,18 @@ def phase2_final_training(
     X_val: np.ndarray,
     y_val: np.ndarray,
     best_params: dict,
-    config: dict,
+    config: Config,
     lookback: int,
     output_dir: Path,
 ) -> LSTMModel:
     """
     Phase 2: Final training on combined 80% (train+val) with PSO params.
-    
+
     FINAL_PLAN.md Section 4.2: PSO Phase 2
-    
+
     Train on 80% combined data using exact epoch count from PSO.
     NO early stopping in final fit.
-    
+
     Args:
         X_train: Training features (70%)
         y_train: Training targets (70%)
@@ -314,7 +313,7 @@ def phase2_final_training(
         config: Configuration dict
         lookback: Window size
         output_dir: Directory to save model
-    
+
     Returns:
         Trained and FROZEN LSTMModel
     """
@@ -325,48 +324,52 @@ def phase2_final_training(
     logger.info("Using PSO-optimized hyperparameters")
     logger.info("NO early stopping (using exact PSO epoch count)")
     logger.info("=" * 80)
-    
+
     # Combine train and val
     X_combined = np.concatenate([X_train, X_val], axis=0)
     y_combined = np.concatenate([y_train, y_val], axis=0)
-    
+
     logger.info(f"Combined data shape: X={X_combined.shape}, y={y_combined.shape}")
-    
+
     # Build LSTM windows
     logger.info(f"Building LSTM windows (lookback={lookback})...")
-    X_combined_win, y_combined_win = build_lstm_windows(X_combined, y_combined, lookback)
-    
+    X_combined_win, y_combined_win = build_lstm_windows(
+        X_combined, y_combined, lookback
+    )
+
     logger.info(f"Windowed shape: X={X_combined_win.shape}, y={y_combined_win.shape}")
-    
+
+    pso_lstm_config = config.pso
+
     # Create model with PSO parameters
-    seed = config.pso_lstm.random_seed
+    seed = config.pso.seed
     set_seeds(seed)
-    
+
     model_config = {
         "input_shape": (lookback, X_train.shape[1]),
         "lstm_units_1": best_params["units_1"],
         "lstm_units_2": best_params["units_2"],
         "dropout_rate": best_params["dropout"],
-        "activation": config.pso_lstm.activation,
-        "output_units": config.pso_lstm.output_units,
-        "output_activation": config.pso_lstm.output_activation,
+        "activation": pso_lstm_config.activation,
+        "output_units": pso_lstm_config.output_units,
+        "output_activation": pso_lstm_config.output_activation,
         "learning_rate": best_params["learning_rate"],
-        "loss": config.pso_lstm.loss,
+        "loss": pso_lstm_config.loss,
     }
-    
+
     logger.info("PSO-optimized model configuration:")
     for key, value in model_config.items():
         logger.info(f"  {key}: {value}")
-    
+
     # Create model
-    model = LSTMModel(model_config, seed=seed)
+    model = LSTMModel(seed=seed)
     trainer = LSTMTrainer(model_config, seed=seed)
-    
+
     # Train with exact PSO epochs (NO early stopping)
     logger.info("=" * 80)
     logger.info("TRAINING (SINGLE FINAL FIT - NO EARLY STOPPING)")
     logger.info("=" * 80)
-    
+
     model, history = trainer.train(
         X_combined_win,
         y_combined_win,
@@ -374,35 +377,38 @@ def phase2_final_training(
         y_combined_win,
         epochs=best_params["epochs"],
         batch_size=best_params["batch_size"],
-        patience=None,  # NO early stopping
+        patience=pso_lstm_config.early_stopping.patience,
         shuffle=False,  # MUST be False
-        verbose=1,
+        lstm_units_1=pso_lstm_config.search_space.lstm_units_1,
+        lstm_units_2=pso_lstm_config.lstm_units_2,
+        dropout_rate=pso_lstm_config.dropout_rate,
+        learning_rate=pso_lstm_config.learning_rate,
     )
-    
+
     logger.info("=" * 80)
     logger.info("PHASE 2 COMPLETE - MODEL NOW FROZEN")
     logger.info("=" * 80)
     logger.info("⚠️  This model will NEVER be retrained")
     logger.info("⚠️  Walk-forward evaluation will use THIS frozen model")
     logger.info("=" * 80)
-    
+
     # Save model
     model_path = output_dir / "pso_lstm_model.h5"
     model.save(str(model_path))
     logger.info(f"Model saved to {model_path}")
-    
+
     # Save training history
     history_path = output_dir / "training_history.yaml"
     with open(history_path, "w") as f:
         yaml.dump(history, f, default_flow_style=False)
     logger.info(f"Training history saved to {history_path}")
-    
+
     # Save final model configuration
     config_path = output_dir / "model_config.yaml"
     with open(config_path, "w") as f:
         yaml.dump(model_config, f, default_flow_style=False)
     logger.info(f"Model config saved to {config_path}")
-    
+
     # Save metadata
     metadata = {
         "model_type": "pso_lstm",
@@ -417,20 +423,18 @@ def phase2_final_training(
         "frozen": True,
         "retraining_allowed": False,
     }
-    
+
     metadata_path = output_dir / "metadata.yaml"
     with open(metadata_path, "w") as f:
         yaml.dump(metadata, f, default_flow_style=False)
     logger.info(f"Metadata saved to {metadata_path}")
-    
+
     return model
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Train PSO-LSTM (two-phase protocol)"
-    )
+    parser = argparse.ArgumentParser(description="Train PSO-LSTM (two-phase protocol)")
     parser.add_argument(
         "--data-path",
         type=Path,
@@ -454,17 +458,17 @@ def main():
         action="store_true",
         help="Skip PSO Phase 1 and load previous results",
     )
-    
+
     args = parser.parse_args()
-    
+
     try:
         # Load configuration
         config = load_config(args.config)
-        lookback = config.features.windowing.lookback
-        
+        lookback = config.pso.lookback
+
         # Load preprocessed data
         data = load_preprocessed_data(args.data_path)
-        
+
         # Phase 1: PSO Search
         if args.skip_pso:
             logger.info("Skipping PSO Phase 1 (loading previous results)")
@@ -482,7 +486,7 @@ def main():
                 lookback=lookback,
                 output_dir=args.output_dir,
             )
-        
+
         # Phase 2: Final Training
         model = phase2_final_training(
             X_train=data["X_train"],
@@ -494,7 +498,7 @@ def main():
             lookback=lookback,
             output_dir=args.output_dir,
         )
-        
+
         logger.info("=" * 80)
         logger.info("PSO-LSTM TWO-PHASE TRAINING SUCCESSFUL")
         logger.info("=" * 80)
@@ -504,9 +508,9 @@ def main():
         logger.info("✓ Model saved to disk")
         logger.info("✓ Ready for walk-forward evaluation")
         logger.info("=" * 80)
-        
+
         sys.exit(0)
-        
+
     except Exception as e:
         logger.error(f"Training failed: {e}", exc_info=True)
         sys.exit(1)

@@ -35,8 +35,8 @@ enforcement:
 # DATA (UNION)
 # ============================================================================
 data:
-  start_date: "2021-04-08"
-  end_date: "2026-04-08"
+  start_date: "2021-04-22"
+  end_date: "2026-04-22"
   
   train_end: "2024-04-05"
   val_end: "2025-04-05" 
@@ -48,7 +48,8 @@ data:
   val_years: 1
   test_years: 1
   
-  freq: "1Min"
+  # freq: "1Min"
+  freq: "5Min"
   
   session_start: "09:30"
   session_end: "16:00"
@@ -216,6 +217,7 @@ pso:
   v_clamp_fraction: 0.20     # Velocity clamping
   
   seed: 42
+  lookback: 20
   
   # Search Space (LSTM Hyperparameters)
   search_space:

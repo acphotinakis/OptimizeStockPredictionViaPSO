@@ -343,6 +343,7 @@ class PSOConfig:
     n_workers: int
 
     random_seed: int
+    lookback: int
 
 
 # =========================

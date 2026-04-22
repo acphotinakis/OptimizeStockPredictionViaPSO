@@ -141,6 +141,16 @@ class LSTMNetwork(nn.Module):
 
         return out
 
+    def save(self, filepath: str) -> None:
+        """
+        Save model weights to disk.
+
+        Args:
+            filepath: Path to save the state dict
+        """
+        torch.save(self.state_dict(), filepath)
+        logger.info(f"Model weights saved to {filepath}")
+
 
 class LSTMModel:
     """
