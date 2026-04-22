@@ -2,48 +2,35 @@
 # CSCI 633 — Biologically-Inspired Intelligent Systems
 # March 2026
 
-pso:
-  # ============================================================
-  # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
-  # ============================================================
-  enabled: false             # Set to true for hyperparameter optimization
-  
-  # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
-  n_particles: 20
-  n_iterations: 50
-  w_min: 0.4                 # Inertia weight minimum (adaptive)
-  w_max: 0.9                 # Inertia weight maximum
-  c1: 1.5                    # Cognitive coefficient
-  c2: 1.5                    # Social coefficient
-  v_clamp_fraction: 0.20     # Velocity clamping
-  seed: 42
-  
-  # Search Space (LSTM Hyperparameters)
-  search_space:
-    lstm_units_1:
-      min: 50
-      max: 300
-      step: 32
-    lstm_units_2:
-      min: 20
-      max: 200
-      step: 20
-    dropout_rate:
-      min: 0.0
-      max: 0.5
-    learning_rate:
-      min: 1.0e-5
-      max: 1.0e-1
-      scale: "log"
-    batch_size:
-      choices: [32, 64]
-    epochs:
-      min: 50
-      max: 300
-  
-  # PSO Runtime
-  checkpoint_dir: "results/checkpoints"
-  n_workers: 1
+# ============================================================================
+# LOGGING
+# ============================================================================
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/pso_lstm.log"
+
+# ============================================================================
+# DATA CONFIGURATION
+# ============================================================================
+data:
+  start_date: "2021-04-08"
+  end_date: "2026-04-08"
+  train_end: "2024-04-05"
+  val_end: "2025-04-05" 
+  test_end: "2026-04-05"
+  # start_date: "2026-01-05"
+  # end_date: "2026-04-05"
+  train_years: 3
+  val_years: 1
+  test_years: 1
+  freq: "1Min"
+  session_start: "09:30"
+  session_end: "16:00"
+  timezone: "America/New_York"
+  benchmark_ticker: "SPY"
+  max_missing_fraction: 0.05
+  max_ffill_bars: 5
 
 lstm:
   # ============================================================
@@ -77,7 +64,7 @@ lstm:
     patience: 10
     restore_best_weights: true
   
-  # Data Handling
+  # Data Handling3
   shuffle: false             # MANDATORY: time-series constraint
   validation_split: 0.10     # 10% chronological validation
   
@@ -145,24 +132,7 @@ fitness:
   signal_threshold: 1.0e-4
   transaction_cost: 0.001
 
-data:
-  start_date: "2021-04-08"
-  end_date: "2026-04-08"
-  train_end: "2024-04-05"
-  val_end: "2025-04-05" 
-  test_end: "2026-04-05"
-  # start_date: "2026-01-05"
-  # end_date: "2026-04-05"
-  train_years: 3
-  val_years: 1
-  test_years: 1
-  freq: "1Min"
-  session_start: "09:30"
-  session_end: "16:00"
-  timezone: "America/New_York"
-  benchmark_ticker: "SPY"
-  max_missing_fraction: 0.05
-  max_ffill_bars: 5
+
 
 features:
   # ============================================================
@@ -201,8 +171,50 @@ backtesting:
   position_fraction: 0.02
   daily_loss_limit: 0.05
 
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/pso_lstm.log"
+
+
+
+pso:
+  # ============================================================
+  # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
+  # ============================================================
+  enabled: false             # Set to true for hyperparameter optimization
+  
+  # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
+  n_particles: 20
+  n_iterations: 50
+  w_min: 0.4                 # Inertia weight minimum (adaptive)
+  w_max: 0.9                 # Inertia weight maximum
+  c1: 1.5                    # Cognitive coefficient
+  c2: 1.5                    # Social coefficient
+  v_clamp_fraction: 0.20     # Velocity clamping
+  seed: 42
+  
+  # Search Space (LSTM Hyperparameters)
+  search_space:
+    lstm_units_1:
+      min: 50
+      max: 300
+      step: 32
+    lstm_units_2:
+      min: 20
+      max: 200
+      step: 20
+    dropout_rate:
+      min: 0.0
+      max: 0.5
+    learning_rate:
+      min: 1.0e-5
+      max: 1.0e-1
+      scale: "log"
+    batch_size:
+      choices: [32, 64]
+    epochs:
+      min: 50
+      max: 300
+  
+  # PSO Runtime
+  checkpoint_dir: "results/checkpoints"
+  n_workers: 1
+
 

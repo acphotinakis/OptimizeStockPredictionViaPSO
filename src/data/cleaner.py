@@ -158,7 +158,7 @@ class DataCleaner:
 
         if invalid_count > 0:
             # Optional breakdown for debugging
-            logger.debug(
+            logger.info(
                 "Invalid OHLCV breakdown | high<low=%d | open<=0=%d | high<=0=%d | low<=0=%d | close<=0=%d | volume<0=%d | close_out_of_bounds=%d",
                 (df["high"] < df["low"]).sum(),
                 (df["open"] <= 0).sum(),
@@ -216,14 +216,14 @@ class DataCleaner:
 
         # Optional deeper diagnostics
         if total_gaps > 0:
-            logger.debug(
+            logger.info(
                 "Gap sizes distribution | min=%d | median=%.2f | max=%d",
                 gap_sizes.min(),
                 gap_sizes.median(),
                 gap_sizes.max(),
             )
 
-            logger.debug("Gap start indices sample=%s", list(df.index[gap_start][:10]))
+            logger.info("Gap start indices sample=%s", list(df.index[gap_start][:10]))
 
         return {
             "gap_start": gap_start,
@@ -317,7 +317,7 @@ class DataCleaner:
         )
 
         if long_gap_count > 0:
-            logger.debug(
+            logger.info(
                 "Long gap indices sample=%s", list(df.index[long_gap_mask][:10])
             )
 

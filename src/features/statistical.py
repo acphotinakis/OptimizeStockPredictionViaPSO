@@ -5,6 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from numba import njit
+import logging
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -45,6 +52,10 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
     # ── Hurst exponent (R/S) ──────────────────────────────────────────────────
     out["hurst_exp_60"] = (
         r.rolling(60, min_periods=30).apply(_hurst_single, raw=True).fillna(0.5)
+    )
+    logger.info(
+        f"Computed {len(out.columns)} statistical features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
     )
 
     return out.fillna(0.0)

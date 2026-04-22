@@ -1,115 +1,240 @@
-"""features/cross_ticker.py — Cross-ticker and market-level features."""
+"""features/cross_ticker.py — Canonical cross-ticker feature engine (TRD-compliant)."""
 
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# SPY feature columns emitted when SPY is absent or target == SPY
-_SPY_COLS = [
-    "beta_spy_60",
-    "corr_spy_20",
-    "corr_spy_60",
-    "alpha_spy",
-    "rel_strength_spy_20",
-    "spy_lag_return_1",
-    "sector_rotation_20",
-    "spy_atr_14",
-    "spy_volume_ratio",
-    "vix_proxy",
-]
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+MARKET_CONTEXT_TICKERS = ["SPY", "QQQ", "IWM", "DIA"]
+MARKET_INTERNAL_TICKERS = ["UVXY", "GLD", "TLT"]
+
+ROLLING_SHORT = 20
+ROLLING_LONG = 60
+ROLLING_VLONG = 252
+
+EPS = 1e-10
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTOR MAPPING (CANONICAL - EXTENDABLE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+SECTOR_MAP = {
+    "AAPL": "XLK",
+    "MSFT": "XLK",
+    "GOOGL": "XLK",
+    "META": "XLK",
+    "CRM": "XLK",
+    "ADBE": "XLK",
+    "NVDA": "SOXX",
+    "AMD": "SOXX",
+    "INTC": "SOXX",
+}
+
+
+def get_sector_etf(target: str) -> Optional[str]:
+    return SECTOR_MAP.get(target, None)
+
+
+def _ensure_log_return(df: pd.DataFrame) -> pd.Series:
+    """
+    Computes log_return if missing.
+    Must be causal and index-safe.
+    """
+    if "log_return" in df.columns:
+        return df["log_return"]
+
+    if "close" not in df.columns:
+        raise ValueError("Missing 'close' column required to compute log_return")
+
+    return np.log(df["close"]).diff()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE FEATURE ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def compute_cross_ticker_features(
-    target_ticker: str,
+    target: str,
     dfs: Dict[str, pd.DataFrame],
-    peer_tickers: List[str],
-    rolling_window: int = 60,
+    peers: List[str],
+    rolling_window: int = 20,
 ) -> pd.DataFrame:
-    """15 cross-ticker / market features for *target_ticker*.
-
-    Args:
-        target_ticker:  Ticker being predicted.
-        dfs:            Full universe dict with 'log_return', 'close', 'volume'.
-        peer_tickers:   Pre-selected peers (fit on training data, never reselected here).
-        rolling_window: Window for beta / correlation calculations.
     """
-    df_target = dfs[target_ticker]
-    idx = df_target.index
-    r_target = df_target["log_return"]
-    C_target = df_target["close"]
+    Canonical cross-ticker feature generator.
+
+    STRICT RULES:
+    - all features are causal (shifted implicitly via rolling windows)
+    - no forward-looking operations
+    - all tickers aligned to target index
+    """
+
+    if target not in dfs:
+        raise ValueError(f"Missing target ticker: {target}")
+
+    idx = dfs[target].index
+    r_t = dfs[target]["log_return"].reindex(idx).fillna(0.0)
+    c_t = dfs[target]["close"].reindex(idx).ffill()
+
     out = pd.DataFrame(index=idx)
 
-    # ── SPY features ─────────────────────────────────────────────────────────
-    if "SPY" in dfs and target_ticker != "SPY":
-        spy = dfs["SPY"]
-        r_spy = spy["log_return"].reindex(idx).fillna(0.0)
-        C_spy = spy["close"].reindex(idx).ffill()
+    # ======================================================================
+    # 1. MARKET CONTEXT LAYER
+    # ======================================================================
+    for t in MARKET_CONTEXT_TICKERS:
+        if t not in dfs:
+            out[f"{t}_log_return"] = 0.0
+            out[f"{t}_rolling_mean_20"] = 0.0
+            out[f"{t}_rolling_std_20"] = 0.0
+            continue
 
-        cov = r_target.rolling(rolling_window, min_periods=10).cov(r_spy)
-        var_spy = r_spy.rolling(rolling_window, min_periods=10).var() + 1e-10
+        df = dfs[t]
+
+        # ── Ensure log_return exists (NO ASSUMPTION) ─────────────────────────────
+        if "log_return" in df.columns:
+            r = df["log_return"]
+        else:
+            if "close" not in df.columns:
+                logger.warning(f"[{t}] missing both log_return and close → zero-fill")
+                r = pd.Series(0.0, index=df.index)
+            else:
+                # deterministic log return computation
+                r = np.log(df["close"]).diff()
+
+        # align to target index
+        r = r.reindex(idx).fillna(0.0)
+
+        out[f"{t}_log_return"] = r
+        out[f"{t}_rolling_mean_20"] = r.rolling(20, min_periods=5).mean()
+        out[f"{t}_rolling_std_20"] = r.rolling(20, min_periods=5).std()
+
+    # ======================================================================
+    # 2. MARKET CROSS FEATURES (SPY-centric)
+    # ======================================================================
+    if "SPY" in dfs:
+        spy_df = dfs["SPY"]
+
+        r_spy = _ensure_log_return(spy_df).reindex(idx).fillna(0.0)
+        c_spy = dfs["SPY"]["close"].reindex(idx).ffill()
+
+        cov = r_t.rolling(ROLLING_LONG, min_periods=10).cov(r_spy)
+        var_spy = r_spy.rolling(ROLLING_LONG, min_periods=10).var() + EPS
         beta = cov / var_spy
 
-        out[f"beta_spy_{rolling_window}"] = beta
-        out["corr_spy_20"] = r_target.rolling(20, min_periods=5).corr(r_spy)
-        out[f"corr_spy_{rolling_window}"] = r_target.rolling(
-            rolling_window, min_periods=10
-        ).corr(r_spy)
-        out["alpha_spy"] = r_target - beta * r_spy
-        out["rel_strength_spy_20"] = (C_target / C_target.shift(20) - 1) / (
-            (C_spy / C_spy.shift(20) - 1).abs() + 1e-10
+        out["rolling_corr_target_SPY_20"] = r_t.rolling(20).corr(r_spy)
+        out["target_beta_SPY_static"] = beta
+        out["target_relative_SPY"] = (c_t / c_t.shift(20) - 1) - (
+            c_spy / c_spy.shift(20) - 1
         )
-        out["spy_lag_return_1"] = r_spy.shift(1)
-
-        vol_t = r_target.rolling(20, min_periods=5).std() + 1e-10
-        vol_s = r_spy.rolling(20, min_periods=5).std() + 1e-10
-        out["sector_rotation_20"] = (
-            r_target.rolling(20, min_periods=5).sum() / vol_t
-            - r_spy.rolling(20, min_periods=5).sum() / vol_s
-        )
-
-        spy_df = spy.reindex(idx).ffill()
-        if {"high", "low"}.issubset(spy_df.columns):
-            out["spy_atr_14"] = (
-                (spy_df["high"] - spy_df["low"]).rolling(14, min_periods=1).mean()
-            )
-        else:
-            out["spy_atr_14"] = 0.0
-
-        spy_vol = spy_df.get("volume", pd.Series(0, index=idx))
-        out["spy_volume_ratio"] = spy_vol / (
-            spy_vol.rolling(20, min_periods=1).mean() + 1e-10
-        )
-        out["vix_proxy"] = np.sqrt(252 * 390) * np.sqrt(
-            r_spy.pow(2).rolling(30, min_periods=5).sum()
+        out["vol_ratio_target_SPY"] = r_t.rolling(20).std() / (
+            r_spy.rolling(20).std() + EPS
         )
     else:
-        for col in _SPY_COLS:
-            out[col] = 0.0
+        out["rolling_corr_target_SPY_20"] = 0.0
+        out["target_beta_SPY_static"] = 0.0
+        out["target_relative_SPY"] = 0.0
+        out["vol_ratio_target_SPY"] = 0.0
 
-    # ── Universe breadth ──────────────────────────────────────────────────────
-    all_rets = pd.DataFrame(
-        {t: dfs[t]["log_return"].reindex(idx).fillna(0.0) for t in dfs}
-    )
-    out["mkt_breadth"] = (all_rets > 0).mean(axis=1)
-    out["universe_mean_ret"] = all_rets.mean(axis=1)
+    # ======================================================================
+    # 3. SECTOR LAYER
+    # ======================================================================
+    sector = get_sector_etf(target)
 
-    # ── Peer correlations (up to 3) ───────────────────────────────────────────
-    for rank, peer in enumerate(peer_tickers[:3], 1):
-        col = f"peer_corr_{peer}"
-        if peer in dfs:
-            r_peer = dfs[peer]["log_return"].reindex(idx).fillna(0.0)
-            out[col] = r_target.rolling(60, min_periods=10).corr(r_peer)
+    if sector and sector in dfs:
+        df = dfs[sector]
+        r_s = _ensure_log_return(df).reindex(idx).fillna(0.0)
+        c_s = df["close"].reindex(idx).ffill()
+
+        cov = r_t.rolling(ROLLING_LONG).cov(r_s)
+        var_s = r_s.rolling(ROLLING_LONG).var() + EPS
+        beta_s = cov / var_s
+
+        out[f"{sector}_log_return"] = r_s
+        out[f"{sector}_rolling_std_20"] = r_s.rolling(20).std()
+
+        out["rolling_corr_target_sector_20"] = r_t.rolling(20).corr(r_s)
+        out["sector_beta_static"] = beta_s
+        out["target_relative_sector"] = (c_t / c_t.shift(20) - 1) - (
+            c_s / c_s.shift(20) - 1
+        )
+    else:
+        out["rolling_corr_target_sector_20"] = 0.0
+        out["sector_beta_static"] = 0.0
+        out["target_relative_sector"] = 0.0
+
+    # ======================================================================
+    # 4. PEER EQUITY LAYER (TOP-K FIXED OR PRESELECTED)
+    # ======================================================================
+    peers = peers[:3]
+
+    peer_returns = []
+
+    for i in range(3):
+        if i < len(peers) and peers[i] in dfs:
+            p = peers[i]
+            r_p = _ensure_log_return(dfs[p]).reindex(idx).fillna(0.0)
+
+            out[f"peer_{i+1}_log_return"] = r_p
+            out[f"peer_{i+1}_rolling_std_20"] = r_p.rolling(20).std()
+            out[f"peer_{i+1}_rolling_corr_target_20"] = r_t.rolling(60).corr(r_p)
+            out[f"target_relative_peer_{i+1}"] = r_t - r_p
+
+            peer_returns.append(r_p)
         else:
-            out[col] = 0.0
+            out[f"peer_{i+1}_log_return"] = 0.0
+            out[f"peer_{i+1}_rolling_std_20"] = 0.0
+            out[f"peer_{i+1}_rolling_corr_target_20"] = 0.0
+            out[f"target_relative_peer_{i+1}"] = 0.0
 
-    # Pad to exactly 3 peer columns so feature count stays constant
-    for rank in range(len(peer_tickers[:3]) + 1, 4):
-        out[f"peer_corr_{rank}"] = 0.0
+    # Peer aggregates
+    if peer_returns:
+        peer_df = pd.concat(peer_returns, axis=1)
 
-    return out.fillna(0.0)
+        out["peer_mean_return"] = peer_df.mean(axis=1)
+        out["peer_dispersion"] = peer_df.std(axis=1)
+        out["target_relative_peer_mean"] = r_t - peer_df.mean(axis=1)
+    else:
+        out["peer_mean_return"] = 0.0
+        out["peer_dispersion"] = 0.0
+        out["target_relative_peer_mean"] = 0.0
+
+    # ======================================================================
+    # 5. MARKET RISK INTERNALS
+    # ======================================================================
+    for t in MARKET_INTERNAL_TICKERS:
+        if t not in dfs:
+            out[f"{t}_log_return"] = 0.0
+            out[f"{t}_rolling_std_20"] = 0.0
+            out[f"target_beta_{t}_static"] = 0.0
+            continue
+
+        r_i = _ensure_log_return(dfs[t]).reindex(idx).fillna(0.0)
+        # r_i = dfs[t]["log_return"].reindex(idx).fillna(0.0)
+
+        cov = r_t.rolling(ROLLING_LONG).cov(r_i)
+        var_i = r_i.rolling(ROLLING_LONG).var() + EPS
+        beta_i = cov / var_i
+
+        out[f"{t}_log_return"] = r_i
+        out[f"{t}_rolling_std_20"] = r_i.rolling(20).std()
+        out[f"target_beta_{t}_static"] = beta_i
+
+    # ======================================================================
+    # FINAL CLEANING
+    # ======================================================================
+    out = out.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    logger.info(
+        f"Computed {len(out.columns)} cross-ticker features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
+    )
+    return out

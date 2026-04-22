@@ -78,6 +78,7 @@ project_archive.zip
 .gemini
 
 data/
+!src/data/
 
 _feature_opts/
 

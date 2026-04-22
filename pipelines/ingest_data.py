@@ -118,7 +118,7 @@ def run_align(args, cfg: Config, tickers: list[str]) -> None:
             len(df),
             df.index.min(),
             df.index.max(),
-            df.isna().mean().mean() * 100,
+            df.isna().mean() * 100,
         )
 
 

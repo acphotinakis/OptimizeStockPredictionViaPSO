@@ -96,7 +96,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["low"] = L
     out["close"] = C
     out["volume"] = V
-    out["log_return"] = np.log(C / C.shift(1))  # Causal: uses only prior close
+    # out["log_return"] = np.log(C / C.shift(1))  # Causal: uses only prior close
 
     # ========================================================================
     # CATEGORY B: TREND-FOLLOWING INDICATORS (TRD1 §3.2)
@@ -266,6 +266,10 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
         index=df.index,
     ).astype(np.float32)
 
+    logger.info(
+        f"Computed {len(out.columns)} price features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
+    )
     return out.ffill().fillna(0.0)
 
 

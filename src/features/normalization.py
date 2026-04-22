@@ -14,85 +14,9 @@ import logging
 import numpy as np
 import pandas as pd
 import pywt
-from typing import Dict, Tuple, Any
+from typing import Dict, Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
-
-
-def _wavelet_denoise_1d(series: np.ndarray, threshold: float) -> np.ndarray:
-    """
-    Apply 3-level Haar wavelet denoising with soft thresholding.
-
-    Args:
-        series: 1D numpy array of close prices
-        threshold: Universal threshold for denoising (computed from training)
-
-    Returns:
-        Denoised series as float32 array
-    """
-    # Ensure contiguous float32 array for pywt
-    series = np.asarray(series, dtype=np.float32)
-    original_length = len(series)
-
-    # Multi-level discrete wavelet decomposition
-    # coeffs[0] = approximation (cA3)
-    # coeffs[1] = detail level 3 (cD3)
-    # coeffs[2] = detail level 2 (cD2)
-    # coeffs[3] = detail level 1 (cD1 - highest frequency)
-    coeffs = pywt.wavedec(series, wavelet="haar", level=3, mode="symmetric")
-
-    # Apply soft thresholding ONLY to detail coefficients (index 1, 2, 3)
-    # Approximation coefficient (index 0) is preserved exactly
-    coeffs[1:] = [pywt.threshold(c, value=threshold, mode="soft") for c in coeffs[1:]]
-
-    # Reconstruct signal from modified coefficients
-    reconstructed = pywt.waverec(coeffs, wavelet="haar", mode="symmetric")
-
-    # Trim to original length (waverec may return slightly longer array due to padding)
-    reconstructed = reconstructed[:original_length]
-
-    return reconstructed.astype(np.float32)
-
-
-def _compute_wavelet_threshold(close_train: np.ndarray) -> float:
-    """
-    Compute universal threshold from training data using MAD estimator.
-
-    Threshold = sigma * sqrt(2 * log(N))
-    where sigma = median(|D1|) / 0.6745
-
-    Args:
-        close_train: Training close prices
-
-    Returns:
-        Universal threshold value
-    """
-    close_train = np.asarray(close_train, dtype=np.float32)
-    N = len(close_train)
-
-    if N == 0:
-        raise ValueError("Cannot compute threshold on empty training data")
-
-    # Decompose to get detail coefficients
-    coeffs = pywt.wavedec(close_train, wavelet="haar", level=3, mode="symmetric")
-    D1 = coeffs[-1]  # Highest frequency detail coefficients
-
-    # Median Absolute Deviation (MAD) estimator of noise standard deviation
-    # 0.6745 is the 75th percentile of standard normal (MAD scaling factor)
-    median_abs_dev = np.median(np.abs(D1))
-
-    if median_abs_dev == 0:
-        logger.warning(
-            "MAD is zero (constant D1 coefficients), setting threshold to 0.0"
-        )
-        return 0.0
-
-    sigma = median_abs_dev / 0.6745
-
-    # Universal threshold (Donoho-Johnstone)
-    threshold = sigma * np.sqrt(2 * np.log(N))
-
-    return float(threshold)
 
 
 def _apply_minmax_scale(
@@ -148,23 +72,20 @@ def _fit_minmax_params(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
         x_min = float(df[col].min())
         x_max = float(df[col].max())
         params[col] = {"min": x_min, "max": x_max}
-        logger.debug(f"Scaler fit - {col}: min={x_min:.8f}, max={x_max:.8f}")
+        logger.info(f"Scaler fit - {col}: min={x_min:.8f}, max={x_max:.8f}")
     return params
 
 
 def transform_features(
-    train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    wavelet_threshold: Optional[float],
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
     Execute Stage 4 Feature Transformation pipeline.
 
     Pipeline steps:
-    1. Wavelet denoising (OPTIONAL - only if 'close' column exists)
-       - 3-level Haar, soft threshold, symmetric padding
-       - Threshold computed on training data only
-       - Applied identically to train/val/test
-       - Column 'close' -> 'close_denoised'
-       - If 'close' not present, skip this step (already denoised or not selected)
     2. MinMax normalization to [-1, 1]
        - Parameters fit on training data only
        - Applied to all columns
@@ -211,34 +132,7 @@ def transform_features(
     test_work = test_work[feature_cols]
 
     # =====================================================================
-    # PART 1: WAVELET DENOISING (close -> close_denoised) - OPTIONAL
-    # =====================================================================
-    # Only apply wavelet denoising if 'close' column exists
-    # (It may have been removed during feature selection or already denoised upstream)
-    if "close" in train_work.columns:
-        logger.info("Wavelet: 'close' column found, applying denoising...")
-        logger.info("Wavelet: Computing universal threshold from training data...")
-
-        threshold = _compute_wavelet_threshold(train_work["close"].values)
-        logger.info(f"Wavelet: Universal threshold = {threshold:.8f}")
-
-        # Apply denoising to all splits using SAME threshold
-        logger.info("Wavelet: Applying denoising to train/val/test...")
-        train_work["close"] = _wavelet_denoise_1d(train_work["close"].values, threshold)
-        val_work["close"] = _wavelet_denoise_1d(val_work["close"].values, threshold)
-        test_work["close"] = _wavelet_denoise_1d(test_work["close"].values, threshold)
-
-        # Rename to indicate denoising
-        train_work = train_work.rename(columns={"close": "close_denoised"})
-        val_work = val_work.rename(columns={"close": "close_denoised"})
-        test_work = test_work.rename(columns={"close": "close_denoised"})
-
-        logger.info("Wavelet: Denoising complete")
-    else:
-        logger.info("Wavelet: 'close' column not found, skipping wavelet denoising")
-
-    # =====================================================================
-    # PART 2: MINMAX NORMALIZATION to [-1, 1]
+    # PART 1: MINMAX NORMALIZATION to [-1, 1]
     # =====================================================================
     logger.info("Scaler: Fitting MinMax parameters on training data...")
 
@@ -318,7 +212,9 @@ def transform_features(
             "wavelet": "haar",
             "level": 3,
             "mode": "symmetric",
-            "threshold": float(threshold),
+            "threshold": (
+                float(wavelet_threshold) if wavelet_threshold is not None else None
+            ),
         },
         "scaler": scaler_params,
         "feature_columns": feature_cols,

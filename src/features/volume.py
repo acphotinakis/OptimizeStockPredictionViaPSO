@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import logging
+from typing import Optional
 
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
 _TRADING_MINUTES = 390  # 09:30–16:00
 _TRADING_DAYS = 5
 
@@ -85,5 +91,10 @@ def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
     dow = idx.tz_convert("America/New_York").dayofweek.values.astype(float)
     out["dow_sin"] = np.sin(2 * np.pi * dow / _TRADING_DAYS)
     out["dow_cos"] = np.cos(2 * np.pi * dow / _TRADING_DAYS)
+
+    logger.info(
+        f"Computed {len(out.columns)} volume features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
+    )
 
     return out.fillna(0.0)

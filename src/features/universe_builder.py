@@ -76,9 +76,7 @@ class SymbolUniverseBuilder:
                 self._fitted_peers[target_ticker] = [
                     "MSFT",
                     "GOOGL",
-                    "AMZN",
                     "NVDA",
-                    "META",
                 ]
                 logger.info(
                     "[%s] Using fixed peers: %s",
@@ -90,8 +88,6 @@ class SymbolUniverseBuilder:
                 self._fitted_peers[target_ticker] = [
                     "AAPL",
                     "GOOGL",
-                    "AMZN",
-                    "NVDA",
                     "META",
                 ]
                 logger.info(
@@ -104,8 +100,6 @@ class SymbolUniverseBuilder:
                 self._fitted_peers[target_ticker] = [
                     "AAPL",
                     "MSFT",
-                    "AMZN",
-                    "NVDA",
                     "META",
                 ]
                 logger.info(
@@ -113,14 +107,36 @@ class SymbolUniverseBuilder:
                     target_ticker,
                     self._fitted_peers[target_ticker],
                 )
-            elif target_ticker == "AMZN":
-                # Manually set peers for AMZN to ensure consistency across runs
+            elif target_ticker == "NVDA":
+                # Manually set peers for NVDA to ensure consistency across runs
                 self._fitted_peers[target_ticker] = [
                     "AAPL",
                     "MSFT",
                     "GOOGL",
-                    "NVDA",
-                    "META",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
+            elif target_ticker == "AMD":
+                # Manually set peers for AMD to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "AAPL",
+                    "MSFT",
+                    "GOOGL",
+                ]
+                logger.info(
+                    "[%s] Using fixed peers: %s",
+                    target_ticker,
+                    self._fitted_peers[target_ticker],
+                )
+            elif target_ticker == "META":
+                # Manually set peers for META to ensure consistency across runs
+                self._fitted_peers[target_ticker] = [
+                    "AAPL",
+                    "MSFT",
+                    "GOOGL",
                 ]
                 logger.info(
                     "[%s] Using fixed peers: %s",
