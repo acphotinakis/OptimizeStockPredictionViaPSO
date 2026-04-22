@@ -15,176 +15,38 @@ logger = logging.getLogger(__name__)
 
 
 # =========================
-# PSO (Unified)
+# Logging
 # =========================
 @dataclass
-class PSOSearchSpaceParam:
-    min: Optional[float] = None
-    max: Optional[float] = None
-    step: Optional[int] = None
-    scale: Optional[str] = None
-    choices: Optional[List[int]] = None
-
-
-@dataclass
-class PSOSearchSpace:
-    lstm_units_1: Optional[PSOSearchSpaceParam] = None
-    lstm_units_2: Optional[PSOSearchSpaceParam] = None
-    dropout_rate: Optional[PSOSearchSpaceParam] = None
-    learning_rate: Optional[PSOSearchSpaceParam] = None
-    batch_size: Optional[PSOSearchSpaceParam] = None
-    epochs: Optional[PSOSearchSpaceParam] = None
-
-
-@dataclass
-class PSOConfig:
-    enabled: bool
-    n_particles: int
-    n_iterations: int
-    w_min: float
-    w_max: float
-    c1: float
-    c2: float
-    v_clamp_fraction: float
-    seed: int
-    checkpoint_dir: str
-    n_workers: int
-    search_space: Optional[PSOSearchSpace] = None
+class LoggingConfig:
+    level: str
+    format: str
+    file: str
 
 
 # =========================
-# LSTM (Unified Canonical)
+# Output
 # =========================
 @dataclass
-class EarlyStoppingConfig:
-    enabled: bool
-    monitor: str
-    patience: int
-    restore_best_weights: bool
-
-
-@dataclass
-class LSTMConfig:
-    # Model metadata
-    name: str
-    framework: str
-    
-    # Architecture (2-layer TRD-compliant)
-    lstm_units_1: int
-    lstm_units_2: int
-    activation: str
-    dropout_rate: float
-    
-    # Output layer
-    output_units: int
-    output_activation: str
-    
-    # Training parameters
-    optimizer: str
-    learning_rate: float
-    loss: str
-    epochs: int
-    batch_size: int
-    
-    # Early stopping
-    early_stopping: EarlyStoppingConfig
-    
-    # Data handling
-    shuffle: bool
-    validation_split: float
-    
-    # Input specification
-    lookback: int
-    prediction_horizon: int
-    expected_features: int
-    
-    # Preprocessing
-    scaler: str
-    scaler_range: List[float]
-    
-    # Reproducibility
-    random_seed: int
-    deterministic: bool
-    
-    # Advanced training
-    grad_clip: float
-    use_amp: bool
-    accumulation_steps: int
+class OutputConfig:
+    results_dir: str
+    save_predictions: bool
+    save_backtests: bool
+    save_metrics: bool
+    save_frozen_state: bool
 
 
 # =========================
-# LSTM Baseline (Deprecated - kept for backward compatibility)
+# PROTOCOL ENFORCEMENT (CANONICAL ONLY)
 # =========================
 @dataclass
-class LSTMBaselineConfig:
-    """Deprecated: Use LSTMConfig instead. Kept for backward compatibility."""
-    input_size: Optional[int] = None
-    num_layers: Optional[int] = None
-    hidden_units: Optional[int] = None
-    dropout: Optional[float] = None
-    learning_rate: Optional[float] = None
-    lookback: Optional[int] = None
-    max_epochs: Optional[int] = None
-    patience: Optional[int] = None
-    batch_size: Optional[int] = None
-    use_checkpointing: Optional[bool] = None
-    grad_clip: Optional[float] = None
-    use_amp: Optional[bool] = None
-    accumulation_steps: Optional[int] = None
-    wfv_fold_size: Optional[int] = None
-    wfv_folds: Optional[int] = None
-    output_size: Optional[int] = None
-
-
-# =========================
-# =========================
-# XGBoost (Unified TRD-Compliant)
-# =========================
-@dataclass
-class XGBoostConfig:
-    """
-    Canonical XGBoost configuration (TRD-aligned).
-    
-    Architecture:
-    - Gradient boosted trees for regression
-    - Next-period return prediction
-    - Early stopping on validation RMSE
-    
-    Constraints:
-    - Consumes features from unified pipeline
-    - No internal feature engineering
-    - No normalization in model layer
-    - Deterministic training
-    """
-    name: str                      # Model identifier
-    objective: str                 # "reg:squarederror"
-    n_estimators: int              # Number of boosting rounds
-    max_depth: int                 # Tree depth
-    learning_rate: float           # Boosting learning rate
-    subsample: float               # Row sampling fraction
-    colsample_bytree: float        # Feature sampling fraction
-    min_child_weight: float        # Minimum leaf weight
-    gamma: float                   # Minimum split loss reduction
-    reg_alpha: float               # L1 regularization
-    reg_lambda: float              # L2 regularization
-    early_stopping_rounds: int     # Early stopping patience
-    importance_type: str           # Feature importance metric (diagnostic)
-    tree_method: str               # Tree construction algorithm
-    max_bin: int                   # Histogram bins
-    lookback: int                  # Number of lags for lag-based features
-    random_seed: int               # Reproducibility seed
-
-
-# =========================
-# Fitness
-# =========================
-@dataclass
-class FitnessConfig:
-    rmse_weight: float
-    sharpe_weight: float
-    drawdown_weight: float
-    signal_threshold: float
-    transaction_cost: float
+class EnforcementConfig:
+    allow_retraining: bool
+    allow_pipeline_refitting: bool
+    allow_test_access_training: bool
+    allow_shuffling: bool
+    require_frozen_state: bool
+    require_chronological_splits: bool
 
 
 # =========================
@@ -194,6 +56,7 @@ class FitnessConfig:
 class DataConfig:
     start_date: str
     end_date: str
+
     train_end: str
     val_end: str
     test_end: str
@@ -203,11 +66,14 @@ class DataConfig:
     test_years: int
 
     freq: str
+
     session_start: str
     session_end: str
+
     timezone: str
 
     benchmark_ticker: str
+
     max_missing_fraction: float
     max_ffill_bars: int
 
@@ -242,10 +108,241 @@ class CrossTickerConfig:
 
 
 @dataclass
+class ScalarConfig:
+    enabled: bool
+    feature_range: List[float]
+
+
+@dataclass
+class WindowConfig:
+    lookback: int
+    prediction_horizon: int
+
+
+@dataclass
 class FeaturesConfig:
     wavelet: WaveletConfig
     selector: SelectorConfig
     cross_ticker: CrossTickerConfig
+    scalar: ScalarConfig
+    windowing: WindowConfig
+
+
+# =========================
+# Evaluation
+# =========================
+
+
+@dataclass
+class SplitsConfig:
+    train_pct: float
+    val_pct: float
+    test_pct: float
+
+
+@dataclass
+class WalkForwardValidationConfig:
+    window_size: int
+    step_size: int
+    window_type: str
+    retraining: bool
+
+
+@dataclass
+class EvaluationPipelineConfig:
+    fit_once: bool
+    freeze_forever: bool
+    refit_per_step: bool
+
+
+@dataclass
+class EvaluationConfig:
+    splits: SplitsConfig
+    walk_forward: WalkForwardValidationConfig
+    pipeline: EvaluationPipelineConfig
+
+
+# =========================
+# LSTM (Unified Canonical)
+# =========================
+@dataclass
+class EarlyStoppingConfig:
+    enabled: bool
+    monitor: str
+    patience: int
+    restore_best_weights: bool
+
+
+@dataclass
+class LSTMBaselineConfig:
+    # Model metadata
+    name: str
+    framework: str
+
+    # Architecture (2-layer TRD-compliant)
+    lstm_units_1: int
+    lstm_units_2: int
+    dropout_rate: float
+    activation: str
+
+    # Output layer
+    output_units: int
+    output_activation: str
+
+    # Training parameters
+    optimizer: str
+    learning_rate: float
+    loss: str
+    epochs: int
+    batch_size: int
+
+    # Early stopping
+    early_stopping: EarlyStoppingConfig
+
+    # Data handling
+    shuffle: bool
+    validation_split: float
+
+    # Input specification
+    lookback: int
+    prediction_horizon: int
+
+    # Reproducibility
+    random_seed: int
+    deterministic: bool
+
+    # Advanced training
+    grad_clip: float
+    use_amp: bool
+    accumulation_steps: int
+
+
+# =========================
+# XGBoost
+# =========================
+@dataclass
+class XGBoostConfig:
+    name: str  # Model identifier
+    objective: str  # "reg:squarederror"
+    max_depth: int  # Tree depth
+    learning_rate: float  # Boosting learning rate
+    n_estimators: int  # Number of boosting rounds
+    subsample: float  # Row sampling fraction
+    colsample_bytree: float  # Feature sampling fraction
+    min_child_weight: float  # Minimum leaf weight
+    gamma: float  # Minimum split loss reduction
+    reg_alpha: float  # L1 regularization
+    reg_lambda: float  # L2 regularization
+
+    early_stopping_rounds: int  # Early stopping patience
+
+    feature_type: str  # Feature type
+    lookback: int  # Number of lags for lag-based features
+
+    tree_method: str  # Tree construction algorithm
+    max_bin: int  # Histogram bins
+    n_jobs: int  # Parallel threads
+
+    random_seed: int  # Reproducibility seed
+
+    importance_type: str  # Feature importance metric (diagnostic)
+
+
+# =========================
+# PSO (Unified)
+# =========================
+@dataclass
+class PSOSearchSpaceParam:
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[int] = None
+    scale: Optional[str] = None
+    choices: Optional[List[int]] = None
+
+
+@dataclass
+class LSTMUnitSearchSpaceParam:
+    min: int
+    max: int
+    step: int
+
+
+@dataclass
+class PSOLSTMDropOutConfig:
+    min: float
+    max: float
+
+
+@dataclass
+class PSOLSTMLearningRateConfig:
+    min: float
+    max: float
+    scale: str
+
+
+@dataclass
+class PSOBathSizeConfig:
+    choices: List[int]
+
+
+@dataclass
+class PSOLSTMEpochsConfig:
+    min: float
+    max: float
+
+
+@dataclass
+class PSOSearchSpace:
+    lstm_units_1: LSTMUnitSearchSpaceParam
+    lstm_units_2: LSTMUnitSearchSpaceParam
+    dropout_rate: PSOLSTMDropOutConfig
+    learning_rate: PSOLSTMLearningRateConfig
+    batch_size: PSOBathSizeConfig
+    epochs: PSOLSTMEpochsConfig
+
+
+# =========================
+# Fitness
+# =========================
+@dataclass
+class FitnessConfig:
+    mse_weight: float
+    msw_weight: float
+    rmse_weight: float
+    sharpe_weight: float
+    drawdown_weight: float
+    signal_threshold: float
+    transaction_cost: float
+
+
+@dataclass
+class PSOConfig:
+    enabled: bool
+    n_particles: int
+    n_iterations: int
+    inertia_min: float
+    inertia_max: float
+    c1: float
+    c2: float
+    v_clamp_fraction: float
+    seed: int
+    search_space: PSOSearchSpace
+
+    activation: str
+    output_units: int
+    output_activation: str
+    optimizer: str
+    loss: str
+    shuffle: bool
+    deterministic: bool
+
+    checkpoint_dir: str
+
+    fitness: FitnessConfig
+
+    n_workers: int
+
+    random_seed: int
 
 
 # =========================
@@ -261,16 +358,9 @@ class BacktestingConfig:
     initial_capital: float
     position_fraction: float
     daily_loss_limit: float
-
-
-# =========================
-# Logging
-# =========================
-@dataclass
-class LoggingConfig:
-    level: str
-    format: str
-    file: str
+    round_trip_cost: float
+    signal_generation: str
+    position_sizing: str
 
 
 # =========================
@@ -299,15 +389,16 @@ class SymbolUniverseConfig:
 # =========================
 @dataclass
 class Config:
-    pso: PSOConfig
-    lstm: LSTMConfig
-    xgboost: XGBoostConfig
-    fitness: FitnessConfig
+    logging: LoggingConfig
+    output: OutputConfig
+    enforcement: EnforcementConfig
     data: DataConfig
     features: FeaturesConfig
+    evaluation: EvaluationConfig
+    lstm_baseline: LSTMBaselineConfig
+    xgboost: XGBoostConfig
+    pso: PSOConfig
     backtesting: BacktestingConfig
-    logging: LoggingConfig
-    lstm_baseline: Optional[LSTMBaselineConfig] = None  # Deprecated, kept for compatibility
     symbol_universe: Optional[SymbolUniverseConfig] = None
 
 
@@ -338,21 +429,8 @@ def _safe_instantiate(cls, raw: dict):
 def load_config(path: str | Path | None = None) -> Config:
     """
     Load a Config object from a YAML file. Uses defaults if path missing.
-    
-    Updated to support unified configuration structure with:
-    - Unified LSTM config (replaces lstm + lstm_baseline)
-    - Expanded PSO config with search_space
-    - Unified features config (wavelet + selector + cross_ticker)
-    
-    Args:
-        path: Path to YAML config file
-    
-    Returns:
-        Config object with all nested dataclasses
-    
-    Raises:
-        FileNotFoundError: If config file not found
     """
+
     path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
 
     if not path.exists():
@@ -364,25 +442,33 @@ def load_config(path: str | Path | None = None) -> Config:
     with open(path, "r") as f:
         raw = yaml.safe_load(f) or {}
 
-    # Instantiate all nested dataclasses safely
     config = Config(
-        pso=_safe_instantiate(PSOConfig, raw.get("pso", {})),
-        lstm=_safe_instantiate(LSTMConfig, raw.get("lstm", {})),
-        xgboost=_safe_instantiate(XGBoostConfig, raw.get("xgboost", {})),
-        fitness=_safe_instantiate(FitnessConfig, raw.get("fitness", {})),
+        logging=_safe_instantiate(LoggingConfig, raw.get("logging", {})),
+        output=_safe_instantiate(OutputConfig, raw.get("output", {})),
+        enforcement=_safe_instantiate(EnforcementConfig, raw.get("enforcement", {})),
         data=_safe_instantiate(DataConfig, raw.get("data", {})),
         features=_safe_instantiate(FeaturesConfig, raw.get("features", {})),
-        backtesting=_safe_instantiate(BacktestingConfig, raw.get("backtesting", {})),
-        logging=_safe_instantiate(LoggingConfig, raw.get("logging", {})),
+        evaluation=_safe_instantiate(EvaluationConfig, raw.get("evaluation", {})),
         lstm_baseline=_safe_instantiate(
-            LSTMBaselineConfig, raw.get("lstm_baseline", {})
-        ) if "lstm_baseline" in raw else None,
+            LSTMBaselineConfig,
+            raw.get("lstm_baseline", {}),
+        ),
+        xgboost=_safe_instantiate(XGBoostConfig, raw.get("xgboost", {})),
+        pso=_safe_instantiate(PSOConfig, raw.get("pso", {})),
+        backtesting=_safe_instantiate(BacktestingConfig, raw.get("backtesting", {})),
+        symbol_universe=(
+            _safe_instantiate(SymbolUniverseConfig, raw.get("symbol_universe", {}))
+            if "symbol_universe" in raw
+            else None
+        ),
     )
-    
+
     logger.info(f"Loaded config from {path}")
-    logger.info(f"  LSTM: {config.lstm.name} (framework={config.lstm.framework})")
-    logger.info(f"  PSO: {'enabled' if config.pso.enabled else 'disabled'}")
-    logger.info(f"  Wavelet: {'enabled' if config.features.wavelet.enabled else 'disabled'}")
-    logger.info(f"  Cross-ticker: {'enabled' if config.features.cross_ticker.enabled else 'disabled'}")
-    
+    logger.info(
+        f"  LSTM Baseline: {config.lstm_baseline.name} (framework={config.lstm_baseline.framework})"
+    )
+    logger.info(f"  PSO enabled: {config.pso.enabled}")
+    logger.info(f"  Wavelet enabled: {config.features.wavelet.enabled}")
+    logger.info(f"  Cross-ticker enabled: {config.features.cross_ticker.enabled}")
+
     return config

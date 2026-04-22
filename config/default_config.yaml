@@ -1,143 +1,70 @@
-# PSO-LSTM Stock Price Prediction Configuration
-# CSCI 633 — Biologically-Inspired Intelligent Systems
-# March 2026
+# ============================================================================
+# UNION CONFIGURATION (CANONICAL ∪ EXPERIMENTAL)
+# Combines:
+# - FINAL_PLAN.md Canonical TRD Configuration
+# - PSO-LSTM Experimental Configuration
+# ============================================================================
 
-# ============================================================================
-# LOGGING
-# ============================================================================
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/pso_lstm.log"
 
 # ============================================================================
-# DATA CONFIGURATION
+# OUTPUT (CANONICAL ONLY)
+# ============================================================================
+output:
+  results_dir: "results/canonical"
+  save_predictions: true
+  save_backtests: true
+  save_metrics: true
+  save_frozen_state: true
+
+# ============================================================================
+# PROTOCOL ENFORCEMENT (CANONICAL ONLY)
+# ============================================================================
+enforcement:
+  allow_retraining: false
+  allow_pipeline_refitting: false
+  allow_test_access_training: false
+  allow_shuffling: false
+  require_frozen_state: true
+  require_chronological_splits: true
+
+# ============================================================================
+# DATA (UNION)
 # ============================================================================
 data:
   start_date: "2021-04-08"
   end_date: "2026-04-08"
+  
   train_end: "2024-04-05"
   val_end: "2025-04-05" 
   test_end: "2026-04-05"
+  
   # start_date: "2026-01-05"
   # end_date: "2026-04-05"
   train_years: 3
   val_years: 1
   test_years: 1
+  
   freq: "1Min"
+  
   session_start: "09:30"
   session_end: "16:00"
+  
   timezone: "America/New_York"
+  
   benchmark_ticker: "SPY"
+  
   max_missing_fraction: 0.05
   max_ffill_bars: 5
 
-lstm:
-  # ============================================================
-  # CANONICAL LSTM CONFIGURATION (Unified TRD-Compliant)
-  # ============================================================
-  # Model Architecture
-  name: "LSTM-Baseline-v1.0"
-  framework: "pytorch"
-  
-  # Architecture (2-layer stack per TRD)
-  lstm_units_1: 128          # Layer 1 hidden size (range: 50-300)
-  lstm_units_2: 64           # Layer 2 hidden size (range: 20-200)
-  activation: "relu"         # Zeng et al. 2025 constraint
-  dropout_rate: 0.2          # Deng & Peng 2025 regularization
-  
-  # Output Layer
-  output_units: 1
-  output_activation: "linear"  # Regression: next-period return
-  
-  # Training Parameters
-  optimizer: "adam"
-  learning_rate: 0.001       # Standard Adam baseline
-  loss: "mse"                # Mean Squared Error
-  epochs: 100                # Mid-range baseline (50-300)
-  batch_size: 32             # Standard baseline {32, 64}
-  
-  # Early Stopping
-  early_stopping:
-    enabled: true
-    monitor: "val_loss"
-    patience: 10
-    restore_best_weights: true
-  
-  # Data Handling3
-  shuffle: false             # MANDATORY: time-series constraint
-  validation_split: 0.10     # 10% chronological validation
-  
-  # Input Specification
-  lookback: 20               # Ji et al. 2021 canonical window
-  prediction_horizon: 1      # Predict t+1 (next-period return)
-  expected_features: 17      # Typical post-selection count (12-23)
-  
-  # Preprocessing (applied upstream in feature pipeline)
-  scaler: "minmax"
-  scaler_range: [-1.0, 1.0]  # TRD-mandated
-  
-  # Reproducibility
-  random_seed: 42
-  deterministic: true
-  
-  # Advanced Training
-  grad_clip: 1.0
-  use_amp: true
-  accumulation_steps: 1
 
-# ============================================================
-# CANONICAL XGBOOST CONFIGURATION (Unified TRD-Compliant)
-# ============================================================
-xgboost:
-  # Model Architecture
-  name: "XGBoost-Baseline-v1.0"
-  objective: "reg:squarederror"  # Regression: next-period return
-  
-  # Tree Parameters
-  n_estimators: 200              # Number of boosting rounds
-  max_depth: 4                   # Tree depth (shallower = regularization)
-  learning_rate: 0.01            # Boosting learning rate
-  
-  # Sampling Parameters
-  subsample: 0.7                 # Row sampling per tree
-  colsample_bytree: 0.6          # Feature sampling per tree
-  min_child_weight: 5            # Minimum sum of instance weight in leaf
-  
-  # Regularization
-  gamma: 0.1                     # Minimum loss reduction for split
-  reg_alpha: 0.0                 # L1 regularization
-  reg_lambda: 1.0                # L2 regularization
-  
-  # Early Stopping
-  early_stopping_rounds: 50      # Stop if no improvement
-  
-  # Feature Importance
-  importance_type: "gain"        # Diagnostic only, NOT for selection
-  
-  # Performance Optimization
-  tree_method: "hist"            # Histogram-based method (CPU/GPU)
-  max_bin: 128                   # Histogram bin count (memory control)
-  
-  # Input Specification (for lag-based representation)
-  lookback: 20                   # Number of lags to create
-  
-  # Reproducibility
-  random_seed: 42
-
-fitness:
-  rmse_weight: 0.4
-  sharpe_weight: 0.4
-  drawdown_weight: 0.2
-  signal_threshold: 1.0e-4
-  transaction_cost: 0.001
-
-
-
+# ============================================================================
+# FEATURES (UNION)
+# ============================================================================
 features:
-  # ============================================================
-  # UNIFIED FEATURE ENGINEERING CONFIGURATION
-  # ============================================================
   # Wavelet Denoising (TRD-required)
   wavelet:
     enabled: true            # Apply wavelet denoising (TRD §4.1)
@@ -161,33 +88,133 @@ features:
     peer_corr_threshold: 0.3
     peer_corr_window: 252
 
-backtesting:
-  transaction_cost: 0.001
-  slippage: 0.0005
-  position_size: 1.0
-  stop_loss: 0.02
-  take_profit: null
-  initial_capital: 100000.0
-  position_fraction: 0.02
-  daily_loss_limit: 0.05
+  # MinMax scaling
+  scalar:
+    enabled: true
+    feature_range: [-1.0, 1.0]
+    # Parameters fit on TRAIN only, frozen forever
+  
+  # Windowing
+  windowing:
+    lookback: 20  # Fixed for all models
+    prediction_horizon: 1  # 1-day ahead
+
+
+# ============================================================================
+# EVALUATION
+# ============================================================================
+evaluation:
+  splits:
+    train_pct: 0.70
+    val_pct: 0.10
+    test_pct: 0.20
+  walk_forward:
+    window_size: 20
+    step_size: 1
+    window_type: "rolling"
+    retraining: false
+  pipeline:
+    fit_once: true
+    freeze_forever: true
+    refit_per_step: false
 
 
 
+# ============================================================================
+# LSTM BASELINE (UNION)
+# ============================================================================
+lstm_baseline:
+  name: "LSTM-Baseline-v1.0"
+  framework: "pytorch"
+  lstm_units_1: 128
+  lstm_units_2: 64
+  dropout_rate: 0.2
+  activation: "relu"
+  output_units: 1
+  output_activation: "linear"
+  optimizer: "adam"
+  learning_rate: 0.001
+  loss: "mse"
+  epochs: 100
+  batch_size: 32
+  shuffle: false
+  lookback: 20
+  prediction_horizon: 1
+  random_seed: 42
+  deterministic: true
+  
+  validation_split: 0.10
 
+  # Early stopping
+  early_stopping:
+    enabled: true
+    monitor: "val_loss"
+    patience: 10
+    restore_best_weights: true
+  
+  # Advanced Training
+  grad_clip: 1.0
+  use_amp: true
+  accumulation_steps: 1
+
+
+
+# ============================================================================
+# XGBOOST (UNION)
+# ============================================================================
+xgboost:
+  name: "XGBoost-v1.0"
+  # Fixed hyperparameters
+  objective: "reg:squarederror"
+  max_depth: 6
+  learning_rate: 0.05
+  n_estimators: 500
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_weight: 1
+  gamma: 0.0
+  reg_alpha: 0.0
+  reg_lambda: 1.0
+  
+  # Early stopping
+  early_stopping_rounds: 50
+  
+  # Feature representation
+  feature_type: "lag_based"  # NOT flattened sequences
+  lookback: 20
+  
+  # Performance
+  tree_method: "hist"  # CPU/GPU compatible
+  max_bin: 256
+  n_jobs: -1
+  
+  # Reproducibility
+  random_seed: 42
+
+  importance_type: "gain"
+
+
+# ============================================================================
+# PSO (UNION)
+# ============================================================================
 pso:
-  # ============================================================
+  # ================================================================
   # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
-  # ============================================================
+  # ================================================================
   enabled: false             # Set to true for hyperparameter optimization
   
   # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
   n_particles: 20
   n_iterations: 50
-  w_min: 0.4                 # Inertia weight minimum (adaptive)
-  w_max: 0.9                 # Inertia weight maximum
+
+  inertia_min: 0.4                 # Inertia weight minimum (adaptive)
+  inertia_max: 0.9                 # Inertia weight maximum
+  
   c1: 1.5                    # Cognitive coefficient
   c2: 1.5                    # Social coefficient
+  
   v_clamp_fraction: 0.20     # Velocity clamping
+  
   seed: 42
   
   # Search Space (LSTM Hyperparameters)
@@ -204,8 +231,8 @@ pso:
       min: 0.0
       max: 0.5
     learning_rate:
-      min: 1.0e-5
-      max: 1.0e-1
+      min: 0.001
+      max: 0.01
       scale: "log"
     batch_size:
       choices: [32, 64]
@@ -213,8 +240,43 @@ pso:
       min: 50
       max: 300
   
-  # PSO Runtime
+  # Fixed parameters
+  activation: "relu"
+  output_units: 1
+  output_activation: "linear"
+  optimizer: "adam"
+  loss: "mse"
+  shuffle: false  # MANDATORY
+  deterministic: true
+
   checkpoint_dir: "results/checkpoints"
-  n_workers: 1
+
+  # Fitness function
+  fitness:
+    mse_weight: 0.9
+    msw_weight: 0.1  # Mean squared weights regularization
+    rmse_weight: 0.4
+    sharpe_weight: 0.4
+    drawdown_weight: 0.2
+    signal_threshold: 1.0e-4
+    transaction_cost: 0.001
+  
+  random_seed: 42
 
 
+
+# ============================================================================
+# BACKTESTING (UNION)
+# ============================================================================
+backtesting:
+  transaction_cost: 0.0015
+  slippage: 0.0005
+  position_size: 1.0
+  stop_loss: 0.02
+  take_profit: null
+  initial_capital: 100000.0
+  position_fraction: 0.02
+  daily_loss_limit: 0.05
+  round_trip_cost: 0.0030
+  signal_generation: "sign"
+  position_sizing: "fixed"

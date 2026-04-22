@@ -14,18 +14,25 @@ Version: 1.0.0 UNIFIED
 """
 
 from .pipeline import FeaturePipeline
-from .technical import compute_trd_technical_features, compute_price_features
+from .feature_creators_funcs import (
+    compute_statistical_features,
+    compute_volume_features,
+    compute_trd_technical_features,
+    compute_price_features,
+    compute_target,
+)
 from .wavelet import apply_wavelet_denoising, denoise_pipeline
 from .selector import FeatureSelector
 from .normalization import transform_features, save_transformer_state
 from .cross_ticker import compute_cross_ticker_features
-from .statistical import compute_statistical_features
-from .volume import compute_volume_features
+from .base_features import FeatureGenerator
 
 __all__ = [
     # Primary API
     "FeaturePipeline",
+    "FeatureGenerator",
     # Feature computation
+    "compute_target",
     "compute_trd_technical_features",
     "compute_price_features",
     "compute_cross_ticker_features",

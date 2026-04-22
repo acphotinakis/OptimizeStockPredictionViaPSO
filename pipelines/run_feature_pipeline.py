@@ -25,12 +25,14 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from matplotlib import ticker
 import numpy as np
 import pandas as pd
 import yaml
+
+from src.features.wavelet import _apply_wavelet
 
 
 # Project root setup
@@ -39,6 +41,8 @@ PROJECT_ROOT = CURRENT_FILE.parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.features.base_features import FeatureGenerator
 
 # Unified imports
 from src.features import (
@@ -52,6 +56,7 @@ from src.data.splitter import DataSplitter
 from src.data.alpaca_ingestor import AlpacaIngestor
 from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import Config, load_config
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -61,40 +66,21 @@ TARGET_COL = "log_return"
 NY_TZ = "America/New_York"
 
 
-def filter_us_market_hours(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Enforce US equity session: 09:00–16:30 New York time.
+def add_log_return(dfs: Dict[str, pd.DataFrame]) -> None:
+    for ticker, df in dfs.items():
+        df = df.copy()
 
-    Rules:
-    - index must be datetime-like
-    - converted to America/New_York
-    - filtered to intraday trading session only
-    """
+        if "close" not in df.columns:
+            raise ValueError(f"[{ticker}] Missing 'close' column")
 
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index)
+        df["log_return"] = np.log(df["close"]).diff()
 
-    # If naive timestamps → assume UTC (common in parquet pipelines)
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-
-    # Convert to New York time
-    df = df.tz_convert(NY_TZ)
-
-    # Filter trading hours
-    df = df.between_time("09:00", "16:30")
-
-    # Return as naive timestamps again (recommended for ML pipelines)
-    df.index = df.index.tz_localize(None)
-
-    return df
+        dfs[ticker] = df
 
 
 def process_ticker(
     ticker: str,
-    dfs_train: dict,
-    dfs_val: dict,
-    dfs_test: dict,
+    dfs: Dict[str, pd.DataFrame],
     universe_builder: SymbolUniverseBuilder,
     output_dir: Path,
     config: Config,
@@ -103,7 +89,7 @@ def process_ticker(
     # ============================================================
     # GUARD
     # ============================================================
-    if ticker not in dfs_train:
+    if ticker not in dfs:
         logger.info("Skipping %s (not in training data)", ticker)
         return
 
@@ -112,15 +98,60 @@ def process_ticker(
     target_ticker = ticker
 
     # ============================================================
+    # STAGE 1: UNIVERSE + PEERS
+    # ============================================================
+    universe = universe_builder.get_universe(ticker, dfs, fit=True)
+    peers = universe_builder.get_fitted_peers(ticker)
+
+    logger.info("[%s] Universe size=%d | peers=%s", ticker, len(universe), peers)
+    logger.info("[%s] Universe: %s", ticker, universe)
+
+    for t in universe:
+        if t not in dfs:
+            logger.warning("[%s] Missing universe ticker in data: %s", ticker, t)
+        else:
+            df = dfs[t]
+            logger.info(
+                f"[{ticker}] Universe ticker '{t}' columns: {df.columns.tolist()}"
+            )
+            logger.info(
+                f"[{ticker}] Universe ticker '{t}' date range: {df.index.min()} to {df.index.max()}"
+            )
+
+    # add_log_return(dfs, "all")
+
+    # ============================================================
+    # STAGE 2: Generate the base features + cross ticker features
+    # ============================================================
+    feature_generator = FeatureGenerator(target_ticker=ticker, peer_tickers=peers)
+
+    raw_features, raw_y, feature_names, idx = feature_generator.generate_features(dfs)
+
+    logger.info(
+        f"[{ticker}] Generated features shape={raw_features.shape} target shape={raw_y.shape} features={len(feature_names)} samples={len(idx)}"
+    )
+    logger.info(f"[{ticker}] Sample feature names: {feature_names[:10]}")
+    logger.info(f"[{ticker}] Sample index range: {idx.min()} to {idx.max()}")
+
+    if config.features.wavelet.enabled:
+        logger.info(f"[{target_ticker}] Stage 2: Wavelet denoising")
+        X, names, _wavelet_threshold = _apply_wavelet(
+            raw_features, feature_names, fit_mode=True, _wavelet_threshold=None
+        )
+        logger.info(f"  Threshold fitted: {_wavelet_threshold:.6f}")
+
+    sys.exit(0)
+
+    # ============================================================
     # STAGE 0: FEATURE PREPARATION (TARGET ONLY)
     # ============================================================
-    def add_log_return(dfs: dict, name: str) -> None:
-        logger.info("[%s] Computing log_return for %s", ticker, name)
-        dfs[ticker]["log_return"] = np.log(dfs[ticker]["close"]).diff()
+    # def add_log_return(dfs: dict, name: str) -> None:
+    #     logger.info("[%s] Computing log_return for %s", ticker, name)
+    #     dfs[ticker]["log_return"] = np.log(dfs[ticker]["close"]).diff()
 
-    add_log_return(dfs_train, "train")
-    add_log_return(dfs_val, "val")
-    add_log_return(dfs_test, "test")
+    # add_log_return(dfs_train, "train")
+    # add_log_return(dfs_val, "val")
+    # add_log_return(dfs_test, "test")
 
     # ============================================================
     # STAGE 1: UNIVERSE + PEERS
@@ -362,69 +393,107 @@ def process_ticker(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--config", default="config/default_config.yaml")
     parser.add_argument("--output", default="data/features")
-    parser.add_argument("--ticker", type=str, default=None)
-    parser.add_argument("--tickers", nargs="+", default=None)
-    parser.add_argument("--tickers-file", default="config/tickers.txt")
+
+    # single prediction target (primary mode)
+    parser.add_argument("--prediction-target", type=str, default="AAPL")
+
     parser.add_argument("--universe-config", default="config/symbol_universe.yaml")
-
-    def load_tickers(args) -> list[str]:
-        # Priority 1: single ticker
-        if args.ticker:
-            return [args.ticker]
-
-        # Priority 2: CLI list
-        if args.tickers:
-            return args.tickers
-
-        # Priority 3: file
-        with open(args.tickers_file) as f:
-            return [l.strip() for l in f if l.strip() and not l.startswith("#")]
 
     args = parser.parse_args()
 
-    if args.ticker and args.tickers:
-        raise ValueError("Use either --ticker or --tickers, not both.")
-
     setup_logger(
-        log_file="logs/02_build_features.log", level="INFO", mode=LogFileMode.OVERWRITE
+        log_file="logs/build_features.log",
+        level="INFO",
+        mode=LogFileMode.OVERWRITE,
     )
+
     config = load_config(args.config)
 
-    logger.info(f"Arguments: \n {args}")
+    logger.info("Arguments:\n%s", args)
 
-    all_tickers = load_tickers(args)
-    logger.info("Loaded %d tickers", len(all_tickers))
-    logger.info("Tickers: %s", all_tickers)
+    # ------------------------------------------------------------
+    # Load universe config
+    # ------------------------------------------------------------
+    with open(args.universe_config) as f:
+        u_cfg = yaml.safe_load(f)
 
-    # Universe builder
+    valid_targets = set(u_cfg.get("prediction_targets", []))
+    all_symbols_in_universe = set(
+        u_cfg.get("context_only", [])
+        + list(valid_targets)
+        + u_cfg.get("market_context", [])
+    )
+
+    logger.info("Valid prediction targets: %s", sorted(valid_targets))
+    logger.info("All symbols in universe config: %s", sorted(all_symbols_in_universe))
+
+    target = args.prediction_target
+    logger.info("Selected prediction target: %s", target)
+
+    # ------------------------------------------------------------
+    # Validate prediction target
+    # ------------------------------------------------------------
+    if target not in valid_targets:
+        raise ValueError(
+            f"Invalid prediction target: {target}. "
+            f"Must be one of: {sorted(valid_targets)}"
+        )
+
+    logger.info("Prediction target validated: %s", target)
+
+    # ------------------------------------------------------------
+    # Initialize universe builder
+    # ------------------------------------------------------------
     universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
 
-    # Load and split data
+    logger.info("Initialized SymbolUniverseBuilder")
+
+    # ------------------------------------------------------------
+    # Load raw data
+    # ------------------------------------------------------------
     processed_dir = Path("data/processed")
+
     dfs = {}
-    for t in all_tickers:
-        p = processed_dir / f"{t}.parquet"
+    for symbol in all_symbols_in_universe:
+        p = processed_dir / f"{symbol}.parquet"
         if p.exists():
             df = pd.read_parquet(p)
-
             df.index = pd.to_datetime(df.index)
-
-            # ENFORCE MARKET HOURS (CRITICAL FIX)
-            # df = filter_us_market_hours(df)
-
-            dfs[t] = df
+            dfs[symbol] = df
         else:
-            logger.warning("Missing parquet: %s", t)
-    logger.info("Loaded %d ticker DataFrames", len(dfs))
+            logger.warning("Missing parquet: %s", symbol)
 
-    # log out number of rows and columns for dfs
-    logger.info("DataFrame shapes:")
-    for t, df in dfs.items():
-        logger.info(f"{t}: {df.shape}")
+    logger.info("Loaded %d symbol DataFrames", len(dfs))
+    add_log_return(dfs)
 
+    # log out the columns in all dfs
+    for ticker, df in dfs.items():
+        logger.info(f"[{ticker}] Columns after log_return: {df.columns.tolist()}")
+
+    logger.info("Added log_return to all DataFrames")
+    # ------------------------------------------------------------
+    # Align full dataset
+    # ------------------------------------------------------------
     df_aligned = pd.concat(dfs, axis=1, keys=dfs.keys()).sort_index()
+    dfs_restored = {
+        ticker: df_aligned[ticker].copy() for ticker in df_aligned.columns.levels[0]
+    }
+
+    process_ticker(
+        target,
+        dfs_restored,
+        universe_builder,
+        args.output,
+        config,
+    )
+
+    import sys
+
+    sys.exit(0)
+
     df_train, df_val, df_test = DataSplitter().split(df_aligned)
 
     OHLCV_COLS = ["open", "high", "low", "close", "volume"]
@@ -432,24 +501,17 @@ def main() -> None:
     def extract(df_split: pd.DataFrame) -> dict:
         out = {}
 
-        for t in all_tickers:
-            if t not in df_split.columns.get_level_values(0):
+        for sym in dfs.keys():
+            if sym not in df_split.columns.get_level_values(0):
                 continue
 
-            # Extract ticker slice
-            sub = df_split.xs(t, axis=1, level=0).copy()
-
-            # Ensure datetime index consistency
+            sub = df_split.xs(sym, axis=1, level=0).copy()
             sub.index = pd.to_datetime(sub.index).tz_localize(None)
 
-            # KEEP ONLY OHLCV COLUMNS (hard enforcement)
-            missing = [c for c in OHLCV_COLS if c not in sub.columns]
-            if missing:
-                continue  # skip invalid tickers safely
+            if not all(c in sub.columns for c in OHLCV_COLS):
+                continue
 
-            sub = sub[OHLCV_COLS]
-
-            out[t] = sub
+            out[sym] = sub[OHLCV_COLS]
 
         return out
 
@@ -457,162 +519,60 @@ def main() -> None:
     dfs_val = extract(df_val)
     dfs_test = extract(df_test)
 
-    # Determine prediction targets
-    with open(args.universe_config) as f:
-        u_cfg = yaml.safe_load(f)
-    targets = u_cfg.get("prediction_targets", all_tickers)
-
-    logger.info(f"Prediction Targets: {targets}")
-
+    # ------------------------------------------------------------
+    # Build universe + features per target
+    # ------------------------------------------------------------
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # process_ticker(
-    #     "AAPL", dfs_train, dfs_val, dfs_test, universe_builder, output_dir, config
-    # )
-    for ticker in targets:
-        process_ticker(
-            ticker, dfs_train, dfs_val, dfs_test, universe_builder, output_dir, config
-        )
+    logger.info("Processing target: %s", target)
 
+    # STEP 1: build full universe (TRAIN ONLY → fit=True)
+    universe = universe_builder.get_universe(
+        target_ticker=target,
+        dfs=dfs_train,
+        fit=True,
+    )
+
+    # STEP 2: ensure all required symbols exist
+    missing = [s for s in universe if s not in dfs_train]
+    if missing:
+        logger.warning("Missing symbols in training data: %s", missing)
+
+    # STEP 3: recompute final usable universe
+    universe = [s for s in universe if s in dfs_train]
+
+    logger.info("Final universe size for %s: %d", target, len(universe))
+    logger.info("Universe: %s", universe)
+
+    # STEP 4: align universe data
+    dfs_train_u = {s: dfs_train[s] for s in universe}
+    dfs_val_u = {s: dfs_val[s] for s in universe if s in dfs_val}
+    dfs_test_u = {s: dfs_test[s] for s in universe if s in dfs_test}
+
+    # STEP 5: compute features (single target pipeline)
+    process_ticker(
+        target,
+        dfs_train_u,
+        dfs_val_u,
+        dfs_test_u,
+        universe_builder,
+        output_dir,
+        config,
+    )
+
+    # ------------------------------------------------------------
+    # Save learned peers
+    # ------------------------------------------------------------
     peers_path = output_dir / "fitted_peers.json"
     universe_builder.save_peers(peers_path)
-    logger.info("Saved peers --> %s", peers_path)
-    logger.info("[SELECTED] Feature engineering complete")
+
+    logger.info("Saved peers -> %s", peers_path)
 
     logger.info("=" * 80)
-    logger.info("UNIFIED FEATURE PIPELINE COMPLETE")
+    logger.info("FEATURE ENGINEERING COMPLETE FOR TARGET=%s", target)
     logger.info("=" * 80)
 
 
 if __name__ == "__main__":
     main()
-
-
-# def main() -> None:
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--config", default="config/default_config.yaml")
-#     parser.add_argument("--output", default="data/features")
-#     parser.add_argument("--ticker", type=str, default=None)
-#     parser.add_argument("--tickers", nargs="+", default=None)
-#     parser.add_argument("--tickers-file", default="config/tickers.txt")
-#     parser.add_argument("--universe-config", default="config/symbol_universe.yaml")
-
-#     def load_tickers(args) -> list[str]:
-#         # Priority 1: single ticker
-#         if args.ticker:
-#             return [args.ticker]
-
-#         # Priority 2: CLI list
-#         if args.tickers:
-#             return args.tickers
-
-#         # Priority 3: file
-#         with open(args.tickers_file) as f:
-#             return [l.strip() for l in f if l.strip() and not l.startswith("#")]
-
-#     args = parser.parse_args()
-
-#     if args.ticker and args.tickers:
-#         raise ValueError("Use either --ticker or --tickers, not both.")
-
-#     setup_logger(
-#         log_file="logs/02_build_features.log", level="INFO", mode=LogFileMode.OVERWRITE
-#     )
-#     config = load_config(args.config)
-
-#     logger.info(f"Arguments: \n {args}")
-
-#     all_tickers = load_tickers(args)
-#     logger.info("Loaded %d tickers", len(all_tickers))
-#     logger.info("Tickers: %s", all_tickers)
-
-#     # Universe builder
-#     universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
-
-#     # Load and split data
-#     processed_dir = Path("data/processed")
-#     dfs = {}
-#     for t in all_tickers:
-#         p = processed_dir / f"{t}.parquet"
-#         if p.exists():
-#             df = pd.read_parquet(p)
-
-#             df.index = pd.to_datetime(df.index)
-
-#             # ENFORCE MARKET HOURS (CRITICAL FIX)
-#             # df = filter_us_market_hours(df)
-
-#             dfs[t] = df
-#         else:
-#             logger.warning("Missing parquet: %s", t)
-#     logger.info("Loaded %d ticker DataFrames", len(dfs))
-
-#     # log out number of rows and columns for dfs
-#     logger.info("DataFrame shapes:")
-#     for t, df in dfs.items():
-#         logger.info(f"{t}: {df.shape}")
-
-#     df_aligned = pd.concat(dfs, axis=1, keys=dfs.keys()).sort_index()
-#     df_train, df_val, df_test = DataSplitter().split(df_aligned)
-
-#     OHLCV_COLS = ["open", "high", "low", "close", "volume"]
-
-#     def extract(df_split: pd.DataFrame) -> dict:
-#         out = {}
-
-#         for t in all_tickers:
-#             if t not in df_split.columns.get_level_values(0):
-#                 continue
-
-#             # Extract ticker slice
-#             sub = df_split.xs(t, axis=1, level=0).copy()
-
-#             # Ensure datetime index consistency
-#             sub.index = pd.to_datetime(sub.index).tz_localize(None)
-
-#             # KEEP ONLY OHLCV COLUMNS (hard enforcement)
-#             missing = [c for c in OHLCV_COLS if c not in sub.columns]
-#             if missing:
-#                 continue  # skip invalid tickers safely
-
-#             sub = sub[OHLCV_COLS]
-
-#             out[t] = sub
-
-#         return out
-
-#     dfs_train = extract(df_train)
-#     dfs_val = extract(df_val)
-#     dfs_test = extract(df_test)
-
-#     # Determine prediction targets
-#     with open(args.universe_config) as f:
-#         u_cfg = yaml.safe_load(f)
-#     targets = u_cfg.get("prediction_targets", all_tickers)
-
-#     logger.info(f"Prediction Targets: {targets}")
-
-#     output_dir = Path(args.output)
-#     output_dir.mkdir(parents=True, exist_ok=True)
-
-#     # process_ticker(
-#     #     "AAPL", dfs_train, dfs_val, dfs_test, universe_builder, output_dir, config
-#     # )
-#     for ticker in targets:
-#         process_ticker(
-#             ticker, dfs_train, dfs_val, dfs_test, universe_builder, output_dir, config
-#         )
-
-#     peers_path = output_dir / "fitted_peers.json"
-#     universe_builder.save_peers(peers_path)
-#     logger.info("Saved peers --> %s", peers_path)
-#     logger.info("[SELECTED] Feature engineering complete")
-
-#     logger.info("=" * 80)
-#     logger.info("UNIFIED FEATURE PIPELINE COMPLETE")
-#     logger.info("=" * 80)
-
-
-# if __name__ == "__main__":
-#     main()

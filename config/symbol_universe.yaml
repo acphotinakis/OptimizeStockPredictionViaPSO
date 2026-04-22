@@ -48,26 +48,15 @@ peer_selection:
   
 # Prediction Targets (stocks we want to predict)
 # Start with high-liquidity names from each sector
-# prediction_targets:
-#   # Technology
-#   - AAPL
-#   - MSFT
-#   - GOOGL
-#   - META
-#   # Semiconductors
-#   - NVDA
-#   - AMD
 prediction_targets:
   # Technology
-  # - AAPL
-  # - MSFT
-  # - GOOGL
+  - AAPL
+  - MSFT
+  - GOOGL
   - META
   # Semiconductors
   - NVDA
   - AMD
-
-
 
 # Context-Only Symbols (never predicted, only used as features)
 context_only:

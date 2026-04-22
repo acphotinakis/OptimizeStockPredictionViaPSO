@@ -45,23 +45,26 @@ def get_sector_etf(target: str) -> Optional[str]:
     return SECTOR_MAP.get(target, None)
 
 
-def _ensure_log_return(df: pd.DataFrame) -> pd.Series:
-    """
-    Computes log_return if missing.
-    Must be causal and index-safe.
-    """
-    if "log_return" in df.columns:
-        return df["log_return"]
-
-    if "close" not in df.columns:
-        raise ValueError("Missing 'close' column required to compute log_return")
-
-    return np.log(df["close"]).diff()
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CORE FEATURE ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
+# def _ensure_log_return(df: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
+#     """
+#     Computes log_return if missing.
+#     Must be causal and index-safe.
+#     """
+#     if "log_return" in df.columns:
+#         return df[["log_return"]]
+
+#     if "close" not in df.columns:
+#         raise ValueError("Missing 'close' column required to compute log_return")
+#     C = df["close"]
+#     target = np.log(C.shift(-horizon) / C + 1e-10).astype(np.float32)
+
+#     out = pd.DataFrame(index=df.index)
+#     out["log_return"] = target
+
+#     return out
 
 
 def compute_cross_ticker_features(
@@ -99,21 +102,10 @@ def compute_cross_ticker_features(
             continue
 
         df = dfs[t]
-
-        # ── Ensure log_return exists (NO ASSUMPTION) ─────────────────────────────
-        if "log_return" in df.columns:
-            r = df["log_return"]
-        else:
-            if "close" not in df.columns:
-                logger.warning(f"[{t}] missing both log_return and close → zero-fill")
-                r = pd.Series(0.0, index=df.index)
-            else:
-                # deterministic log return computation
-                r = np.log(df["close"]).diff()
+        r = df["log_return"].reindex(idx).fillna(0.0)  # align to target index
+        # r = df["log_return"].reindex(idx).fillna(0.0
 
         # align to target index
-        r = r.reindex(idx).fillna(0.0)
-
         out[f"{t}_log_return"] = r
         out[f"{t}_rolling_mean_20"] = r.rolling(20, min_periods=5).mean()
         out[f"{t}_rolling_std_20"] = r.rolling(20, min_periods=5).std()
@@ -124,8 +116,8 @@ def compute_cross_ticker_features(
     if "SPY" in dfs:
         spy_df = dfs["SPY"]
 
-        r_spy = _ensure_log_return(spy_df).reindex(idx).fillna(0.0)
-        c_spy = dfs["SPY"]["close"].reindex(idx).ffill()
+        r_spy = spy_df["log_return"].reindex(idx).fillna(0.0)
+        c_spy = spy_df["close"].reindex(idx).ffill()
 
         cov = r_t.rolling(ROLLING_LONG, min_periods=10).cov(r_spy)
         var_spy = r_spy.rolling(ROLLING_LONG, min_periods=10).var() + EPS
@@ -152,7 +144,7 @@ def compute_cross_ticker_features(
 
     if sector and sector in dfs:
         df = dfs[sector]
-        r_s = _ensure_log_return(df).reindex(idx).fillna(0.0)
+        r_s = df["log_return"].reindex(idx).fillna(0.0)
         c_s = df["close"].reindex(idx).ffill()
 
         cov = r_t.rolling(ROLLING_LONG).cov(r_s)
@@ -182,7 +174,7 @@ def compute_cross_ticker_features(
     for i in range(3):
         if i < len(peers) and peers[i] in dfs:
             p = peers[i]
-            r_p = _ensure_log_return(dfs[p]).reindex(idx).fillna(0.0)
+            r_p = dfs[p]["log_return"].reindex(idx).fillna(0.0)
 
             out[f"peer_{i+1}_log_return"] = r_p
             out[f"peer_{i+1}_rolling_std_20"] = r_p.rolling(20).std()
@@ -218,8 +210,7 @@ def compute_cross_ticker_features(
             out[f"target_beta_{t}_static"] = 0.0
             continue
 
-        r_i = _ensure_log_return(dfs[t]).reindex(idx).fillna(0.0)
-        # r_i = dfs[t]["log_return"].reindex(idx).fillna(0.0)
+        r_i = dfs[t]["log_return"].reindex(idx).fillna(0.0)
 
         cov = r_t.rolling(ROLLING_LONG).cov(r_i)
         var_i = r_i.rolling(ROLLING_LONG).var() + EPS

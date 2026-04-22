@@ -14,13 +14,55 @@ Version: 1.0.0
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import pywt
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_wavelet(
+    X: np.ndarray, names: List[str], fit_mode: bool, _wavelet_threshold: Optional[float]
+) -> Tuple[np.ndarray, List[str], Optional[float]]:
+    """
+    Apply wavelet denoising to 'close' feature.
+
+    Args:
+        X: Feature matrix (N, F)
+        names: List of feature names
+        fit_mode: If True, compute threshold; if False, use fitted threshold
+
+    Returns:
+        Tuple of (X_updated, names_updated) with close_denoised replacing close
+    """
+    if "close" not in names:
+        logger.warning("'close' feature not found, skipping wavelet denoising")
+        return X, names, None
+
+    close_idx = names.index("close")
+    close_series = pd.Series(X[:, close_idx])
+
+    if fit_mode:
+        # FIT MODE: Compute threshold on training data
+        close_denoised, threshold = apply_wavelet_denoising(
+            close_series, threshold_train=None
+        )
+        _wavelet_threshold = threshold
+    else:
+        # TRANSFORM MODE: Use fitted threshold
+        if _wavelet_threshold is None:
+            raise RuntimeError("Wavelet threshold not fitted")
+        close_denoised = apply_wavelet_denoising(
+            close_series, threshold_train=_wavelet_threshold
+        )
+
+    # Replace close with close_denoised
+    X[:, close_idx] = close_denoised.values
+    names[close_idx] = "close_denoised"
+
+    return X, names, _wavelet_threshold
 
 
 def apply_wavelet_denoising(

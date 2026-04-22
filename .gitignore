@@ -60,7 +60,7 @@ logs/
 # Plots
 *.png
 *.jpg
-*.pdf
+# *.pdf
 
 # OS
 Thumbs.db

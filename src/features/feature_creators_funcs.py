@@ -1,22 +1,8 @@
-"""
-Unified Technical Indicators Module
-
-Implements TRD-specified technical indicators for financial time-series feature engineering.
-Combines indicators from src/features/technical.py and src/feature_eng_revised/feature_gen.py
-with strict TRD compliance.
-
-TRD References:
-- Price features: TRD1 §3.1
-- Trend indicators: TRD1 §3.2, Lanbouri & Achchab 2020, Zeng et al. 2025
-- Volatility indicators: TRD1 §3.3, Lanbouri & Achchab 2020, Zeng et al. 2025
-- Momentum indicators: TRD1 §3.4, Zeng et al. 2025
-
-Author: System Architect
-Version: 1.0.0
-"""
-
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
+from numba import njit
 import logging
 from typing import Optional
 
@@ -24,6 +10,73 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+_TRADING_MINUTES = 390  # 09:30–16:00
+_TRADING_DAYS = 5
+
+
+def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
+    r = df["log_return"]
+    C = df["close"]
+    out = pd.DataFrame(index=df.index)
+
+    # ── Rolling mean / var / skew / kurt ─────────────────────────────────────
+    # Spec: mean@[10,20,60,120]  var@[10,20,60]  skew@[20,60]  kurt@[20,60]
+    for w, stats in {
+        10: ["mean", "var"],
+        20: ["mean", "var", "skew", "kurt"],
+        60: ["mean", "var", "skew", "kurt"],
+        120: ["mean"],
+    }.items():
+        roll = r.rolling(w, min_periods=max(1, w // 2))
+        for stat in stats:
+            out[f"ret_{stat}_{w}"] = getattr(roll, stat)()
+
+    # ── Lag-1 autocorrelation ─────────────────────────────────────────────────
+    for w in (20, 60):
+        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
+            _fast_autocorr, raw=True
+        )
+
+    # ── Price range ratio ─────────────────────────────────────────────────────
+    for w in (20, 60):
+        roll_C = C.rolling(w, min_periods=1)
+        out[f"range_ratio_{w}"] = (roll_C.max() - roll_C.min()) / (
+            roll_C.mean() + 1e-10
+        )
+
+    # ── Realized volatility ───────────────────────────────────────────────────
+    r_sq = r**2
+    for w in (10, 30):
+        out[f"rv_{w}"] = np.sqrt(r_sq.rolling(w, min_periods=1).sum())
+
+    # ── Hurst exponent (R/S) ──────────────────────────────────────────────────
+    out["hurst_exp_60"] = (
+        r.rolling(60, min_periods=30).apply(_hurst_single, raw=True).fillna(0.5)
+    )
+    logger.info(
+        f"Computed {len(out.columns)} statistical features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
+    )
+
+    return out.fillna(0.0)
+
+
+def _fast_autocorr(x: np.ndarray) -> float:
+    return float(np.corrcoef(x[:-1], x[1:])[0, 1]) if len(x) > 2 else 0.0
+
+
+@njit
+def _hurst_single(x: np.ndarray) -> float:
+    n = len(x)
+    if n < 10:
+        return 0.5
+    mean_x = np.mean(x)
+    dev = np.cumsum(x - mean_x)
+    R = dev.max() - dev.min()
+    S = np.std(x)
+    if S < 1e-10:
+        return 0.5
+    return np.log(R / S) / np.log(n)
 
 
 def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -271,6 +324,101 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
         f"(columns: {list(out.columns.tolist())}...)"
     )
     return out.ffill().fillna(0.0)
+
+
+def compute_target(df: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
+    C = df["close"]
+    target = np.log(C.shift(-horizon) / C + 1e-10).astype(np.float32)
+
+    out = pd.DataFrame(index=df.index)
+    out["log_return"] = target
+
+    return out
+
+
+def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
+    C, H, L, V = df["close"], df["high"], df["low"], df["volume"]
+    r = df["log_return"]
+    sm = df.get("session_minute", pd.Series(0, index=df.index))
+    out = pd.DataFrame(index=df.index)
+
+    # ── Shared intermediates ─────────────────────────────────────────────────
+    tp = (H + L + C) / 3
+    clv = ((C - L) - (H - C)) / (H - L + 1e-10)  # close location value
+
+    # ── VWAP (session-reset) ─────────────────────────────────────────────────
+    session_id = (sm == 0).cumsum()
+    cum_tp_vol = (tp * V).groupby(session_id).cumsum()
+    cum_vol = V.groupby(session_id).cumsum()
+    vwap = cum_tp_vol / (cum_vol + 1e-10)
+    out["vwap"] = vwap
+    out["price_to_vwap"] = C / (vwap + 1e-10)
+    out["vwap_dev"] = (C - vwap) / (vwap + 1e-10)
+
+    # ── Relative Volume ───────────────────────────────────────────────────────
+    out["rvol_20"] = V / (V.rolling(20, min_periods=1).mean() + 1e-10)
+    out["rvol_60"] = V / (V.rolling(60, min_periods=1).mean() + 1e-10)
+
+    # ── On-Balance Volume ─────────────────────────────────────────────────────
+    obv = pd.Series(
+        np.cumsum(np.where(C > C.shift(1), V, np.where(C < C.shift(1), -V, 0))),
+        index=df.index,
+    )
+    out["obv"] = obv
+    out["obv_ema_20"] = obv.ewm(span=20, adjust=False).mean()
+    out["obv_momentum_20"] = obv.diff(20) / (obv.abs().rolling(20).mean() + 1e-10)
+
+    # ── Accumulation/Distribution Line ───────────────────────────────────────
+    adl = (clv * V).cumsum()
+    out["adl"] = adl
+    out["adl_slope_10"] = adl.diff(10) / (adl.abs().rolling(10).mean() + 1e-10)
+
+    # ── Chaikin Money Flow ────────────────────────────────────────────────────
+    out["cmf_20"] = (clv * V).rolling(20, min_periods=1).sum() / (
+        V.rolling(20, min_periods=1).sum() + 1e-10
+    )
+
+    # ── Force Index ───────────────────────────────────────────────────────────
+    force = r * V
+    out["force_1"] = force
+    out["force_ema_13"] = force.ewm(span=13, adjust=False).mean()
+
+    # ── Ease of Movement ─────────────────────────────────────────────────────
+    hl_mid = (H + L) / 2
+    out["eom_14"] = (
+        ((hl_mid - hl_mid.shift(1)) / (V / (H - L + 1e-10) + 1e-10))
+        .rolling(14, min_periods=1)
+        .mean()
+    )
+
+    # ── Volume Price Trend ────────────────────────────────────────────────────
+    out["vpt"] = (r * V).cumsum()
+
+    # ── Intraday Turnover Velocity ────────────────────────────────────────────
+    out["itv_20"] = V / (V.rolling(20, min_periods=1).sum() + 1e-10)
+
+    # ── Bar Activity Score ────────────────────────────────────────────────────
+    out["bas"] = np.log1p(V) * (H - L) / (C.shift(1) + 1e-10)
+
+    # ── Time-of-Day encoding ──────────────────────────────────────────────────
+    tod = sm / _TRADING_MINUTES
+    out["tod_sin"] = np.sin(2 * np.pi * tod)
+    out["tod_cos"] = np.cos(2 * np.pi * tod)
+
+    # ── Day-of-Week encoding ──────────────────────────────────────────────────
+    idx = df.index
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    dow = idx.tz_convert("America/New_York").dayofweek.values.astype(float)
+    out["dow_sin"] = np.sin(2 * np.pi * dow / _TRADING_DAYS)
+    out["dow_cos"] = np.cos(2 * np.pi * dow / _TRADING_DAYS)
+
+    logger.info(
+        f"Computed {len(out.columns)} volume features for {len(out)} samples "
+        f"(columns: {list(out.columns.tolist())}...)"
+    )
+
+    return out.fillna(0.0)
 
 
 # Alias for backward compatibility and explicit naming
