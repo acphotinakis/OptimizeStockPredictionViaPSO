@@ -127,6 +127,8 @@ evaluation:
 lstm_baseline:
   name: "LSTM-Baseline-v1.0"
   framework: "pytorch"
+
+  # lstm model
   lstm_units_1: 128
   lstm_units_2: 64
   dropout_rate: 0.2
@@ -134,6 +136,8 @@ lstm_baseline:
   output_units: 1
   output_activation: "linear"
   optimizer: "adam"
+
+  
   learning_rate: 0.001
   loss: "mse"
   epochs: 100
@@ -141,6 +145,7 @@ lstm_baseline:
   shuffle: false
   lookback: 20
   prediction_horizon: 1
+  
   random_seed: 42
   deterministic: true
   
