@@ -26,7 +26,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from .lstm import LSTMNetwork, set_seeds
+from .baseline_lstm_model import LSTMNetwork, set_seeds
 
 logger = logging.getLogger(__name__)
 
@@ -265,49 +265,83 @@ class LSTMTrainer:
         return model, history
 
     def evaluate(
-        self, model: LSTMNetwork, X_test: np.ndarray, y_test: np.ndarray
+        self,
+        model: LSTMNetwork,
+        X_test: np.ndarray,
+        y_test: np.ndarray,
+        target_scaler=None,
     ) -> Dict[str, float]:
         """
         Evaluate model on test set.
-
+        
+        CRITICAL: If target_scaler provided, metrics computed on ORIGINAL scale.
+        
         Args:
             model: Trained LSTM model
             X_test: Test features (N_test, 20, F)
-            y_test: Test targets (N_test,)
-
+            y_test: Test targets (N_test,) - can be scaled or original
+            target_scaler: Optional scaler to inverse-transform predictions
+        
         Returns:
-            Dictionary of metrics (mse, mae, rmse)
+            Dictionary of metrics (mse, mae, rmse, r2)
         """
         self._validate_inputs(X_test, y_test, "test")
-
+        
         model.eval()
-
+        
         X_test_t = torch.from_numpy(X_test.astype(np.float32)).to(self.device)
-
+        
         with torch.no_grad():
             predictions = model(X_test_t)
-
-        y_pred = predictions.cpu().numpy().flatten()
-
+        
+        y_pred_scaled = predictions.cpu().numpy().flatten()
+        
+        # Inverse transform if scaler provided
+        if target_scaler is not None:
+            y_pred = target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
+            y_true = target_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+            metric_space = "original"
+            logger.info("✓ Inverse transform applied (metrics on ORIGINAL scale)")
+        else:
+            y_pred = y_pred_scaled
+            y_true = y_test
+            metric_space = "scaled"
+            logger.info("⚠️  No inverse transform (metrics on SCALED space)")
+        
         # Compute metrics
-        mse = float(np.mean((y_test - y_pred) ** 2))
-        mae = float(np.mean(np.abs(y_test - y_pred)))
+        mse = float(np.mean((y_true - y_pred) ** 2))
+        mae = float(np.mean(np.abs(y_true - y_pred)))
         rmse = float(np.sqrt(mse))
-
+        
+        # R²
+        ss_res = np.sum((y_true - y_pred) ** 2)
+        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+        r2 = float(1 - (ss_res / ss_tot)) if ss_tot != 0 else 0.0
+        
+        # Directional accuracy
+        correct_dir = np.sum(np.sign(y_true) == np.sign(y_pred))
+        directional_accuracy = float(correct_dir / len(y_true))
+        
         metrics = {
             "mse": mse,
             "mae": mae,
             "rmse": rmse,
+            "r2": r2,
+            "directional_accuracy": directional_accuracy,
+            "n_samples": len(y_true),
+            "metric_space": metric_space,
         }
-
+        
         logger.info("=" * 80)
-        logger.info("TEST EVALUATION")
+        logger.info(f"TEST EVALUATION ({metric_space.upper()} SCALE)")
         logger.info("=" * 80)
         logger.info(f"MSE:  {mse:.6f}")
         logger.info(f"MAE:  {mae:.6f}")
         logger.info(f"RMSE: {rmse:.6f}")
+        logger.info(f"R²:   {r2:.4f}")
+        logger.info(f"DA:   {directional_accuracy:.2%}")
         logger.info("=" * 80)
-
+        
         return metrics
 
     def _validate_inputs(self, X: np.ndarray, y: np.ndarray, split_name: str) -> None:

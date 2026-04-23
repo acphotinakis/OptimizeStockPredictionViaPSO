@@ -317,6 +317,7 @@ class FitnessConfig:
 
 @dataclass
 class PSOConfig:
+    
     enabled: bool
     n_particles: int
     n_iterations: int
@@ -325,25 +326,13 @@ class PSOConfig:
     c1: float
     c2: float
     v_clamp_fraction: float
-    seed: int
-    search_space: PSOSearchSpace
 
-    activation: str
-    output_units: int
-    output_activation: str
-    optimizer: str
-    loss: str
-    shuffle: bool
-    deterministic: bool
+    search_space: PSOSearchSpace
+    fitness: FitnessConfig
 
     checkpoint_dir: str
 
-    fitness: FitnessConfig
 
-    n_workers: int
-
-    random_seed: int
-    lookback: int
 
 
 # =========================

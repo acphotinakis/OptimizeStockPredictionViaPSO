@@ -203,21 +203,14 @@ pso:
   # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
   # ================================================================
   enabled: false             # Set to true for hyperparameter optimization
-  
   # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
   n_particles: 20
   n_iterations: 50
-
   inertia_min: 0.4                 # Inertia weight minimum (adaptive)
   inertia_max: 0.9                 # Inertia weight maximum
-  
   c1: 1.5                    # Cognitive coefficient
-  c2: 1.5                    # Social coefficient
-  
+  c2: 1.5                    # Social coefficient  
   v_clamp_fraction: 0.20     # Velocity clamping
-  
-  seed: 42
-  lookback: 20
   
   # Search Space (LSTM Hyperparameters)
   search_space:
@@ -242,12 +235,6 @@ pso:
       min: 50
       max: 300
   
-  # Fixed parameters
-  activation: "relu"
-  output_units: 1
-  output_activation: "linear"
-  optimizer: "adam"
-  loss: "mse"
   shuffle: false  # MANDATORY
   deterministic: true
 
@@ -262,10 +249,32 @@ pso:
     drawdown_weight: 0.2
     signal_threshold: 1.0e-4
     transaction_cost: 0.001
+
+
+
+# ============================================================================
+# WALK-FORWARD VALIDATION (PRODUCTION)
+# ============================================================================
+walk_forward:
+  enabled: true
+  initial_train_pct: 0.60  # 60% initial training window
+  fold_step_pct: 0.05      # 5% expansion per fold
+  val_pct: 0.05            # 5% validation per fold
+  max_folds: 0             # 0 = unlimited
   
-  random_seed: 42
-
-
+  # Per-fold configuration
+  pso_per_fold: true       # Run PSO for each fold
+  scale_per_fold: true     # Independent scalers per fold
+  fresh_model_per_fold: true  # No weight carryover
+  
+  # Metrics
+  inverse_transform_metrics: true  # CRITICAL: always true
+  compute_per_fold: true
+  aggregate_folds: true
+  save_fold_results: true
+  
+  # Reproducibility
+  seed_variation_per_fold: true  # seed + fold_idx
 
 # ============================================================================
 # BACKTESTING (UNION)

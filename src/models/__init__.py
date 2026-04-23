@@ -41,8 +41,8 @@ Version: 1.0.0 UNIFIED CANONICAL
 """
 
 from .ipso_optimizer import IPSOOptimizer
-from .lstm import LSTMModel, LSTMNetwork, create_lstm_model, set_seeds
-from .trainer import LSTMTrainer
+from .baseline_lstm_model import LSTMModel, LSTMNetwork, create_lstm_model, set_seeds
+from .baseline_lstm_trainer import LSTMTrainer
 from .utils import build_lstm_windows, load_model_weights, save_model_weights
 from .xgboost_model import XGBoostModel, create_xgboost_model
 from .xgboost_trainer import XGBoostTrainer, build_xgboost_lag_features

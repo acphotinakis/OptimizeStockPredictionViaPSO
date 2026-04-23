@@ -428,7 +428,6 @@ def phase2_final_training(
     y_val: np.ndarray,
     best_params: Dict,
     config: Config,
-    lookback: int,
     output_dir: Path,
     feature_metadata: Dict,
 ) -> LSTMModel:
@@ -462,6 +461,8 @@ def phase2_final_training(
     logger.info("NO early stopping (exact PSO epoch count)")
     logger.info("=" * 80)
 
+    lookback = config.lstm_baseline.lookback
+
     # Combine train and val
     X_combined = np.concatenate([X_train, X_val], axis=0)
     y_combined = np.concatenate([y_train, y_val], axis=0)
@@ -477,7 +478,7 @@ def phase2_final_training(
     logger.info(f"Windowed shape: X={X_combined_win.shape}, y={y_combined_win.shape}")
 
     # Create model with PSO parameters
-    seed = config.pso.random_seed
+    seed = config.lstm_baseline.random_seed
     set_all_seeds(seed)
 
     # TRD1 §5.1: LSTM Architecture Constraints
@@ -486,11 +487,11 @@ def phase2_final_training(
         "lstm_units_1": best_params["units_1"],
         "lstm_units_2": best_params["units_2"],
         "dropout_rate": best_params["dropout"],
-        "activation": config.pso.activation,
-        "output_units": config.pso.output_units,
-        "output_activation": config.pso.output_activation,
+        "activation": config.lstm_baseline.activation,
+        "output_units": config.lstm_baseline.output_units,
+        "output_activation": config.lstm_baseline.output_activation,
         "learning_rate": best_params["learning_rate"],
-        "loss": config.pso.loss,
+        "loss": config.lstm_baseline.loss,
     }
 
     logger.info("PSO-optimized model configuration:")

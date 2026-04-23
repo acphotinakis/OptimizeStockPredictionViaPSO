@@ -1,7 +1,7 @@
 """
 Canonical Evaluation Module
 
-Implements the authoritative evaluation framework defined in FINAL_PLAN.md.
+Implements the authoritative evaluation framework.
 
 This module supersedes all prior validation and backtesting specifications.
 
@@ -11,11 +11,12 @@ Public API:
 - FrozenPipelineState: Immutable pipeline state container
 - PipelineStateFitter: One-time pipeline fitting
 - transform_with_frozen_state: Apply frozen transformations
-- CanonicalWalkForward: Walk-forward evaluation with frozen models
+- ExpandingWindowWalkForward: Production walk-forward with per-fold PSO
+- validate_walk_forward_compliance: TRD compliance validation
 - CanonicalBacktest: Backtesting with transaction costs
 
-Version: CANONICAL 1.0
-Source: FINAL_PLAN.md
+Version: PRODUCTION 2.0
+Source: WALK_FORWARD_PLAN.md
 """
 
 from .backtest import CanonicalBacktest
@@ -25,7 +26,10 @@ from .frozen_pipeline import (
     PipelineStateFitter,
     transform_with_frozen_state,
 )
-from .walk_forward import CanonicalWalkForward
+from .walk_forward_pso import (
+    ExpandingWindowWalkForward,
+    validate_walk_forward_compliance,
+)
 
 __all__ = [
     # Splitting
@@ -36,8 +40,9 @@ __all__ = [
     "PipelineStateFitter",
     "transform_with_frozen_state",
     # Evaluation
-    "CanonicalWalkForward",
+    "ExpandingWindowWalkForward",
+    "validate_walk_forward_compliance",
     "CanonicalBacktest",
 ]
 
-__version__ = "CANONICAL_1.0"
+__version__ = "PRODUCTION_2.0"
