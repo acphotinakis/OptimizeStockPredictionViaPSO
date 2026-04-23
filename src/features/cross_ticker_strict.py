@@ -160,6 +160,9 @@ def compute_cross_ticker_features_strict(
     peers: List[str],
     split_name: str = "",
     rolling_window: int = 20,
+    market_context: Optional[List[str]] = None,
+    sector_etf: Optional[str] = None,
+    market_internals: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Compute cross-ticker features with STRICT alignment checking.
@@ -169,6 +172,7 @@ def compute_cross_ticker_features_strict(
     - Errors on insufficient data quality
     - Logs all alignment warnings
     - Forward-fill limited to 5 bars (TRD requirement)
+    - Accepts universe context as parameters (no hardcoded constants)
     
     Args:
         target: Target ticker symbol
@@ -176,6 +180,9 @@ def compute_cross_ticker_features_strict(
         peers: Pre-selected peer tickers (selected on training data)
         split_name: "TRAIN"/"VAL"/"TEST" for logging
         rolling_window: Window for rolling calculations
+        market_context: List of market context tickers (e.g., ["SPY", "QQQ"])
+        sector_etf: Sector ETF for target (e.g., "XLK")
+        market_internals: List of market internal tickers (e.g., ["UVXY", "GLD"])
     
     Returns:
         DataFrame with cross-ticker features (aligned to target index)
@@ -183,6 +190,13 @@ def compute_cross_ticker_features_strict(
     Raises:
         ValueError: If critical tickers missing or alignment fails
     """
+    # Use defaults for backward compatibility
+    if market_context is None:
+        market_context = MARKET_CONTEXT_TICKERS
+    if market_internals is None:
+        market_internals = MARKET_INTERNAL_TICKERS
+    if sector_etf is None:
+        sector_etf = SECTOR_MAP.get(target)
     if target not in dfs:
         raise ValueError(f"{split_name}: Target ticker '{target}' not in dfs")
     
@@ -274,26 +288,24 @@ def compute_cross_ticker_features_strict(
     # ========================================================================
     # 3. SECTOR LAYER
     # ========================================================================
-    sector = SECTOR_MAP.get(target, None)
-    
-    if sector and sector in dfs:
-        df = dfs[sector]
+    if sector_etf and sector_etf in dfs:
+        df = dfs[sector_etf]
         
         r_s = strict_reindex(
-            df["log_return"], idx, sector,
+            df["log_return"], idx, sector_etf,
             max_fill=MAX_FORWARD_FILL,
             split_name=split_name,
             tolerance_pct=ALIGNMENT_TOLERANCE_PCT
         )
         c_s = strict_reindex(
-            df["close"], idx, sector,
+            df["close"], idx, sector_etf,
             max_fill=MAX_FORWARD_FILL,
             split_name=split_name,
             tolerance_pct=ALIGNMENT_TOLERANCE_PCT
         )
         
-        out[f"{sector}_log_return"] = r_s
-        out[f"{sector}_rolling_std_20"] = r_s.rolling(20, min_periods=5).std()
+        out[f"{sector_etf}_log_return"] = r_s
+        out[f"{sector_etf}_rolling_std_20"] = r_s.rolling(20, min_periods=5).std()
         
         # Sector correlation
         out["rolling_corr_target_sector_20"] = r_t.rolling(20, min_periods=10).corr(r_s)
@@ -313,12 +325,13 @@ def compute_cross_ticker_features_strict(
         out["target_relative_sector"] = 0.0
     
     # ========================================================================
-    # 4. PEER EQUITY LAYER (TOP 3)
+    # 4. PEER EQUITY LAYER
     # ========================================================================
-    peers = peers[:3]  # Limit to top 3
+    # Note: peers already limited by config max_peers setting
     peer_returns = []
+    max_peers_to_use = min(len(peers), 3)  # Keep at most 3 for feature consistency
     
-    for i in range(3):
+    for i in range(max_peers_to_use):
         if i < len(peers) and peers[i] in dfs:
             p = peers[i]
             

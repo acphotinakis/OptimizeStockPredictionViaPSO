@@ -163,11 +163,41 @@ def process_ticker_split_first(
     # ============================================================================
     logger.info(f"[{ticker}] Stage 1: Universe & Peer Selection (TRAINING ONLY)")
 
-    universe = universe_builder.get_universe(ticker, dfs_train, fit=True)
-    peers = universe_builder.get_fitted_peers(ticker)
-
-    logger.info(f"[{ticker}] Universe size: {len(universe)}")
-    logger.info(f"[{ticker}] Selected peers: {peers}")
+    # Select universe and peers with error handling
+    try:
+        universe = universe_builder.get_universe(ticker, dfs_train, fit=True)
+        peers = universe_builder.get_fitted_peers(ticker)
+        
+        logger.info(f"[{ticker}] Universe size: {len(universe)}")
+        logger.info(f"[{ticker}] Selected peers: {peers}")
+        
+        # Validate peer data availability
+        missing_peers = [p for p in peers if p not in dfs_train]
+        if missing_peers:
+            logger.warning(
+                f"[{ticker}] Missing peer data: {missing_peers}. "
+                "These will be excluded from cross-ticker features."
+            )
+            # Remove missing peers
+            peers = [p for p in peers if p in dfs_train]
+            
+        if not peers:
+            logger.warning(
+                f"[{ticker}] No valid peers available. "
+                "Cross-ticker features will be limited to market context only."
+            )
+    except Exception as e:
+        logger.error(f"[{ticker}] Peer selection failed: {e}", exc_info=True)
+        raise
+    
+    # Extract universe context for feature generation
+    sector_etf = universe_builder.sector_map.get(ticker)
+    market_context = universe_builder.market_context
+    market_internals = universe_builder.market_internals
+    
+    logger.info(f"[{ticker}] Sector ETF: {sector_etf}")
+    logger.info(f"[{ticker}] Market context: {market_context}")
+    logger.info(f"[{ticker}] Market internals: {market_internals}")
 
     # Filter to available tickers per split
     def filter_universe(
@@ -191,15 +221,24 @@ def process_ticker_split_first(
     logger.info(f"[{ticker}] Stage 2: Raw Feature Generation")
 
     X_train_raw, y_train_raw, feat_names_train, idx_train = generate_raw_features(
-        ticker, dfs_train_u, peers, split_name="TRAIN"
+        ticker, dfs_train_u, peers, split_name="TRAIN",
+        market_context=market_context,
+        sector_etf=sector_etf,
+        market_internals=market_internals,
     )
 
     X_val_raw, y_val_raw, feat_names_val, idx_val = generate_raw_features(
-        ticker, dfs_val_u, peers, split_name="VAL"
+        ticker, dfs_val_u, peers, split_name="VAL",
+        market_context=market_context,
+        sector_etf=sector_etf,
+        market_internals=market_internals,
     )
 
     X_test_raw, y_test_raw, feat_names_test, idx_test = generate_raw_features(
-        ticker, dfs_test_u, peers, split_name="TEST"
+        ticker, dfs_test_u, peers, split_name="TEST",
+        market_context=market_context,
+        sector_etf=sector_etf,
+        market_internals=market_internals,
     )
 
     # Verify feature consistency
@@ -561,6 +600,15 @@ def main() -> None:
             logger.warning(f"[{symbol}] Missing parquet file: {p}")
 
     logger.info(f"Loaded {len(dfs)} ticker DataFrames")
+    
+    # Validate universe data availability
+    missing_symbols = [s for s in all_symbols if s not in dfs]
+    if missing_symbols:
+        logger.warning(
+            f"Missing {len(missing_symbols)} universe symbols: {missing_symbols}. "
+            "This may affect feature quality. Consider ingesting missing data."
+        )
+        logger.warning("Impact: Some cross-ticker features may be unavailable or less informative.")
 
     # ============================================================================
     # STAGE 2: SPY-ALIGNED REINDEXING (CRITICAL FOR CROSS-TICKER)

@@ -69,80 +69,28 @@ class SymbolUniverseBuilder:
         Pass fit=True on training data to select peers; fit=False reuses them.
         """
         if fit:
-            # self._fitted_peers[target_ticker] = self._select_peers(target_ticker, dfs)
-
-            if target_ticker == "AAPL":
-                # Manually set peers for AAPL to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "MSFT",
-                    "GOOGL",
-                    "NVDA",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
-            elif target_ticker == "MSFT":
-                # Manually set peers for MSFT to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "AAPL",
-                    "GOOGL",
-                    "META",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
-            elif target_ticker == "GOOGL":
-                # Manually set peers for GOOGL to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "AAPL",
-                    "MSFT",
-                    "META",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
-            elif target_ticker == "NVDA":
-                # Manually set peers for NVDA to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "AAPL",
-                    "MSFT",
-                    "GOOGL",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
-            elif target_ticker == "AMD":
-                # Manually set peers for AMD to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "AAPL",
-                    "MSFT",
-                    "GOOGL",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
-            elif target_ticker == "META":
-                # Manually set peers for META to ensure consistency across runs
-                self._fitted_peers[target_ticker] = [
-                    "AAPL",
-                    "MSFT",
-                    "GOOGL",
-                ]
-                logger.info(
-                    "[%s] Using fixed peers: %s",
-                    target_ticker,
-                    self._fitted_peers[target_ticker],
-                )
+            mode = self.peer_config.get("mode", "dynamic")
+            
+            if mode == "manual":
+                self._fitted_peers[target_ticker] = self._get_manual_peers(target_ticker)
+            elif mode == "hybrid":
+                # Try manual first, fall back to dynamic
+                manual = self._get_manual_peers(target_ticker)
+                if manual:
+                    self._fitted_peers[target_ticker] = manual
+                else:
+                    logger.info(
+                        f"[{target_ticker}] No manual peers defined, using dynamic selection"
+                    )
+                    self._fitted_peers[target_ticker] = self._select_peers(target_ticker, dfs)
+            else:  # dynamic (default)
+                self._fitted_peers[target_ticker] = self._select_peers(target_ticker, dfs)
+            
+            logger.info(
+                f"[{target_ticker}] Peer selection mode='{mode}', "
+                f"selected {len(self._fitted_peers[target_ticker])} peers: "
+                f"{self._fitted_peers[target_ticker]}"
+            )
         elif target_ticker not in self._fitted_peers:
             raise RuntimeError(
                 f"Peers for {target_ticker} not fitted. "
@@ -179,6 +127,18 @@ class SymbolUniverseBuilder:
         )
         return universe
 
+    def _get_manual_peers(self, target: str) -> List[str]:
+        """Retrieve manually specified peers from config."""
+        manual_peers = self.peer_config.get("manual_peers", {})
+        
+        if target in manual_peers:
+            peers = manual_peers[target]
+            logger.info(f"[{target}] Using manual peers from config: {peers}")
+            return peers
+        else:
+            logger.debug(f"[{target}] No manual peers defined in config")
+            return []
+    
     def _select_peers(self, target: str, dfs: Dict[str, pd.DataFrame]) -> List[str]:
         """
         Select top-N correlated peers STRICTLY within same sector.
@@ -253,7 +213,76 @@ class SymbolUniverseBuilder:
             target_sector_etf,
             [(p, f"{correlations[p]:.3f}") for p in peers],
         )
+        
+        # Validation and fallback
+        if not peers:
+            logger.warning(
+                f"[{target}] No peers found meeting criteria "
+                f"(min_corr={self.peer_config['min_correlation']})"
+            )
+            
+            fallback_cfg = self.peer_config.get("fallback", {})
+            
+            if not fallback_cfg.get("allow_empty_peers", True):
+                raise RuntimeError(
+                    f"[{target}] No peers found and allow_empty_peers=False"
+                )
+            
+            if fallback_cfg.get("cross_sector_fallback", False):
+                logger.info(f"[{target}] Attempting cross-sector peer selection...")
+                peers = self._select_peers_cross_sector(target, dfs)
+        
+        # Warn if peer count is below threshold
+        min_peers = self.peer_config.get("fallback", {}).get("min_peers_warning", 2)
+        if len(peers) < min_peers:
+            logger.warning(
+                f"[{target}] Only {len(peers)} peers found "
+                f"(expected at least {min_peers})"
+            )
 
+        return peers
+    
+    def _select_peers_cross_sector(
+        self, target: str, dfs: Dict[str, pd.DataFrame]
+    ) -> List[str]:
+        """
+        Select peers WITHOUT sector constraint (fallback).
+        
+        Use when sector-constrained selection finds no peers.
+        """
+        if target not in dfs:
+            return []
+        
+        exclude = (
+            set(self.market_context)
+            | set(self.market_internals)
+            | set(self.sector_map.values())
+            | {target}
+        )
+        
+        r_target = dfs[target]["log_return"]
+        candidates = [
+            t for t in dfs if t not in exclude and "log_return" in dfs[t].columns
+        ]
+        
+        correlations: Dict[str, float] = {}
+        for t in candidates:
+            aligned = pd.concat([r_target, dfs[t]["log_return"]], axis=1).dropna()
+            if len(aligned) < 100:
+                continue
+            corr = abs(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+            if pd.notna(corr) and corr >= self.peer_config["min_correlation"]:
+                correlations[t] = corr
+        
+        peers = sorted(correlations, key=correlations.get, reverse=True)[
+            : self.peer_config["max_peers"]
+        ]
+        
+        logger.info(
+            f"[{target}] Cross-sector peers: "
+            f"{[(p, f'{correlations[p]:.3f}') for p in peers]}"
+        )
+        
         return peers
 
     # def _select_peers(self, target: str, dfs: Dict[str, pd.DataFrame]) -> List[str]:
@@ -293,12 +322,38 @@ class SymbolUniverseBuilder:
 
     # ── Persistence ──────────────────────────────────────────────────────────
     def save_peers(self, path: str | Path) -> None:
+        """Save fitted peers with selection metadata."""
+        from datetime import datetime
+        
+        metadata = {
+            "fitted_peers": self._fitted_peers,
+            "selection_mode": self.peer_config.get("mode", "dynamic"),
+            "config": {
+                "max_peers": self.peer_config.get("max_peers"),
+                "min_correlation": self.peer_config.get("min_correlation"),
+                "sector_constrained": self.peer_config.get("sector_constrained"),
+            },
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
         with open(path, "w") as f:
-            json.dump(self._fitted_peers, f, indent=2)
+            json.dump(metadata, f, indent=2)
+        
+        logger.info(f"Saved peer metadata to {path}")
 
     def load_peers(self, path: str | Path) -> None:
+        """Load fitted peers (backward compatible with old format)."""
         with open(path) as f:
-            self._fitted_peers = json.load(f)
+            data = json.load(f)
+        
+        # Backward compatibility: check if it's the old format (just peers dict)
+        if "fitted_peers" in data:
+            self._fitted_peers = data["fitted_peers"]
+            logger.info(f"Loaded peers with metadata from {path}")
+        else:
+            # Old format: directly a peers dictionary
+            self._fitted_peers = data
+            logger.info(f"Loaded peers (legacy format) from {path}")
 
     def get_fitted_peers(self, target: str) -> List[str]:
         return self._fitted_peers.get(target, [])

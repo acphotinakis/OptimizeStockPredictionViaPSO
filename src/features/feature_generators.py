@@ -44,6 +44,9 @@ def generate_raw_features(
     dfs: Dict[str, pd.DataFrame],
     peer_tickers: List[str],
     split_name: str = "",
+    market_context: List[str] = None,
+    sector_etf: str = None,
+    market_internals: List[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], pd.DatetimeIndex]:
     """
     Generate raw features for a single split (train, val, or test).
@@ -59,6 +62,9 @@ def generate_raw_features(
         dfs: Dictionary of ticker -> DataFrame for THIS SPLIT ONLY
         peer_tickers: Pre-selected peer tickers (selected on training data)
         split_name: "TRAIN", "VAL", or "TEST" (for logging)
+        market_context: List of market context tickers (e.g., ["SPY", "QQQ"])
+        sector_etf: Sector ETF for target (e.g., "XLK")
+        market_internals: List of market internal tickers (e.g., ["UVXY", "GLD"])
     
     Returns:
         Tuple of (X, y, feature_names, datetime_index)
@@ -101,7 +107,13 @@ def generate_raw_features(
     
     # Cross-ticker features (strict alignment)
     block_cross = compute_cross_ticker_features_strict(
-        target_ticker, dfs, peer_tickers, split_name=split_name
+        target_ticker, 
+        dfs, 
+        peer_tickers, 
+        split_name=split_name,
+        market_context=market_context,
+        sector_etf=sector_etf,
+        market_internals=market_internals,
     )
     blocks.append(block_cross)
     logger.info(f"[{target_ticker}] {split_name}: Cross-ticker features: {block_cross.shape[1]}")

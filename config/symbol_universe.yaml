@@ -41,10 +41,30 @@ market_internals:
 
 # Tier 3: Peer Selection Settings
 peer_selection:
+  # Selection mode: "dynamic" (correlation-based), "manual" (config-based), or "hybrid" (manual + dynamic fallback)
+  mode: "dynamic"
+  
+  # Dynamic selection parameters
   max_peers: 3
-  method: "pearson"  # correlation method
-  min_correlation: 0.3  # minimum abs correlation to be considered
-  lookback_days: 252  # use 1 year of training data for correlation
+  min_correlation: 0.3
+  correlation_method: "pearson"  # pearson, spearman, or kendall
+  sector_constrained: true  # Restrict peers to same sector
+  
+  # Manual peer overrides (used in "manual" or "hybrid" mode)
+  # These are the previously hardcoded peer assignments
+  manual_peers:
+    AAPL: ["MSFT", "GOOGL", "NVDA"]
+    MSFT: ["AAPL", "GOOGL", "META"]
+    GOOGL: ["AAPL", "MSFT", "META"]
+    NVDA: ["AAPL", "MSFT", "GOOGL"]
+    AMD: ["AAPL", "MSFT", "GOOGL"]
+    META: ["AAPL", "MSFT", "GOOGL"]
+  
+  # Fallback strategy if no peers meet criteria
+  fallback:
+    allow_empty_peers: true  # Allow zero peers if none qualify
+    min_peers_warning: 2  # Warn if fewer than this many peers
+    cross_sector_fallback: false  # Allow cross-sector if no in-sector peers
   
 # Prediction Targets (stocks we want to predict)
 # Start with high-liquidity names from each sector
