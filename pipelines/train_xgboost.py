@@ -249,7 +249,16 @@ def train_xgboost(
     metadata_path = output_dir / "metadata.json"
     with open(metadata_path, "w") as f:
         # Convert any potential numpy types in metadata using a default lambda
-        json.dump(metadata, f, indent=4, default=lambda x: float(x) if isinstance(x, (np.float32, np.float64, np.float64)) else int(x) if isinstance(x, (np.int32, np.int64)) else str(x))
+        json.dump(
+            metadata,
+            f,
+            indent=4,
+            default=lambda x: (
+                float(x)
+                if isinstance(x, (np.float32, np.float64, np.float64))
+                else int(x) if isinstance(x, (np.int32, np.int64)) else str(x)
+            ),
+        )
 
     logger.info(f"Metadata saved to {metadata_path}")
 
@@ -272,6 +281,12 @@ def main():
         help="Path to configuration file",
     )
     parser.add_argument(
+        "--ticker",
+        type=str,
+        required=True,
+        help="String ticker to train",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=PROJECT_ROOT / "results" / "canonical" / "models" / "xgboost",
@@ -287,6 +302,8 @@ def main():
         # Load preprocessed data
         data = load_preprocessed_data(args.data_path)
 
+        output_dir = args.output_dir / args.ticker
+
         # Train model (ONCE)
         model = train_xgboost(
             X_train=data["X_train"],
@@ -294,16 +311,16 @@ def main():
             X_val=data["X_val"],
             y_val=data["y_val"],
             config=config,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
         )
 
         logger.info("=" * 80)
         logger.info("XGBOOST TRAINING SUCCESSFUL")
         logger.info("=" * 80)
-        logger.info("✓ Model trained and frozen")
-        logger.info("✓ Lag-based features created")
-        logger.info("✓ Model saved to disk")
-        logger.info("✓ Ready for walk-forward evaluation")
+        logger.info(" Model trained and frozen")
+        logger.info(" Lag-based features created")
+        logger.info(" Model saved to disk")
+        logger.info(" Ready for walk-forward evaluation")
         logger.info("=" * 80)
 
         sys.exit(0)

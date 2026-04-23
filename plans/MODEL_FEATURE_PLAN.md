@@ -961,27 +961,27 @@ cross_ticker_features = {
 | TRD Requirement | Section | Status | Implementation |
 |-----------------|---------|--------|----------------|
 | **Feature Generation** |
-| Log return target | TRD1 §3.1 | ✓ | `(close_{t+1} - close_t) / close_t` |
-| 17 core indicators | TRD1 §3.1-3.4 | ✓ | `technical.py` (merged) |
-| Cross-ticker features | Blueprint | ✓ | `cross_ticker.py` (15 features) |
+| Log return target | TRD1 §3.1 |  | `(close_{t+1} - close_t) / close_t` |
+| 17 core indicators | TRD1 §3.1-3.4 |  | `technical.py` (merged) |
+| Cross-ticker features | Blueprint |  | `cross_ticker.py` (15 features) |
 | **Feature Transformation** |
-| Wavelet denoising | TRD1 §4.1 | ✗ → ✓ | `wavelet.py` (NEW) |
-| MinMax [-1,1] scaling | TRD1 §4.2 | ✓ | `normalization.py` |
+| Wavelet denoising | TRD1 §4.1 | ✗ →  | `wavelet.py` (NEW) |
+| MinMax [-1,1] scaling | TRD1 §4.2 |  | `normalization.py` |
 | **Feature Selection** |
-| 4-stage selector | TRD1 §5 | ✓ | `selector.py` (Variance→Pearson→VIF→MI) |
-| Pearson threshold 0.95 | TRD1 §5 | ✓ | `correlation_threshold=0.95` |
-| VIF threshold 10 | Blueprint | ✓ | `vif_threshold=10.0` |
-| MI bottom quartile | Blueprint | ✓ | `mi_quantile_threshold=0.25` |
+| 4-stage selector | TRD1 §5 |  | `selector.py` (Variance→Pearson→VIF→MI) |
+| Pearson threshold 0.95 | TRD1 §5 |  | `correlation_threshold=0.95` |
+| VIF threshold 10 | Blueprint |  | `vif_threshold=10.0` |
+| MI bottom quartile | Blueprint |  | `mi_quantile_threshold=0.25` |
 | **Model Architecture** |
-| 2-layer LSTM | TRD1 §5.3 | ✓ | `lstm.py` (PyTorch) |
-| ReLU activation | Zeng 2025 | ✓ | `nn.ReLU()` |
-| Dropout regularization | Deng 2025 | ✓ | `dropout_rate=0.2` |
-| Look-back 20 days | Ji 2021 | ✓ | `lookback=20` |
+| 2-layer LSTM | TRD1 §5.3 |  | `lstm.py` (PyTorch) |
+| ReLU activation | Zeng 2025 |  | `nn.ReLU()` |
+| Dropout regularization | Deng 2025 |  | `dropout_rate=0.2` |
+| Look-back 20 days | Ji 2021 |  | `lookback=20` |
 | **Training Protocol** |
-| No shuffling | TRD1 §5.4 | ✓ | `shuffle=False` |
-| Early stopping | TRD1 §5.4 | ✓ | `patience=10` |
-| MSE loss | TRD1 §5.3 | ✓ | `nn.MSELoss()` |
-| Adam optimizer | Ji 2021 | ✓ | `torch.optim.Adam()` |
+| No shuffling | TRD1 §5.4 |  | `shuffle=False` |
+| Early stopping | TRD1 §5.4 |  | `patience=10` |
+| MSE loss | TRD1 §5.3 |  | `nn.MSELoss()` |
+| Adam optimizer | Ji 2021 |  | `torch.optim.Adam()` |
 
 **Overall TRD Compliance:** 18/19 requirements met (95%)  
 **Critical Gap Closed:** Wavelet denoising (now implemented)

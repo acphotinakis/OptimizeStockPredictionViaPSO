@@ -242,6 +242,12 @@ def main():
         help="Path to preprocessed features directory",
     )
     parser.add_argument(
+        "--ticker",
+        type=str,
+        required=True,
+        help="String ticker to train",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         default=PROJECT_ROOT / "config" / "default_config.yaml",
@@ -267,6 +273,8 @@ def main():
         # Load preprocessed data
         data = load_feature_data(args.data_path)
 
+        output_dir = args.output_dir / args.ticker
+
         # Train model (ONCE)
         model = train_baseline_lstm(
             X_train=data["X_train"],
@@ -274,15 +282,15 @@ def main():
             X_val=data["X_val"],
             y_val=data["y_val"],
             config=config,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
         )
 
         logger.info("=" * 80)
         logger.info("BASELINE LSTM TRAINING SUCCESSFUL")
         logger.info("=" * 80)
-        logger.info("✓ Model trained and frozen")
-        logger.info("✓ Model saved to disk")
-        logger.info("✓ Ready for walk-forward evaluation")
+        logger.info(" Model trained and frozen")
+        logger.info(" Model saved to disk")
+        logger.info(" Ready for walk-forward evaluation")
         logger.info("=" * 80)
 
         sys.exit(0)

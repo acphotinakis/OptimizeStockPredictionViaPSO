@@ -232,13 +232,13 @@ class LSTMTrainer:
                 epochs_no_improve += 1
 
             # Logging
-            if (epoch + 1) % 10 == 0 or epoch == 0:
-                logger.info(
-                    f"Epoch {epoch+1:3d}/{epochs}: "
-                    f"train_loss={avg_train_loss:.6f}, "
-                    f"val_loss={avg_val_loss:.6f}, "
-                    f"best={best_val_loss:.6f} @ epoch {best_epoch+1}"
-                )
+            # if (epoch + 1) % 10 == 0 or epoch == 0:
+            logger.info(
+                f"Epoch {epoch+1:3d}/{epochs}: "
+                f"train_loss={avg_train_loss:.6f}, "
+                f"val_loss={avg_val_loss:.6f}, "
+                f"best={best_val_loss:.6f} @ epoch {best_epoch+1}"
+            )
 
             # Early stopping trigger
             if epochs_no_improve >= patience:

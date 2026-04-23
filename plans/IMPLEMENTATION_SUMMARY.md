@@ -122,14 +122,14 @@ src/features_unified/
 
 **From `src/features/`:**
 ```
-✓ universe_builder.py        # Peer selection logic (not duplicated)
-✓ scalar.py                   # May contain scaler utilities
-✓ ttm_squeeze.py              # Specialized indicator (not in TRD)
+ universe_builder.py        # Peer selection logic (not duplicated)
+ scalar.py                   # May contain scaler utilities
+ ttm_squeeze.py              # Specialized indicator (not in TRD)
 ```
 
 **From `src/feature_eng_revised/`:**
 ```
-✓ feature_gen.py              # Monolithic generator (may be used by old pipelines)
+ feature_gen.py              # Monolithic generator (may be used by old pipelines)
 ```
 
 ---
@@ -160,20 +160,20 @@ src/features_unified/
 
 **Canonical LSTM Implementation:**
 ```
-✓ src/models_revised/lstm.py               # 2-layer LSTM with ReLU + Dropout
-✓ src/models_revised/lstm_pipeline.py      # Training pipeline with early stopping
-✓ src/models_revised/xgboost.py            # XGBoost model (newly created)
-✓ src/models_revised/xgboost_pipeline.py   # XGBoost pipeline (newly created)
+ src/models_revised/lstm.py               # 2-layer LSTM with ReLU + Dropout
+ src/models_revised/lstm_pipeline.py      # Training pipeline with early stopping
+ src/models_revised/xgboost.py            # XGBoost model (newly created)
+ src/models_revised/xgboost_pipeline.py   # XGBoost pipeline (newly created)
 ```
 
 **LSTM Verification:**
 - **Architecture:** 2-layer LSTM (LSTMNetwork class)
-- **Activation:** ReLU (Zeng et al. 2025 compliance) ✓
-- **Regularization:** Dropout after each LSTM layer (Deng & Peng 2025) ✓
-- **Output:** Single neuron, linear activation (regression) ✓
-- **Training:** Adam optimizer, MSE loss, early stopping (patience=10) ✓
-- **Shuffle:** Disabled (shuffle=False) — temporal integrity ✓
-- **Input Validation:** Shape (N, 20, F) enforced ✓
+- **Activation:** ReLU (Zeng et al. 2025 compliance) 
+- **Regularization:** Dropout after each LSTM layer (Deng & Peng 2025) 
+- **Output:** Single neuron, linear activation (regression) 
+- **Training:** Adam optimizer, MSE loss, early stopping (patience=10) 
+- **Shuffle:** Disabled (shuffle=False) — temporal integrity 
+- **Input Validation:** Shape (N, 20, F) enforced 
 
 **Status:** **VERIFIED** — No changes needed, already TRD-compliant
 
@@ -413,62 +413,62 @@ features:
 
 ## 6. CONSISTENCY VERIFICATION CHECKLIST
 
-### 6.1 Leakage-Free Confirmation ✓
+### 6.1 Leakage-Free Confirmation 
 
 | Check | Status | Implementation |
 |-------|--------|----------------|
-| Scaler fit on training only | ✓ | `normalization.py:_fit_minmax_params()` |
-| Wavelet threshold on training only | ✓ | `wavelet.py:apply_wavelet_denoising(fit_mode=True)` |
-| Feature selection on training only | ✓ | `selector.py:FeatureSelector.fit()` |
-| Peer list frozen after training | ✓ | `cross_ticker.py:compute_cross_ticker_features()` |
-| No window crossing splits | ✓ | `pipeline.py:build_windows()` temporal slicing |
-| No shuffling in LSTM training | ✓ | `lstm.py:train()` shuffle=False enforced |
-| Target is future (t+1) | ✓ | `pipeline.py:_clean_and_align()` y = close.shift(-1) |
+| Scaler fit on training only |  | `normalization.py:_fit_minmax_params()` |
+| Wavelet threshold on training only |  | `wavelet.py:apply_wavelet_denoising(fit_mode=True)` |
+| Feature selection on training only |  | `selector.py:FeatureSelector.fit()` |
+| Peer list frozen after training |  | `cross_ticker.py:compute_cross_ticker_features()` |
+| No window crossing splits |  | `pipeline.py:build_windows()` temporal slicing |
+| No shuffling in LSTM training |  | `lstm.py:train()` shuffle=False enforced |
+| Target is future (t+1) |  | `pipeline.py:_clean_and_align()` y = close.shift(-1) |
 
 **Status:** **VERIFIED** — No data leakage across splits
 
 ---
 
-### 6.2 Cross-Ticker Alignment Confirmation ✓
+### 6.2 Cross-Ticker Alignment Confirmation 
 
 | Check | Status | Implementation |
 |-------|--------|----------------|
-| SPY as global timestamp grid | ✓ | `cross_ticker.py:compute_cross_ticker_features()` |
-| Left-join alignment strategy | ✓ | `cross_ticker.py:reindex(spy_index).ffill()` |
-| Missing data handled without leakage | ✓ | Forward-fill only (causal operation) |
-| Peer selection on training only | ✓ | `universe_builder.py` (preserved) |
-| ETF + sector integration | ✓ | `cross_ticker.py:compute_cross_ticker_features()` |
+| SPY as global timestamp grid |  | `cross_ticker.py:compute_cross_ticker_features()` |
+| Left-join alignment strategy |  | `cross_ticker.py:reindex(spy_index).ffill()` |
+| Missing data handled without leakage |  | Forward-fill only (causal operation) |
+| Peer selection on training only |  | `universe_builder.py` (preserved) |
+| ETF + sector integration |  | `cross_ticker.py:compute_cross_ticker_features()` |
 
 **Status:** **VERIFIED** — Cross-ticker system operational
 
 ---
 
-### 6.3 TRD Compliance Confirmation ✓
+### 6.3 TRD Compliance Confirmation 
 
 | TRD Requirement | Section | Status | Implementation |
 |-----------------|---------|--------|----------------|
 | **Feature Generation** |
-| Log return target | TRD1 §3.1 | ✓ | `technical.py:out["log_return"]` |
-| 17 core indicators | TRD1 §3.1-3.4 | ✓ | `technical.py:compute_trd_technical_features()` |
-| Cross-ticker features | Blueprint | ✓ | `cross_ticker.py` (15 features) |
+| Log return target | TRD1 §3.1 |  | `technical.py:out["log_return"]` |
+| 17 core indicators | TRD1 §3.1-3.4 |  | `technical.py:compute_trd_technical_features()` |
+| Cross-ticker features | Blueprint |  | `cross_ticker.py` (15 features) |
 | **Feature Transformation** |
-| Wavelet denoising | TRD1 §4.1 | ✓ | `wavelet.py:apply_wavelet_denoising()` (NEW) |
-| MinMax [-1,1] scaling | TRD1 §4.2 | ✓ | `normalization.py:transform_features()` |
+| Wavelet denoising | TRD1 §4.1 |  | `wavelet.py:apply_wavelet_denoising()` (NEW) |
+| MinMax [-1,1] scaling | TRD1 §4.2 |  | `normalization.py:transform_features()` |
 | **Feature Selection** |
-| 4-stage selector | TRD1 §5 | ✓ | `selector.py:FeatureSelector` |
-| Pearson threshold 0.95 | TRD1 §5 | ✓ | `selector.py:correlation_threshold=0.95` |
-| VIF threshold 10 | Blueprint | ✓ | `selector.py:vif_threshold=10.0` |
-| MI bottom quartile | Blueprint | ✓ | `selector.py:mi_quantile_threshold=0.25` |
+| 4-stage selector | TRD1 §5 |  | `selector.py:FeatureSelector` |
+| Pearson threshold 0.95 | TRD1 §5 |  | `selector.py:correlation_threshold=0.95` |
+| VIF threshold 10 | Blueprint |  | `selector.py:vif_threshold=10.0` |
+| MI bottom quartile | Blueprint |  | `selector.py:mi_quantile_threshold=0.25` |
 | **Model Architecture** |
-| 2-layer LSTM | TRD1 §5.3 | ✓ | `lstm.py:LSTMNetwork` (2 layers) |
-| ReLU activation | Zeng 2025 | ✓ | `lstm.py:self.relu = nn.ReLU()` |
-| Dropout regularization | Deng 2025 | ✓ | `lstm.py:self.dropout_1, self.dropout_2` |
-| Look-back 20 days | Ji 2021 | ✓ | `config:lstm.lookback=20` |
+| 2-layer LSTM | TRD1 §5.3 |  | `lstm.py:LSTMNetwork` (2 layers) |
+| ReLU activation | Zeng 2025 |  | `lstm.py:self.relu = nn.ReLU()` |
+| Dropout regularization | Deng 2025 |  | `lstm.py:self.dropout_1, self.dropout_2` |
+| Look-back 20 days | Ji 2021 |  | `config:lstm.lookback=20` |
 | **Training Protocol** |
-| No shuffling | TRD1 §5.4 | ✓ | `lstm.py:train() shuffle=False` |
-| Early stopping | TRD1 §5.4 | ✓ | `lstm.py:train() patience=10` |
-| MSE loss | TRD1 §5.3 | ✓ | `lstm.py:nn.MSELoss()` |
-| Adam optimizer | Ji 2021 | ✓ | `lstm.py:torch.optim.Adam()` |
+| No shuffling | TRD1 §5.4 |  | `lstm.py:train() shuffle=False` |
+| Early stopping | TRD1 §5.4 |  | `lstm.py:train() patience=10` |
+| MSE loss | TRD1 §5.3 |  | `lstm.py:nn.MSELoss()` |
+| Adam optimizer | Ji 2021 |  | `lstm.py:torch.optim.Adam()` |
 
 **Overall TRD Compliance:** 19/19 requirements met (100%)  
 **Critical Gap Closed:** Wavelet denoising (now fully implemented)

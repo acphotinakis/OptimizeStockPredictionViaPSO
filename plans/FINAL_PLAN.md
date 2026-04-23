@@ -1150,35 +1150,35 @@ def verify_protocol_compliance(evaluation_results):
     assert abs(train_pct - 0.70) < 0.01, "Train split must be 70%"
     assert abs(val_pct - 0.10) < 0.01, "Val split must be 10%"
     assert abs(test_pct - 0.20) < 0.01, "Test split must be 20%"
-    checks.append("✓ Split ratios: 70/10/20")
+    checks.append(" Split ratios: 70/10/20")
     
     # Check 2: Pipeline state frozen
     pipeline_state = evaluation_results["pipeline_state"]
     assert pipeline_state["fit_date"] <= evaluation_results["val_start_date"], \
         "Pipeline must be fit before validation"
-    checks.append("✓ Pipeline fit only on train")
+    checks.append(" Pipeline fit only on train")
     
     # Check 3: No model retraining
     assert evaluation_results["n_model_fits"] == 1, \
         "Model must be trained exactly once"
-    checks.append("✓ Single model training (no retraining)")
+    checks.append(" Single model training (no retraining)")
     
     # Check 4: Rolling window
     assert evaluation_results["window_type"] == "rolling", \
         "Must use rolling window"
     assert evaluation_results["window_size"] == 20, \
         "Window size must be 20 days"
-    checks.append("✓ Rolling 20-day window")
+    checks.append(" Rolling 20-day window")
     
     # Check 5: Transaction costs applied
     assert "transaction_costs" in evaluation_results["backtest"], \
         "Transaction costs must be applied"
-    checks.append("✓ Transaction costs applied")
+    checks.append(" Transaction costs applied")
     
     # Check 6: Test isolation
     assert evaluation_results["test_accessed_during_training"] == False, \
         "Test data must not be accessed during training"
-    checks.append("✓ Test data isolated")
+    checks.append(" Test data isolated")
     
     logger.info("Protocol Compliance Verification:")
     for check in checks:

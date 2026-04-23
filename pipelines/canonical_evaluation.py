@@ -248,7 +248,6 @@ def canonical_evaluation_pipeline(
         "frozen_state": frozen_state,
         "models": {
             "baseline": baseline_model,
-            "pso": pso_model,
             "xgboost": xgb_model,
         },
         "predictions": {},

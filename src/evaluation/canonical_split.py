@@ -161,6 +161,6 @@ def verify_split_integrity(
     assert train_data.index[-1] < val_data.index[0], "Train not before val"
     assert val_data.index[-1] < test_data.index[0], "Val not before test"
 
-    logger.info("✓ Split integrity verified (FINAL_PLAN.md compliant)")
+    logger.info(" Split integrity verified (FINAL_PLAN.md compliant)")
 
     return True

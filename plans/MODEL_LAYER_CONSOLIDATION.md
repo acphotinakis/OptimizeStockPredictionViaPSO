@@ -134,10 +134,10 @@ Output (batch, 1): Next-period return prediction
 
 **Files analyzed:**
 ```
-✓ lstm.py              # TRD-compliant 2-layer LSTM (VERIFIED)
-✓ lstm_pipeline.py     # Training wrapper (DEPRECATED - replaced by trainer.py)
-✓ xgboost.py           # Empty file (REMOVED)
-✓ xgboost_pipeline.py  # XGBoost windowing helper (PRESERVED separately)
+ lstm.py              # TRD-compliant 2-layer LSTM (VERIFIED)
+ lstm_pipeline.py     # Training wrapper (DEPRECATED - replaced by trainer.py)
+ xgboost.py           # Empty file (REMOVED)
+ xgboost_pipeline.py  # XGBoost windowing helper (PRESERVED separately)
 ```
 
 **Verification Results:**

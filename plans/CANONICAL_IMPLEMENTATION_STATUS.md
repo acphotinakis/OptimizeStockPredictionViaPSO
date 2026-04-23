@@ -351,7 +351,7 @@ Several modules contain placeholder implementations:
 
 The canonical implementation is **complete** when:
 
-### 10.1 Functional Requirements ✓
+### 10.1 Functional Requirements 
 
 - [ ] All models (Baseline LSTM, PSO-LSTM, XGBoost) train statically (once)
 - [ ] Feature pipeline fits once on 70% train, freezes forever
@@ -360,7 +360,7 @@ The canonical implementation is **complete** when:
 - [ ] All models use identical 70/10/20 splits
 - [ ] PSO implements two-phase protocol correctly
 
-### 10.2 Quality Requirements ✓
+### 10.2 Quality Requirements 
 
 - [ ] No retraining occurs during evaluation
 - [ ] No pipeline refitting occurs during evaluation
@@ -368,14 +368,14 @@ The canonical implementation is **complete** when:
 - [ ] Frozen state is truly immutable
 - [ ] Results are deterministic (same seed → same results)
 
-### 10.3 Compliance Requirements ✓
+### 10.3 Compliance Requirements 
 
 - [ ] `verify_protocol_compliance()` passes all checks
 - [ ] No violations of FINAL_PLAN.md rules
 - [ ] All enforcement flags in config are respected
 - [ ] Leakage prevention checklist passes
 
-### 10.4 Testing Requirements ✓
+### 10.4 Testing Requirements 
 
 - [ ] Unit tests pass for all canonical modules
 - [ ] Integration test passes for end-to-end pipeline
