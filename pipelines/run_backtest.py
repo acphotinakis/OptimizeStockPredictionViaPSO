@@ -310,6 +310,15 @@ def main():
     strategy_returns = backtest_df["strategy_return"].values
     equity_curve = backtest_df["capital"].values
     trade_costs = backtest_df["trade_cost"].values
+    
+    # Align dates with backtest results (in case of length mismatch)
+    backtest_dates = backtest_df["date"].values if "date" in backtest_df.columns else None
+    if backtest_dates is None and len(test_data["dates"]) >= len(predictions):
+        backtest_dates = test_data["dates"][:len(predictions)]
+    
+    # Log lengths for debugging
+    logger.info(f"Array lengths: predictions={len(predictions)}, actual_returns={len(actual_returns)}, "
+                f"signals={len(signals)}, equity={len(equity_curve)}")
 
     results = BacktestResults(
         model_type=args.model_type,
@@ -317,7 +326,7 @@ def main():
         timestamp=datetime.now().isoformat(),
         predictions=predictions,
         actual_returns=actual_returns,
-        dates=test_data["dates"],
+        dates=backtest_dates,
         signals=signals,
         strategy_returns=strategy_returns,
         equity_curve=equity_curve,

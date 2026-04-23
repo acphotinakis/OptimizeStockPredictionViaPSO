@@ -100,20 +100,32 @@ def save_backtest_results(
     logger.info(f"  ✓ Metrics saved to {metrics_path.name}")
 
     # 2. Save time series (CSV)
+    # Find the minimum length to ensure all arrays are aligned
+    min_len = min(
+        len(results.predictions),
+        len(results.actual_returns),
+        len(results.signals),
+        len(results.strategy_returns),
+        len(results.equity_curve),
+        len(results.trade_costs),
+    )
+    
     if results.dates is not None:
-        dates_col = results.dates
+        dates_col = results.dates[:min_len]
     else:
-        dates_col = pd.RangeIndex(len(results.predictions))
+        dates_col = pd.RangeIndex(min_len)
+    
+    logger.info(f"Aligning time series to length {min_len}")
 
     equity_df = pd.DataFrame(
         {
             "date": dates_col,
-            "prediction": results.predictions,
-            "actual_return": results.actual_returns,
-            "signal": results.signals,
-            "strategy_return": results.strategy_returns,
-            "equity": results.equity_curve,
-            "trade_cost": results.trade_costs,
+            "prediction": results.predictions[:min_len],
+            "actual_return": results.actual_returns[:min_len],
+            "signal": results.signals[:min_len],
+            "strategy_return": results.strategy_returns[:min_len],
+            "equity": results.equity_curve[:min_len],
+            "trade_cost": results.trade_costs[:min_len],
         }
     )
 
@@ -125,8 +137,8 @@ def save_backtest_results(
     predictions_df = pd.DataFrame(
         {
             "date": dates_col,
-            "prediction": results.predictions,
-            "actual_return": results.actual_returns,
+            "prediction": results.predictions[:min_len],
+            "actual_return": results.actual_returns[:min_len],
         }
     )
 
