@@ -196,59 +196,58 @@ xgboost:
 
 
 # ============================================================================
-# PSO (UNION)
+# PSO (SPEC-COMPLIANT)
 # ============================================================================
 pso:
   # ================================================================
-  # PSO HYPERPARAMETER OPTIMIZATION (Optional, disabled by default)
+  # IPSO HYPERPARAMETER OPTIMIZATION (Spec-compliant implementation)
   # ================================================================
-  enabled: false             # Set to true for hyperparameter optimization
-  # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
-  n_particles: 20
-  n_iterations: 50
-  inertia_min: 0.4                 # Inertia weight minimum (adaptive)
-  inertia_max: 0.9                 # Inertia weight maximum
-  c1: 1.5                    # Cognitive coefficient
-  c2: 1.5                    # Social coefficient  
-  v_clamp_fraction: 0.20     # Velocity clamping
+  enabled: true              # PSO optimization enabled
   
-  # Search Space (LSTM Hyperparameters)
+  # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
+  n_particles: 20            # Swarm size (SPEC REQUIRED)
+  n_iterations: 50           # Total iterations (SPEC REQUIRED)
+  inertia_min: 0.4          # Inertia weight minimum (SPEC REQUIRED)
+  inertia_max: 0.9          # Inertia weight maximum (SPEC REQUIRED)
+  c1: 1.5                   # Cognitive coefficient (SPEC REQUIRED)
+  c2: 1.5                   # Social coefficient (SPEC REQUIRED)
+  v_clamp_fraction: 0.20    # Velocity clamping
+  
+  # Search Space (6D - SPEC COMPLIANT)
   search_space:
     lstm_units_1:
-      min: 50
+      min: 50               # First LSTM layer size
       max: 300
-      step: 32
     lstm_units_2:
-      min: 20
+      min: 20               # Second LSTM layer size (ADDED PER SPEC)
       max: 200
-      step: 20
     dropout_rate:
       min: 0.0
       max: 0.5
     learning_rate:
-      min: 0.001
+      min: 0.001            # Log-scale range (SPEC REQUIRED)
       max: 0.01
       scale: "log"
     batch_size:
-      choices: [32, 64]
+      choices: [32, 64]     # Discrete choices (SPEC REQUIRED)
     epochs:
-      min: 50
+      min: 50               # Training epochs range (SPEC REQUIRED)
       max: 300
   
-  shuffle: false  # MANDATORY
+  # Fixed parameters (NOT optimized by PSO)
+  lookback: 20              # FIXED at 20 (SPEC REQUIRED)
+  shuffle: false            # MANDATORY (no temporal shuffling)
   deterministic: true
+  random_seed: 42
 
   checkpoint_dir: "results/checkpoints"
 
-  # Fitness function
+  # Fitness function (SPEC-COMPLIANT: γ×MSE + (1-γ)×MSW)
   fitness:
-    mse_weight: 0.9
-    msw_weight: 0.1  # Mean squared weights regularization
-    rmse_weight: 0.4
-    sharpe_weight: 0.4
-    drawdown_weight: 0.2
-    signal_threshold: 1.0e-4
-    transaction_cost: 0.001
+    gamma: 0.9              # Weight for MSE component (SPEC REQUIRED)
+    # MSW weight = 1 - gamma = 0.1 (computed automatically)
+    # Formula: F(x) = 0.9 × MSE + 0.1 × MSW
+    # NO financial metrics (Sharpe, drawdown) in core fitness
 
 
 

@@ -1,15 +1,19 @@
 """
 src/optimizer/particle.py
 
-Particle encoding and decoding for the 5-dimensional LSTM hyperparameter
-search space defined in pso_mathematical_spec.md.
+Particle encoding and decoding for the 6-dimensional LSTM hyperparameter
+search space per IPSO-LSTM specification.
 
-Continuous encoding --> decoded hyperparameters:
-  dim 0: num_layers    [1.0, 4.99] --> int  {1,2,3,4}
-  dim 1: hidden_units  [32, 512]   --> int  multiple of 32
-  dim 2: dropout       [0.0, 0.5]  --> float
-  dim 3: log_lr        [ln1e-5, ln1e-1] --> float exp(x)
-  dim 4: lookback_idx  [0, 3.99]   --> int  index into {10,30,60,120}
+SPEC-COMPLIANT ENCODING:
+  dim 0: lstm_units_1   [50, 300]     --> int  (first LSTM layer size)
+  dim 1: lstm_units_2   [20, 200]     --> int  (second LSTM layer size)
+  dim 2: dropout_rate   [0.0, 0.5]    --> float
+  dim 3: log_lr         [ln0.001, ln0.01] --> float exp(x)
+  dim 4: batch_size_idx [0, 1.99]     --> int  index into {32, 64}
+  dim 5: epochs         [50, 300]     --> int
+
+FIXED (NOT OPTIMIZED):
+  lookback: 20 (fixed per specification)
 """
 
 from __future__ import annotations
@@ -19,46 +23,64 @@ from typing import Any, Dict
 
 import numpy as np
 
-LOOKBACK_CHOICES = [10, 30, 60, 120]
+# FIXED PARAMETER (not in PSO search space)
+LOOKBACK_FIXED = 20
+
+# Discrete batch size choices
+BATCH_SIZE_CHOICES = [32, 64]
 
 # Search space bounds (continuous encoding)
-LB = np.array([1.0, 32.0, 0.0, np.log(1e-5), 0.0], dtype=np.float64)
-UB = np.array([4.99, 512.0, 0.5, np.log(1e-1), 3.99], dtype=np.float64)
+# [units_1, units_2, dropout, log_lr, batch_idx, epochs]
+LB = np.array([50.0, 20.0, 0.0, np.log(0.001), 0.0, 50.0], dtype=np.float64)
+UB = np.array([300.0, 200.0, 0.5, np.log(0.01), 1.99, 300.0], dtype=np.float64)
 
 
 def decode(position: np.ndarray) -> Dict[str, Any]:
     """Map a continuous particle position to LSTM hyperparameters.
 
     Args:
-        position: Length-5 float array (clipped to [LB, UB]).
+        position: Length-6 float array (clipped to [LB, UB]).
 
     Returns:
-        Dict with keys: num_layers, hidden_units, dropout,
-                        learning_rate, lookback.
+        Dict with keys: units_1, units_2, dropout, learning_rate,
+                        batch_size, epochs, lookback (fixed at 20).
     """
     x = np.clip(position, LB, UB)
-    num_layers = int(x[0])  # floor --> {1,2,3,4}
-    hidden_raw = int(round(x[1] / 32.0)) * 32  # round to nearest 32
-    hidden_units = int(np.clip(hidden_raw, 32, 512))
-    dropout = float(x[2])
-    learning_rate = float(np.exp(x[3]))
-    lookback = LOOKBACK_CHOICES[int(x[4])]
+    
+    # Decode each dimension
+    units_1 = int(np.round(x[0]))  # [50, 300]
+    units_2 = int(np.round(x[1]))  # [20, 200]
+    dropout = float(x[2])  # [0.0, 0.5]
+    learning_rate = float(np.exp(x[3]))  # [0.001, 0.01]
+    batch_size = BATCH_SIZE_CHOICES[int(x[4])]  # {32, 64}
+    epochs = int(np.round(x[5]))  # [50, 300]
+    
     return {
-        "num_layers": num_layers,
-        "hidden_units": hidden_units,
+        "units_1": units_1,
+        "units_2": units_2,
         "dropout": dropout,
         "learning_rate": learning_rate,
-        "lookback": lookback,
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "lookback": LOOKBACK_FIXED,  # Always 20
     }
 
 
 def random_position(rng: np.random.Generator) -> np.ndarray:
-    """Sample a random particle position uniformly inside [LB, UB]."""
+    """Sample a random particle position uniformly inside [LB, UB].
+    
+    Returns:
+        Length-6 array for 6D search space.
+    """
     return rng.uniform(LB, UB)
 
 
 def random_velocity(rng: np.random.Generator) -> np.ndarray:
-    """Sample initial velocity as ±25 % of the search range."""
+    """Sample initial velocity as ±25% of the search range.
+    
+    Returns:
+        Length-6 array for 6D search space.
+    """
     half_range = (UB - LB) * 0.25
     return rng.uniform(-half_range, half_range)
 
@@ -68,8 +90,8 @@ class Particle:
     """Single PSO particle.
 
     Attributes:
-        position:       Current continuous position in R^5.
-        velocity:       Current velocity in R^5.
+        position:       Current continuous position in R^6.
+        velocity:       Current velocity in R^6.
         pbest_position: Best position found by this particle.
         pbest_fitness:  Fitness value at pbest_position (lower is better).
         fitness:        Current fitness value.

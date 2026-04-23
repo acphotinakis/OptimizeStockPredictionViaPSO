@@ -1,5 +1,5 @@
 """
-LSTM Modeling Module for Financial Time-Series Forecasting
+PSO LSTM Modeling Module for Financial Time-Series Forecasting
 
 Production-grade implementation of a 2-layer LSTM for stock return prediction.
 Guarantees deterministic training, strict temporal integrity, and PSO hyperparameter
@@ -15,6 +15,7 @@ Version: 1.0.0
 """
 
 import logging
+from tqdm import tqdm
 from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
 import torch
@@ -26,8 +27,7 @@ from src.models.utils import set_seeds
 logger = logging.getLogger(__name__)
 
 
-
-class LSTMNetwork(nn.Module):
+class PSOLSTMNetwork(nn.Module):
     """
     PyTorch LSTM network for financial time-series regression.
 
@@ -56,7 +56,7 @@ class LSTMNetwork(nn.Module):
             hidden_size_2: Units in second LSTM layer (20-200)
             dropout_rate: Dropout rate (0.0-0.5)
         """
-        super(LSTMNetwork, self).__init__()
+        super(PSOLSTMNetwork, self).__init__()
 
         self.hidden_size_1 = hidden_size_1
         self.hidden_size_2 = hidden_size_2
@@ -141,7 +141,7 @@ class LSTMNetwork(nn.Module):
         logger.info(f"Model weights saved to {filepath}")
 
 
-class LSTMModel:
+class PSOLSTMModel:
     """
     Production LSTM model wrapper for financial time-series.
 
@@ -160,7 +160,7 @@ class LSTMModel:
         self.device = (
             device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.model: Optional[LSTMNetwork] = None
+        self.model: Optional[PSOLSTMNetwork] = None
         self.history: Dict[str, List[float]] = {"train_loss": [], "val_loss": []}
         self.training_config: Optional[Dict[str, Any]] = None
         self.best_weights: Optional[Dict[str, torch.Tensor]] = None
@@ -235,7 +235,7 @@ class LSTMModel:
 
         logger.info(f"Validation passed for {split_name}: shape {X.shape}")
 
-    def build_model(self, config: Dict[str, Any], input_size: int) -> LSTMNetwork:
+    def build_model(self, config: Dict[str, Any], input_size: int) -> PSOLSTMNetwork:
         """
         Build 2-layer LSTM architecture from PSO configuration.
 
@@ -279,7 +279,7 @@ class LSTMModel:
         )
 
         # Build model
-        self.model = LSTMNetwork(
+        self.model = PSOLSTMNetwork(
             input_size=input_size,
             hidden_size_1=units_1,
             hidden_size_2=units_2,
@@ -304,7 +304,7 @@ class LSTMModel:
         X_val: np.ndarray,
         y_val: np.ndarray,
         config: Dict[str, Any],
-    ) -> Tuple[LSTMNetwork, Dict[str, List[float]], Dict[str, Any]]:
+    ) -> Tuple[PSOLSTMNetwork, Dict[str, List[float]], Dict[str, Any]]:
         """
         Train LSTM model with strict temporal integrity.
 
@@ -404,12 +404,16 @@ class LSTMModel:
         # Training loop
         self.history = {"train_loss": [], "val_loss": []}
 
-        for epoch in range(epochs):
+        for epoch in tqdm(
+            range(epochs), desc="Training Epochs", total=epochs, leave=True
+        ):
             # Training phase
             self.model.train()
             train_losses = []
 
-            for batch_X, batch_y in train_loader:
+            for batch_X, batch_y in tqdm(
+                train_loader, desc="Training Batches", leave=False
+            ):
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
 
@@ -431,7 +435,9 @@ class LSTMModel:
             val_losses = []
 
             with torch.no_grad():
-                for batch_X, batch_y in val_loader:
+                for batch_X, batch_y in tqdm(
+                    val_loader, desc="Validation Batches", leave=False
+                ):
                     batch_X = batch_X.to(self.device)
                     batch_y = batch_y.to(self.device)
 
@@ -458,12 +464,12 @@ class LSTMModel:
                 epochs_no_improve += 1
 
             # Log every 10 epochs
-            if (epoch + 1) % 10 == 0 or epoch == 0:
-                logger.info(
-                    f"Epoch {epoch+1}/{epochs}: "
-                    f"train_loss={avg_train_loss:.6f}, "
-                    f"val_loss={avg_val_loss:.6f}"
-                )
+            # if (epoch + 1) % 10 == 0 or epoch == 0:
+            logger.info(
+                f"Epoch {epoch+1}/{epochs}: "
+                f"train_loss={avg_train_loss:.6f}, "
+                f"val_loss={avg_val_loss:.6f}"
+            )
 
             # Early stopping trigger
             if epochs_no_improve >= patience:
@@ -582,14 +588,14 @@ class LSTMModel:
         logger.info(f"Model weights loaded from {filepath}")
 
 
-def create_lstm_model(
+def create_pso_lstm_model(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
     config: Dict[str, Any],
     seed: int = 42,
-) -> Tuple[LSTMModel, Dict[str, List[float]]]:
+) -> Tuple[PSOLSTMModel, Dict[str, List[float]]]:
     """
     Factory function to create and train LSTM model in one call.
 
@@ -608,7 +614,7 @@ def create_lstm_model(
     set_seeds(seed)
 
     # Create and train model
-    model = LSTMModel(seed=seed)
+    model = PSOLSTMModel(seed=seed)
     model.train(X_train, y_train, X_val, y_val, config)
 
     return model, model.history

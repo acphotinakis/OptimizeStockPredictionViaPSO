@@ -33,7 +33,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import yaml
@@ -43,13 +43,13 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models import (
-    IPSOOptimizer,
-    LSTMModel,
-    LSTMTrainer,
+    PSOLSTMModel,
+    PSOLSTMTrainer,
     build_lstm_windows,
 )
+from src.optimizer import IPSO, SpecCompliantFitness
 from src.utils.config_loader import Config, load_config
-from src.utils.logger import setup_logger
+from src.utils.logger import LogFileMode, setup_logger
 
 
 logger = logging.getLogger(__name__)
@@ -170,76 +170,8 @@ def load_preprocessed_data(data_path: Path) -> Dict:
     return data
 
 
-def fitness_function(
-    params: Dict,
-    X_train_win: np.ndarray,
-    y_train_win: np.ndarray,
-    X_val_win: np.ndarray,
-    y_val_win: np.ndarray,
-    lookback: int,
-    n_features: int,
-    seed: int,
-    config: Config,
-) -> float:
-    """
-    Fitness function for PSO: Train LSTM and return validation MSE.
-
-    TRD1 §7.3: Objective Function = MSE on validation set
-    TRD2 §7.4: Evaluates on PSO validation set (8% of total)
-
-    Args:
-        params: Hyperparameters proposed by PSO
-        X_train_win: PSO training features (windowed, 72%)
-        y_train_win: PSO training targets
-        X_val_win: PSO validation features (windowed, 8%)
-        y_val_win: PSO validation targets
-        lookback: Window size
-        n_features: Number of features
-        seed: Random seed
-        config: Full configuration object
-
-    Returns:
-        Fitness value (validation MSE, lower is better)
-    """
-    # TRD1 §5: LSTM Architecture Constraints
-    model_config = {
-        "input_shape": (lookback, n_features),
-        "lstm_units_1": params["units_1"],
-        "lstm_units_2": params["units_2"],
-        "dropout_rate": params["dropout"],
-        "activation": config.pso.activation,  # From LSTM config
-        "output_units": config.pso.output_units,
-        "output_activation": config.pso.output_activation,
-        "learning_rate": params["learning_rate"],
-        "loss": config.pso.loss,
-    }
-
-    # Create and train model
-
-    model = LSTMModel(seed=seed)
-    trainer = LSTMTrainer(model_config, seed=seed)
-
-    # TRD1 §5.4: Training Protocol
-    model, _ = trainer.train(
-        X_train_win,
-        y_train_win,
-        X_val_win,
-        y_val_win,
-        lstm_units_1=int(params["lstm_units_1"]),
-        lstm_units_2=int(params["lstm_units_2"]),
-        dropout_rate=float(params["dropout_rate"]),
-        learning_rate=float(params["learning_rate"]),
-        epochs=int(params["epochs"]),
-        batch_size=int(params["batch_size"]),
-        patience=config.lstm_baseline.early_stopping.patience,
-        shuffle=False,  # TRD1 §8.1 L-1: NO SHUFFLING
-    )
-
-    # TRD1 §7.3: Compute validation MSE
-    y_pred = model.predict(X_val_win, verbose=0)
-    mse = np.mean((y_val_win - y_pred.flatten()) ** 2)
-
-    return float(mse)
+# Note: fitness_function is now implemented inline in model_builder
+# to properly integrate with src/optimizer/ infrastructure
 
 
 def phase1_pso_search(
@@ -292,7 +224,7 @@ def phase1_pso_search(
 
     # Extract PSO config
     pso_config = config.pso
-    seed = pso_config.random_seed
+    seed = config.lstm_baseline.random_seed
     set_all_seeds(seed)
 
     # Build LSTM windows
@@ -342,47 +274,93 @@ def phase1_pso_search(
         },
     }
 
-    # Define fitness function wrapper
-    def fitness_wrapper(params):
-        fitness = fitness_function(
-            params,
-            X_pso_train_win,
-            y_pso_train_win,
-            X_pso_val_win,
-            y_pso_val_win,
-            lookback,
-            X_pso_train.shape[1],
-            seed,
-            config,
+    # Define model builder function that PSO core will call
+    def model_builder(params, X_train, y_train, X_val, y_val):
+        """
+        Build and train LSTM model for one PSO particle.
+
+        This function is called by PSO core for each particle evaluation.
+        Returns (y_pred, model) tuple so fitness function can compute MSW.
+
+        Args:
+            params: Hyperparameters decoded from particle position
+            X_train: Training sequences (already windowed)
+            y_train: Training targets
+            X_val: Validation sequences (already windowed)
+            y_val: Validation targets
+
+        Returns:
+            y_pred: Predictions on validation set (for MSE computation)
+        """
+        # Build model configuration from PSO parameters
+        model_config = {
+            "lstm_units_1": params["units_1"],
+            "lstm_units_2": params["units_2"],
+            "dropout_rate": params["dropout"],
+            "learning_rate": params["learning_rate"],
+            "batch_size": params["batch_size"],
+            "epochs": params["epochs"],
+        }
+
+        # Create and train model
+        model_wrapper = PSOLSTMModel(seed=seed)
+        trainer = PSOLSTMTrainer(model_config, seed=seed)
+
+        # Train on PSO internal split
+        trained_model, _, _ = model_wrapper.train(
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            model_config,
         )
+
+        # Get validation predictions
+        y_pred = model_wrapper.predict(X_val)
 
         # TRD1 §8.1 L-6: Verify test set never accessed
         current_hash = hashlib.sha256(X_test.tobytes()).hexdigest()
         assert (
             current_hash == _test_data_hash
         ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
+        
+        # Return (predictions, model) tuple for MSW computation
+        # PSO core expects this format and will pass both to fitness function
+        return y_pred, trained_model
+    
+    # Initialize spec-compliant fitness function (MSE + MSW)
+    # PSO core will call this with (y_true, y_pred, model)
+    fitness_fn = SpecCompliantFitness(gamma=0.9)
 
-        return fitness
-
-    # TRD1 §7.1: Initialize IPSO
-    optimizer = IPSOOptimizer(
+    # TRD1 §7.1: Initialize IPSO optimizer
+    logger.info("Initializing IPSO optimizer...")
+    optimizer = IPSO(
         n_particles=pso_config.n_particles,
         n_iterations=pso_config.n_iterations,
-        search_space=search_space,
-        fitness_func=fitness_wrapper,
-        inertia_min=pso_config.inertia_min,
-        inertia_max=pso_config.inertia_max,
+        fitness_fn=fitness_fn,
+        model_builder=model_builder,
+        w_max=pso_config.inertia_max,
+        w_min=pso_config.inertia_min,
         c1=pso_config.c1,
         c2=pso_config.c2,
         v_clamp_fraction=pso_config.v_clamp_fraction,
         seed=seed,
     )
 
-    # Run optimization
+    # Run PSO optimization
     logger.info("=" * 80)
-    logger.info("RUNNING PSO OPTIMIZATION")
+    logger.info("RUNNING IPSO OPTIMIZATION")
     logger.info("=" * 80)
-    best_params, best_fitness = optimizer.optimize()
+    logger.info(f"Search space: 6D (units_1, units_2, dropout, lr, batch_size, epochs)")
+    logger.info(f"Fitness: F(x) = 0.9 × MSE + 0.1 × MSW")
+    logger.info("=" * 80)
+
+    best_params, best_fitness = optimizer.run(
+        X_pso_train_win,
+        y_pso_train_win,
+        X_pso_val_win,
+        y_pso_val_win,
+    )
 
     # Save PSO results
     pso_results = {
@@ -430,7 +408,7 @@ def phase2_final_training(
     config: Config,
     output_dir: Path,
     feature_metadata: Dict,
-) -> LSTMModel:
+) -> PSOLSTMModel:
     """
     Phase 2: Final training on combined 80% (train+val) with PSO params.
 
@@ -483,43 +461,34 @@ def phase2_final_training(
 
     # TRD1 §5.1: LSTM Architecture Constraints
     model_config = {
-        "input_shape": (lookback, X_train.shape[1]),
         "lstm_units_1": best_params["units_1"],
         "lstm_units_2": best_params["units_2"],
         "dropout_rate": best_params["dropout"],
-        "activation": config.lstm_baseline.activation,
-        "output_units": config.lstm_baseline.output_units,
-        "output_activation": config.lstm_baseline.output_activation,
         "learning_rate": best_params["learning_rate"],
-        "loss": config.lstm_baseline.loss,
+        "batch_size": best_params["batch_size"],
+        "epochs": best_params["epochs"],
     }
 
     logger.info("PSO-optimized model configuration:")
     for key, value in model_config.items():
         logger.info(f"  {key}: {value}")
 
-    # Create model
-    model = LSTMModel(seed=seed)
-    trainer = LSTMTrainer(model_config, seed=seed)
+    # Create model (FIXED: Use correct classes)
+    model_wrapper = PSOLSTMModel(seed=seed)
+    trainer = PSOLSTMTrainer(model_config, seed=seed)
 
     # TRD2 §7.4: Train with exact PSO epochs, NO early stopping
     logger.info("=" * 80)
     logger.info("TRAINING (SINGLE FINAL FIT - NO EARLY STOPPING)")
     logger.info("=" * 80)
 
-    model, history = trainer.train(
+    # Train on combined 80% data with NO validation split
+    trained_model, history, _ = model_wrapper.train(
         X_combined_win,
         y_combined_win,
-        None,  # NO validation in Phase 2
-        None,
-        lstm_units_1=int(best_params["units_1"]),
-        lstm_units_2=int(best_params["units_2"]),
-        dropout_rate=float(best_params["dropout"]),
-        learning_rate=float(best_params["learning_rate"]),
-        epochs=int(best_params["epochs"]),  # Exact count from PSO
-        batch_size=int(best_params["batch_size"]),
-        patience=None,  # Disable early stopping
-        shuffle=False,  # TRD1 §8.1 L-1
+        X_combined_win,  # Use train data as "val" (no early stopping)
+        y_combined_win,
+        model_config,
     )
 
     logger.info("=" * 80)
@@ -530,8 +499,8 @@ def phase2_final_training(
     logger.info("=" * 80)
 
     # Save model
-    model_path = output_dir / "pso_lstm_model.h5"
-    model.save(str(model_path))
+    model_path = output_dir / "pso_lstm_model.pt"
+    model_wrapper.save_weights(str(model_path))
     logger.info(f"Model saved to {model_path}")
 
     # Save training history
@@ -597,7 +566,7 @@ def phase2_final_training(
             json.dump(feature_metadata["scaler_params"], f, indent=2)
         logger.info(f"Scaler parameters saved to {scaler_path}")
 
-    return model
+    return model_wrapper
 
 
 def main():
@@ -637,12 +606,17 @@ def main():
     args = parser.parse_args()
 
     try:
+        setup_logger(
+            log_file="logs/train_pso_lstm.log",
+            level="INFO",
+            mode=LogFileMode.OVERWRITE,
+        )
         # Load configuration
         config = load_config(args.config)
-        lookback = config.pso.lookback
+        lookback = config.lstm_baseline.lookback
 
         # Set all seeds for reproducibility (TRD1 §9.1)
-        set_all_seeds(config.pso.random_seed)
+        set_all_seeds(config.lstm_baseline.random_seed)
 
         # Load preprocessed data
         data = load_preprocessed_data(args.data_path)

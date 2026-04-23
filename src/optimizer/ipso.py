@@ -23,7 +23,6 @@ import numpy as np
 
 from .pso_core import StandardPSO
 from .particle import LB, UB, Particle, random_position, random_velocity
-from .fitness import CompositeFitness
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +71,8 @@ class IPSO(StandardPSO):
         if self._pre_update_hook(particle, t):
             return
 
-        r1 = self._rng.uniform(0.0, 1.0, size=5)
-        r2 = self._rng.uniform(0.0, 1.0, size=5)
+        r1 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
+        r2 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
 
         cognitive = self.c1 * r1 * (particle.pbest_position - particle.position)
         social = self.c2 * r2 * (self._gbest_position - particle.position)

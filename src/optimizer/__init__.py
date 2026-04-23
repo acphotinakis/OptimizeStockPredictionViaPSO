@@ -1,9 +1,8 @@
-from .particle import Particle, decode, LB, UB, LOOKBACK_CHOICES
+from .particle import Particle, decode, LB, UB, LOOKBACK_FIXED
 from .fitness import (
+    SpecCompliantFitness,
     CompositeFitness,
-    generate_signals,
-    sharpe_from_signals,
-    max_drawdown_from_signals,
+    compute_msw,
 )
 from .pso_core import StandardPSO
 from .ipso import IPSO
@@ -13,11 +12,10 @@ __all__ = [
     "decode",
     "LB",
     "UB",
-    "LOOKBACK_CHOICES",
+    "LOOKBACK_FIXED",
+    "SpecCompliantFitness",
     "CompositeFitness",
-    "generate_signals",
-    "sharpe_from_signals",
-    "max_drawdown_from_signals",
+    "compute_msw",
     "StandardPSO",
     "IPSO",
 ]

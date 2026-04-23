@@ -17,6 +17,20 @@ import torch
 logger = logging.getLogger(__name__)
 
 
+def set_seeds(seed: int = 42) -> None:
+    """
+    Set all random seeds for deterministic behavior.
+
+    Args:
+        seed: Random seed value (default: 42)
+    """
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For CUDA if available
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def build_lstm_windows(
     X: np.ndarray, y: np.ndarray, lookback: int = 20
 ) -> Tuple[np.ndarray, np.ndarray]:

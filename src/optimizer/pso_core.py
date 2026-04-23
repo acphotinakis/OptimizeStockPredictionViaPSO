@@ -72,7 +72,7 @@ class StandardPSO:
 
         self._rng = np.random.default_rng(seed)
         self._swarm: List[Particle] = []
-        self._gbest_position: np.ndarray = np.zeros(5)
+        self._gbest_position: np.ndarray = np.zeros(6)  # 6D search space
         self._gbest_fitness: float = float("inf")
         self.fitness_history: List[float] = []
         self.diversity_history: List[float] = []
@@ -156,8 +156,8 @@ class StandardPSO:
         if self._pre_update_hook(particle, 0):
             return
 
-        r1 = self._rng.uniform(0.0, 1.0, size=5)
-        r2 = self._rng.uniform(0.0, 1.0, size=5)
+        r1 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
+        r2 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
 
         cognitive = self.c1 * r1 * (particle.pbest_position - particle.position)
         social = self.c2 * r2 * (self._gbest_position - particle.position)
@@ -204,17 +204,29 @@ class StandardPSO:
             torch.cuda.empty_cache()
 
         params = particle.decode()
-        lookback = params["lookback"]
+        lookback = params["lookback"]  # Always 20 (fixed)
 
-        # Slice windows to the required lookback length
+        # Validate lookback matches data
+        if X_train.shape[1] < lookback:
+            raise ValueError(f"X_train lookback {X_train.shape[1]} < required {lookback}")
+
+        # Slice windows to the required lookback length (should be 20)
         X_tr = X_train[:, :lookback, :]
         X_vl = X_val[:, :lookback, :]
 
         if self.model_builder is None:
             raise RuntimeError("model_builder must be set before calling run().")
 
-        y_pred = self.model_builder(params, X_tr, y_train, X_vl, y_val)
-        fitness = self.fitness_fn(y_val, y_pred)
+        # model_builder must now return (y_pred, model) tuple for MSW computation
+        result = self.model_builder(params, X_tr, y_train, X_vl, y_val)
+        
+        if isinstance(result, tuple):
+            y_pred, model = result
+            fitness = self.fitness_fn(y_val, y_pred, model)
+        else:
+            # Backward compatibility: if only predictions returned
+            y_pred = result
+            fitness = self.fitness_fn(y_val, y_pred, None)
 
         # Phase 3: Clear GPU cache after evaluation
         if torch.cuda.is_available():
