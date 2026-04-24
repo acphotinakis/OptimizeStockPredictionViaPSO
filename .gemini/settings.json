@@ -1,0 +1,11 @@
+{
+  "skills": {
+    "disabled": [
+      "backend-developer",
+      "performance-engineer",
+      "debugger",
+      "architect-reviewer",
+      "api-designer"
+    ]
+  }
+}

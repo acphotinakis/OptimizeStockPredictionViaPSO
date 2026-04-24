@@ -56,12 +56,25 @@ def plot_equity_curve(
         dates = np.arange(len(capital))
 
     # Plot strategy
-    ax.plot(dates, capital, label=f"{model_type.upper()} Strategy", linewidth=1.5, color="blue")
+    ax.plot(
+        dates,
+        capital,
+        label=f"{model_type.upper()} Strategy",
+        linewidth=1.5,
+        color="blue",
+    )
 
     # Compute and plot benchmark
     initial_capital = capital[0]
     benchmark_capital = initial_capital * np.cumprod(1 + benchmark_returns)
-    ax.plot(dates, benchmark_capital, label="Buy & Hold", linestyle="--", alpha=0.7, color="orange")
+    ax.plot(
+        dates,
+        benchmark_capital,
+        label="Buy & Hold",
+        linestyle="--",
+        alpha=0.7,
+        color="orange",
+    )
 
     ax.set_xlabel("Date" if isinstance(dates[0], (pd.Timestamp, str)) else "Time")
     ax.set_ylabel("Portfolio Value ($)")
@@ -74,7 +87,7 @@ def plot_equity_curve(
     plt.savefig(output_path / "equity_curve.png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    logger.info("  ✓ Equity curve plot saved")
+    logger.info("   Equity curve plot saved")
 
 
 def plot_drawdown_chart(
@@ -127,7 +140,7 @@ def plot_drawdown_chart(
     plt.savefig(output_path / "drawdown.png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    logger.info("  ✓ Drawdown chart saved")
+    logger.info("   Drawdown chart saved")
 
 
 def plot_returns_distribution(
@@ -158,7 +171,13 @@ def plot_returns_distribution(
     # Add statistics
     mean_ret = np.mean(returns) * 100
     std_ret = np.std(returns) * 100
-    ax.axvline(mean_ret, color="green", linestyle=":", linewidth=1.5, label=f"Mean: {mean_ret:.3f}%")
+    ax.axvline(
+        mean_ret,
+        color="green",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"Mean: {mean_ret:.3f}%",
+    )
 
     ax.set_xlabel("Return (%)")
     ax.set_ylabel("Frequency")
@@ -170,7 +189,7 @@ def plot_returns_distribution(
     plt.savefig(output_path / "returns_distribution.png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    logger.info("  ✓ Returns distribution saved")
+    logger.info("   Returns distribution saved")
 
 
 def plot_signal_analysis(
@@ -236,7 +255,7 @@ def plot_signal_analysis(
     plt.savefig(output_path / "signal_analysis.png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    logger.info("  ✓ Signal analysis saved")
+    logger.info("   Signal analysis saved")
 
 
 def create_all_plots(
@@ -288,5 +307,5 @@ def create_all_plots(
         logger.warning(f"Failed to generate signal analysis: {e}")
 
     logger.info("=" * 80)
-    logger.info(f"✓ All plots saved to {output_dir}")
+    logger.info(f" All plots saved to {output_dir}")
     logger.info("=" * 80)

@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""
-Production Walk-Forward Validation Pipeline
 
-Executes expanding-window walk-forward validation with per-fold PSO optimization.
-
-ARCHITECTURE (WALK_FORWARD_PLAN.md):
-- Global preprocessing (once): cleaning, feature generation, wavelet
-- Per-fold processing: scaling, PSO, training, prediction
-- Expanding window (train grows each fold)
-- Independent scalers per fold
-- Inverse transform before metrics
-
-Usage:
-    python pipelines/walk_forward_evaluation.py \\
-        --data-path data/processed/features_unified/AAPL \\
-        --config config/default_config.yaml \\
-        --output-dir results/walk_forward/AAPL \\
-        --enable-pso
-
-TRD Compliance: TRD1 §8 (no leakage), TRD2 §7.4 (PSO per fold)
-Author: Production System
-Version: 1.0
-"""
 
 import argparse
 import json

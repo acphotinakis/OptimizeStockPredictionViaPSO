@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BacktestResults:
     """Container for complete backtesting results.
-    
+
     Stores all data needed for analysis, visualization, and comparison.
     """
 
@@ -86,10 +86,16 @@ def save_backtest_results(
         "statistical_metrics": results.statistical_metrics,
         "trading_metrics": results.trading_metrics,
         "summary": {
-            "total_return": float(results.equity_curve[-1] / results.equity_curve[0] - 1),
+            "total_return": float(
+                results.equity_curve[-1] / results.equity_curve[0] - 1
+            ),
             "final_capital": float(results.equity_curve[-1]),
             "n_trades": int(np.sum(np.abs(np.diff(results.signals)) > 0)),
-            "n_days": len(results.dates) if results.dates is not None else len(results.predictions),
+            "n_days": (
+                len(results.dates)
+                if results.dates is not None
+                else len(results.predictions)
+            ),
             "total_costs": float(np.sum(results.trade_costs)),
         },
     }
@@ -97,7 +103,7 @@ def save_backtest_results(
     metrics_path = output_dir / "backtest_results.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics_data, f, indent=2)
-    logger.info(f"  ✓ Metrics saved to {metrics_path.name}")
+    logger.info(f"   Metrics saved to {metrics_path.name}")
 
     # 2. Save time series (CSV)
     # Find the minimum length to ensure all arrays are aligned
@@ -109,12 +115,12 @@ def save_backtest_results(
         len(results.equity_curve),
         len(results.trade_costs),
     )
-    
+
     if results.dates is not None:
         dates_col = results.dates[:min_len]
     else:
         dates_col = pd.RangeIndex(min_len)
-    
+
     logger.info(f"Aligning time series to length {min_len}")
 
     equity_df = pd.DataFrame(
@@ -131,7 +137,7 @@ def save_backtest_results(
 
     equity_path = output_dir / "equity_curve.csv"
     equity_df.to_csv(equity_path, index=False)
-    logger.info(f"  ✓ Equity curve saved to {equity_path.name}")
+    logger.info(f"   Equity curve saved to {equity_path.name}")
 
     # 3. Save predictions separately (CSV)
     predictions_df = pd.DataFrame(
@@ -144,7 +150,7 @@ def save_backtest_results(
 
     pred_path = output_dir / "predictions.csv"
     predictions_df.to_csv(pred_path, index=False)
-    logger.info(f"  ✓ Predictions saved to {pred_path.name}")
+    logger.info(f"   Predictions saved to {pred_path.name}")
 
     # 4. Save metadata (YAML)
     metadata = {
@@ -160,12 +166,12 @@ def save_backtest_results(
     metadata_path = output_dir / "metadata.yaml"
     with open(metadata_path, "w") as f:
         yaml.dump(metadata, f, default_flow_style=False)
-    logger.info(f"  ✓ Metadata saved to {metadata_path.name}")
+    logger.info(f"   Metadata saved to {metadata_path.name}")
 
     # 5. Generate summary report (Markdown)
     report_path = output_dir / "backtest_report.md"
     generate_backtest_report(results, report_path)
-    logger.info(f"  ✓ Report saved to {report_path.name}")
+    logger.info(f"   Report saved to {report_path.name}")
 
     logger.info("=" * 80)
 
@@ -306,7 +312,9 @@ def load_backtest_results(
         timestamp=metrics_data["timestamp"],
         predictions=equity_df["prediction"].values,
         actual_returns=equity_df["actual_return"].values,
-        dates=pd.to_datetime(equity_df["date"]) if "date" in equity_df.columns else None,
+        dates=(
+            pd.to_datetime(equity_df["date"]) if "date" in equity_df.columns else None
+        ),
         signals=equity_df["signal"].values,
         strategy_returns=equity_df["strategy_return"].values,
         equity_curve=equity_df["equity"].values,
@@ -317,6 +325,6 @@ def load_backtest_results(
         backtest_config=metadata["backtest_config"],
     )
 
-    logger.info("✓ Backtest results loaded successfully")
+    logger.info(" Backtest results loaded successfully")
 
     return results

@@ -75,7 +75,7 @@ project_archive.zip
 
 .agent_skills
 
-.gemini
+# .gemini
 
 data/
 !src/data/
@@ -89,3 +89,5 @@ ac
 streamlit/
 
 # plans/
+
+plans/

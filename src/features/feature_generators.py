@@ -158,7 +158,7 @@ def generate_raw_features(
     # ========================================================================
     # CRITICAL: This computes y[t] = log(close[t+1] / close[t])
     # The last sample will be NaN and dropped in Step 4.
-    y_series = compute_canonical_target(df_target["close"], horizon=1)
+    y_sries = compute_canonical_target(df_target["close"], horizon=1)e
     y = y_series.values.astype(np.float32)
     
     # ========================================================================

@@ -85,8 +85,8 @@ def compute_log_return_all(dfs: Dict[str, pd.DataFrame]) -> None:
 
 def temporal_split_all(
     dfs: Dict[str, pd.DataFrame],
-    train_pct: float = 0.60,
-    val_pct: float = 0.20,
+    train_pct: float = 0.70,
+    val_pct: float = 0.10,
     test_pct: float = 0.20,
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
     """
@@ -198,10 +198,6 @@ def process_ticker_split_first(
     logger.info(f"[{ticker}] Sector ETF: {sector_etf}")
     logger.info(f"[{ticker}] Market context: {market_context}")
     logger.info(f"[{ticker}] Market internals: {market_internals}")
-
-    import sys
-
-    sys.exit(0)
 
     # Filter to available tickers per split
     def filter_universe(
@@ -628,27 +624,27 @@ def main() -> None:
     # ============================================================================
     # STAGE 2: SPY-ALIGNED REINDEXING (CRITICAL FOR CROSS-TICKER)
     # ============================================================================
-    logger.info("Stage 2: SPY-Aligned Reindexing (BEFORE split)")
+    # logger.info("Stage 2: SPY-Aligned Reindexing (BEFORE split)")
 
-    # CRITICAL: Align all tickers to SPY's index BEFORE splitting
-    # This ensures all tickers have the SAME date range
-    aligner = TickerAligner(benchmark_ticker="SPY")
-    aligned_df = aligner.align(dfs, fields=["open", "high", "low", "close", "volume"])
+    # # CRITICAL: Align all tickers to SPY's index BEFORE splitting
+    # # This ensures all tickers have the SAME date range
+    # aligner = TickerAligner(benchmark_ticker="SPY")
+    # aligned_df = aligner.align(dfs, fields=["open", "high", "low", "close", "volume"])
 
-    # Extract back to individual DataFrames
-    dfs_aligned = {}
-    tickers = aligned_df.columns.get_level_values("ticker").unique()
-    for ticker in tickers:
-        dfs_aligned[ticker] = aligned_df[ticker].copy()
-        # dfs_aligned[ticker].columns = dfs_aligned[ticker].columns.droplevel(0)  # Remove ticker level
-        logger.info(
-            f"[{ticker}] Aligned: {len(dfs_aligned[ticker])} samples, "
-            f"NaN: {dfs_aligned[ticker].isna().sum().sum()}"
-        )
+    # # Extract back to individual DataFrames
+    # dfs_aligned = {}
+    # tickers = aligned_df.columns.get_level_values("ticker").unique()
+    # for ticker in tickers:
+    #     dfs_aligned[ticker] = aligned_df[ticker].copy()
+    #     # dfs_aligned[ticker].columns = dfs_aligned[ticker].columns.droplevel(0)  # Remove ticker level
+    #     logger.info(
+    #         f"[{ticker}] Aligned: {len(dfs_aligned[ticker])} samples, "
+    #         f"NaN: {dfs_aligned[ticker].isna().sum().sum()}"
+    #     )
 
-    dfs = dfs_aligned  # Replace with aligned data
+    # dfs = dfs_aligned  # Replace with aligned data
 
-    logger.info(f"All tickers aligned to SPY index: {len(dfs)} tickers")
+    # logger.info(f"All tickers aligned to SPY index: {len(dfs)} tickers")
 
     # ============================================================================
     # STAGE 3: COMPUTE LOG_RETURN (CAUSAL OPERATION)

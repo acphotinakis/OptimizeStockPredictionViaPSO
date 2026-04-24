@@ -243,9 +243,10 @@ class XGBoostConfig:
     max_bin: int  # Histogram bins
     n_jobs: int  # Parallel threads
 
-    random_seed: int  # Reproducibility seed
+    random_state: int  # Reproducibility seed
 
     importance_type: str  # Feature importance metric (diagnostic)
+    verbosity: int
 
 
 # =========================
@@ -317,7 +318,7 @@ class FitnessConfig:
 
 @dataclass
 class PSOConfig:
-    
+
     enabled: bool
     n_particles: int
     n_iterations: int
@@ -331,8 +332,6 @@ class PSOConfig:
     fitness: FitnessConfig
 
     checkpoint_dir: str
-
-
 
 
 # =========================

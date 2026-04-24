@@ -23,14 +23,14 @@ Version: 2.1.0 CONFIG-COMPLIANT
 
 import logging
 from typing import Any, Dict, List, Optional, Tuple
-
+import json
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from .lstm_model import LSTMModel, LSTMNetwork
+from .lstm_model import LSTMModel
 from .utils import set_seeds
 
 logger = logging.getLogger(__name__)
@@ -48,12 +48,6 @@ class LSTMTrainer:
 
     Example:
         >>> config = {
-        ...     "lstm_units_1": 128,
-        ...     "lstm_units_2": 64,
-        ...     "dropout_rate": 0.2,
-        ...     "activation": "relu",
-        ...     "output_units": 1,
-        ...     "output_activation": "linear",
         ...     "optimizer": "adam",
         ...     "learning_rate": 0.001,
         ...     "loss": "mse",
@@ -75,7 +69,13 @@ class LSTMTrainer:
         >>> metrics = model.evaluate(X_test, y_test)
     """
 
-    def __init__(self, config: Dict, seed: int = 42, device: Optional[str] = None):
+    def __init__(
+        self,
+        lstm_model: LSTMModel,
+        config: Dict,
+        seed: int = 42,
+        device: Optional[str] = None,
+    ):
         """
         Initialize LSTM trainer.
 
@@ -89,6 +89,8 @@ class LSTMTrainer:
         self.device = (
             device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         )
+
+        self.lstm_model = lstm_model
 
         # AMP scaler (lazy init)
         self._scaler: Optional[torch.cuda.amp.GradScaler] = None
@@ -175,12 +177,7 @@ class LSTMTrainer:
         self._validate_inputs(X_train, y_train, "train")
         self._validate_inputs(X_val, y_val, "val")
 
-        input_size = X_train.shape[2]
-
         # Extract hyperparameters from config
-        lstm_units_1 = int(self.config["lstm_units_1"])
-        lstm_units_2 = int(self.config["lstm_units_2"])
-        dropout_rate = float(self.config["dropout_rate"])
         learning_rate = float(self.config["learning_rate"])
         epochs = int(self.config["epochs"])
         batch_size = int(self.config["batch_size"])
@@ -196,12 +193,11 @@ class LSTMTrainer:
         logger.info("=" * 80)
         logger.info("STARTING LSTM TRAINING")
         logger.info("=" * 80)
-        logger.info(f"Architecture: {lstm_units_1} → {lstm_units_2} → 1")
+        logger.info(f"LSTM Model {self.lstm_model}")
         logger.info(f"Training samples: {len(X_train)}")
         logger.info(f"Validation samples: {len(X_val)}")
-        logger.info(f"Input features: {input_size}")
         logger.info(f"Epochs: {epochs}, Batch size: {batch_size}, Shuffle: {shuffle}")
-        logger.info(f"Learning rate: {learning_rate}, Dropout: {dropout_rate}")
+        logger.info(f"Learning rate: {learning_rate}")
         logger.info(f"Optimizer: {self.config.get('optimizer', 'adam')}")
         logger.info(f"Loss: {self.config.get('loss', 'mse')}")
         logger.info(
@@ -212,22 +208,7 @@ class LSTMTrainer:
         )
 
         # Build model wrapper and network
-        model_wrapper = LSTMModel(seed=self.seed, device=self.device)
-        model_wrapper.build_model(
-            config={
-                "lstm_units_1": lstm_units_1,
-                "lstm_units_2": lstm_units_2,
-                "dropout_rate": dropout_rate,
-                "output_units": int(self.config.get("output_units", 1)),
-                "activation": str(self.config.get("activation", "relu")),
-                "output_activation": str(
-                    self.config.get("output_activation", "linear")
-                ),
-            },
-            input_size=input_size,
-        )
-        model = model_wrapper.model
-
+        model = self.lstm_model.model
         if model is None:
             raise RuntimeError("Failed to build model: model_wrapper.model is None")
 
@@ -407,6 +388,18 @@ class LSTMTrainer:
                 f"Best val_loss={best_val_loss:.6f} @ epoch {best_epoch+1}"
             )
 
+        # ============================
+        # HARD FREEZE (CRITICAL)
+        # ============================
+        model.eval()
+
+        for param in model.parameters():
+            param.requires_grad = False
+
+        logger.info("MODEL HARD-FROZEN (requires_grad=False)")
+
+        # ============================
+
         logger.info("=" * 80)
         logger.info("TRAINING COMPLETE")
         logger.info("=" * 80)
@@ -416,7 +409,7 @@ class LSTMTrainer:
         logger.info(f"Final train loss: {history['train_loss'][-1]:.6f}")
         logger.info(f"Final val loss: {history['val_loss'][-1]:.6f}")
 
-        return model_wrapper, history
+        return self.lstm_model, history
 
     def _validate_inputs(self, X: np.ndarray, y: np.ndarray, split_name: str) -> None:
         """
@@ -471,3 +464,46 @@ class LSTMTrainer:
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")
+
+    def __str__(self) -> str:
+
+        es_cfg = self._resolve_early_stopping()
+
+        model = self.lstm_model.model
+        if model is not None:
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(
+                p.numel() for p in model.parameters() if p.requires_grad
+            )
+        else:
+            total_params = 0
+            trainable_params = 0
+
+        payload = {
+            "device": self.device,
+            "seed": self.seed,
+            "optimizer": self.config.get("optimizer", "adam"),
+            "loss": self.config.get("loss", "mse"),
+            "learning_rate": self.config.get("learning_rate"),
+            "batch_size": self.config.get("batch_size"),
+            "epochs": self.config.get("epochs"),
+            "shuffle": self.config.get("shuffle", False),
+            "grad_clip": self.config.get("grad_clip", 0.0),
+            "use_amp": self.config.get("use_amp", False),
+            "accumulation_steps": self.config.get("accumulation_steps", 1),
+            "early_stopping": {
+                "enabled": es_cfg["enabled"],
+                "monitor": es_cfg["monitor"],
+                "patience": es_cfg["patience"],
+                "restore_best_weights": es_cfg["restore_best_weights"],
+            },
+            "model": {
+                "total_params": total_params,
+                "trainable_params": trainable_params,
+            },
+        }
+
+        return json.dumps(payload, indent=2)
+
+    def __repr__(self) -> str:
+        return self.__str__()

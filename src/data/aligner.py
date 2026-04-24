@@ -77,7 +77,7 @@ class TickerAligner:
             logger.error("SPY index contains duplicates")
             raise ValueError("SPY index contains duplicate timestamps")
 
-        master_index = spy.index
+        master_index = spy.index.values
 
         logger.info("SPY canonical index established | rows=%d", len(master_index))
 
@@ -90,7 +90,7 @@ class TickerAligner:
 
             logger.info("Aligning ticker=%s | rows_before=%d", ticker, len(df))
 
-            df = df.copy()
+            df = dfs[ticker]
 
             # ensure datetime index
             if not isinstance(df.index, pd.DatetimeIndex):
@@ -108,7 +108,7 @@ class TickerAligner:
             if missing_cols:
                 logger.warning("Ticker=%s missing columns=%s", ticker, missing_cols)
 
-            df = df.reindex(columns=fields)
+            df = df.reindex(master_index)
 
             before_rows = len(df)
 
@@ -186,7 +186,7 @@ class TickerAligner:
         logger.info("Saving aligned dataset | tickers=%d", len(tickers))
 
         for ticker in tickers:
-            df = aligned_df[ticker].copy()
+            df = aligned_df[ticker]
 
             file_path = output_dir / f"{ticker}.parquet"
 

@@ -29,6 +29,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import yaml
@@ -37,42 +38,133 @@ import yaml
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.models import LSTMModel, LSTMTrainer, build_lstm_windows, set_seeds
+from src.models import LSTMModel, LSTMTrainer, set_seeds
+from src.data.windowing import build_lstm_windows
 from src.utils.config_loader import Config, load_config
 from src.utils.logger import LogFileMode, setup_logger
 
 logger = logging.getLogger(__name__)
 
+MODEL_TYPE = "lstm_baseline"
+
 
 def load_feature_data(data_path: Path) -> dict:
     """
-    Load preprocessed features from canonical feature pipeline.
+    Load preprocessed features from canonical feature pipeline with full diagnostics.
 
     Args:
         data_path: Directory containing X_train.npy, y_train.npy, etc.
+        config: Optional config dict for dataset/version metadata.
 
     Returns:
-        Dictionary with train/val/test splits
+        Dictionary with train/val/test splits.
     """
-    logger.info(f"Loading preprocessed data from {data_path}")
+    logger.info(f"Resolving dataset path: {data_path.resolve()}")
 
+    splits = ["train", "val", "test"]
     data = {}
-    for split in ["train", "val", "test"]:
+
+    total_samples = 0
+    feature_dim = None
+
+    logger.info(f"Expected splits: {splits}")
+
+    for split in splits:
         X_path = data_path / f"X_{split}.npy"
         y_path = data_path / f"y_{split}.npy"
 
+        # ----------------------------
+        # File existence + metadata
+        # ----------------------------
         if not X_path.exists() or not y_path.exists():
             raise FileNotFoundError(
                 f"Missing {split} data: {X_path} or {y_path}\n"
                 f"Run canonical feature pipeline first."
             )
 
-        data[f"X_{split}"] = np.load(X_path)
-        data[f"y_{split}"] = np.load(y_path)
+        x_size_mb = X_path.stat().st_size / 1e6
+        y_size_mb = y_path.stat().st_size / 1e6
+
+        logger.info(f"[{split}] Loading files:")
+        logger.info(f"  X: {X_path} ({x_size_mb:.2f} MB)")
+        logger.info(f"  y: {y_path} ({y_size_mb:.2f} MB)")
+
+        # ----------------------------
+        # Load data
+        # ----------------------------
+        X = np.load(X_path)
+        y = np.load(y_path)
+
+        data[f"X_{split}"] = X
+        data[f"y_{split}"] = y
+
+        # ----------------------------
+        # Shape diagnostics
+        # ----------------------------
+        logger.info(
+            f"[{split}] Shapes -> "
+            f"X: {X.shape} (samples={X.shape[0]}, features={X.shape[1]}), "
+            f"y: {y.shape}"
+        )
+
+        total_samples += X.shape[0]
+
+        if feature_dim is None:
+            feature_dim = X.shape[1]
+        elif feature_dim != X.shape[1]:
+            raise ValueError(
+                f"Feature dimension mismatch in {split}: "
+                f"expected {feature_dim}, got {X.shape[1]}"
+            )
+
+        # ----------------------------
+        # dtype checks
+        # ----------------------------
+        logger.info(f"[{split}] dtypes -> X: {X.dtype}, y: {y.dtype}")
+
+        # ----------------------------
+        # Basic stats
+        # ----------------------------
+        logger.info(
+            f"[{split}] X stats -> "
+            f"min={X.min():.6f}, max={X.max():.6f}, mean={X.mean():.6f}, std={X.std():.6f}"
+        )
 
         logger.info(
-            f"  {split}: X={data[f'X_{split}'].shape}, y={data[f'y_{split}'].shape}"
+            f"[{split}] y stats -> "
+            f"min={y.min():.6f}, max={y.max():.6f}, mean={y.mean():.6f}, std={y.std():.6f}"
         )
+
+        # ----------------------------
+        # Missing / invalid values
+        # ----------------------------
+        nan_x = np.isnan(X).sum()
+        nan_y = np.isnan(y).sum()
+        inf_x = np.isinf(X).sum()
+        inf_y = np.isinf(y).sum()
+
+        logger.info(
+            f"[{split}] NaN/Inf -> "
+            f"NaN(X)={nan_x}, NaN(y)={nan_y}, Inf(X)={inf_x}, Inf(y)={inf_y}"
+        )
+
+        # ----------------------------
+        # Label distribution / range
+        # ----------------------------
+        logger.info(f"[{split}] y range: [{y.min():.6f}, {y.max():.6f}]")
+
+        # ----------------------------
+        # Sequence sanity (time series assumption)
+        # ----------------------------
+        logger.info(f"[{split}] sequence length (timesteps): {X.shape[1]}")
+
+    # ----------------------------
+    # Global dataset summary
+    # ----------------------------
+    logger.info("==== Dataset Summary ====")
+    logger.info(f"Total samples across splits: {total_samples}")
+    logger.info(f"Feature dimension: {feature_dim}")
+    logger.info(f"Splits loaded successfully: {list(data.keys())}")
 
     return data
 
@@ -84,7 +176,7 @@ def train_baseline_lstm(
     y_val: np.ndarray,
     config: Config,
     output_dir: Path,
-) -> LSTMModel:
+) -> None:
     """
     Train Baseline LSTM with fixed hyperparameters.
 
@@ -127,64 +219,73 @@ def train_baseline_lstm(
     logger.info(f"  X_train: {X_train_win.shape}, y_train: {y_train_win.shape}")
     logger.info(f"  X_val:   {X_val_win.shape}, y_val:   {y_val_win.shape}")
 
-    # Create model with FIXED hyperparameters
-    logger.info("Creating Baseline LSTM with FIXED hyperparameters:")
-    logger.info(f"  Units L1: {lstm_config.lstm_units_1}")
-    logger.info(f"  Units L2: {lstm_config.lstm_units_2}")
-    logger.info(f"  Dropout:  {lstm_config.dropout_rate }")
-    logger.info(f"  LR:       {lstm_config.learning_rate}")
-    logger.info(f"  Batch:    {lstm_config.batch_size}")
-    logger.info(f"  Epochs:   {lstm_config.epochs}")
-    logger.info(f"  Shuffle:  {lstm_config.shuffle}  <-- MUST BE FALSE")
-
-    # Model configuration dict
+    # Model configuration dict (for metadata persistence)
     model_config = {
-        "input_shape": (lookback, X_train.shape[1]),
+        "input_size": X_train_win.shape[2],
         "lstm_units_1": lstm_config.lstm_units_1,
         "lstm_units_2": lstm_config.lstm_units_2,
         "dropout_rate": lstm_config.dropout_rate,
-        "activation": lstm_config.activation,
         "output_units": lstm_config.output_units,
+        "activation": lstm_config.activation,
         "output_activation": lstm_config.output_activation,
-        "learning_rate": lstm_config.learning_rate,
-        "loss": lstm_config.loss,
     }
 
     # Create model
-    model = LSTMModel(seed=seed)
+    lstm_model_wrapper = LSTMModel(seed=seed)
+    lstm_network, lstm_model = lstm_model_wrapper.build_model(model_config)
+
+    logger.info("========== LSTM MODEL BUILT ==========")
+    logger.info(lstm_model)
+    logger.info("======================================")
+
+    # Build unified trainer config dict — ALL hyperparameters from YAML
+    trainer_config = {
+        # Training
+        "optimizer": lstm_config.optimizer,
+        "learning_rate": lstm_config.learning_rate,
+        "loss": lstm_config.loss,
+        "epochs": lstm_config.epochs,
+        "batch_size": lstm_config.batch_size,
+        "shuffle": lstm_config.shuffle,
+        # Advanced training
+        "grad_clip": lstm_config.grad_clip,
+        "use_amp": lstm_config.use_amp,
+        "accumulation_steps": lstm_config.accumulation_steps,
+        # Early stopping
+        "early_stopping": {
+            "enabled": lstm_config.early_stopping.enabled,
+            "monitor": lstm_config.early_stopping.monitor,
+            "patience": lstm_config.early_stopping.patience,
+            "restore_best_weights": lstm_config.early_stopping.restore_best_weights,
+        },
+    }
+
+    # create trainer and run
+    trainer = LSTMTrainer(lstm_model=lstm_model, config=trainer_config, seed=seed)
+
+    logger.info("========== LSTM TRAINER BUILT ==========")
+    logger.info(trainer)
+    logger.info("======================================")
 
     # Train with early stopping
     logger.info("=" * 80)
     logger.info("TRAINING (SINGLE FIT - NO RETRAINING)")
     logger.info("=" * 80)
 
-    trainer = LSTMTrainer(model_config, seed=seed)
-
     model, history = trainer.train(
         X_train_win,
         y_train_win,
         X_val_win,
         y_val_win,
-        epochs=lstm_config.epochs,
-        batch_size=lstm_config.batch_size,
-        patience=lstm_config.early_stopping.patience,
-        shuffle=False,  # MUST be False
-        lstm_units_1=lstm_config.lstm_units_1,
-        lstm_units_2=lstm_config.lstm_units_2,
-        dropout_rate=lstm_config.dropout_rate,
-        learning_rate=lstm_config.learning_rate,
     )
 
     logger.info("=" * 80)
     logger.info("TRAINING COMPLETE - MODEL NOW FROZEN")
     logger.info("=" * 80)
-    logger.info("⚠️  This model will NEVER be retrained")
-    logger.info("⚠️  Walk-forward evaluation will use THIS frozen model")
-    logger.info("=" * 80)
 
     # Save model
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / "baseline_lstm_model.h5"
+    model_path = output_dir / "baseline_lstm_model.pt"
     model.save(str(model_path))
     logger.info(f"Model saved to {model_path}")
 
@@ -227,70 +328,116 @@ def train_baseline_lstm(
         json.dump(metadata, f, indent=4)
     logger.info(f"Metadata saved to {metadata_path}")
 
-    return model
+    # return model
+
+
+def build_output_dir(ticker: str) -> Path:
+    return PROJECT_ROOT / "results" / "train" / ticker / MODEL_TYPE / "v1"
 
 
 def main():
-    """Main entry point."""
     parser = argparse.ArgumentParser(
         description="Train Baseline LSTM (static, single-fit)"
     )
-    parser.add_argument(
-        "--data-path",
-        type=Path,
-        required=True,
-        help="Path to preprocessed features directory",
-    )
-    parser.add_argument(
-        "--ticker",
-        type=str,
-        required=True,
-        help="String ticker to train",
-    )
+
     parser.add_argument(
         "--config",
         type=Path,
         default=PROJECT_ROOT / "config" / "default_config.yaml",
-        help="Path to configuration file",
     )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=PROJECT_ROOT / "results" / "canonical" / "models" / "baseline_lstm",
-        help="Directory to save trained model",
+
+    # -------------------------
+    # Mode selection (STRICT)
+    # -------------------------
+    group = parser.add_mutually_exclusive_group(required=True)
+
+    group.add_argument(
+        "--train-all",
+        action="store_true",
+        help="Train all tickers",
     )
+
+    group.add_argument(
+        "--ticker",
+        type=str,
+        help="Single ticker to train",
+    )
+
+    # -------------------------
+    # Paths
+    # -------------------------
+    parser.add_argument("--features-path", type=Path)
+    parser.add_argument("--data-path", type=Path)
 
     args = parser.parse_args()
 
     try:
-        setup_logger(
-            log_file="logs/train_baseline_lstm.log",
-            level="INFO",
-            mode=LogFileMode.OVERWRITE,
-        )
-        # Load configuration
         config = load_config(args.config)
-        # Load preprocessed data
-        data = load_feature_data(args.data_path)
 
-        output_dir = args.output_dir / args.ticker
+        # ==========================================================
+        # SINGLE TICKER MODE
+        # ==========================================================
+        if args.ticker:
+            if args.data_path is None:
+                raise ValueError("--data-path required for single ticker mode")
 
-        # Train model (ONCE)
-        model = train_baseline_lstm(
-            X_train=data["X_train"],
-            y_train=data["y_train"],
-            X_val=data["X_val"],
-            y_val=data["y_val"],
-            config=config,
-            output_dir=output_dir,
-        )
+            logger.info(f"Training single ticker: {args.ticker}")
+
+            data = load_feature_data(args.data_path)
+
+            output_dir = build_output_dir(args.ticker)
+
+            setup_logger(
+                log_file=f"{output_dir}/{args.ticker}_train.log",
+                level="INFO",
+                mode=LogFileMode.OVERWRITE,
+            )
+
+            train_baseline_lstm(
+                X_train=data["X_train"],
+                y_train=data["y_train"],
+                X_val=data["X_val"],
+                y_val=data["y_val"],
+                config=config,
+                output_dir=output_dir,
+            )
+
+        # ==========================================================
+        # MULTI TICKER MODE
+        # ==========================================================
+        elif args.train_all:
+            if args.features_path is None:
+                raise ValueError("--features-path required for --train-all")
+
+            tickers = [d.name for d in args.features_path.iterdir() if d.is_dir()]
+
+            logger.info(f"Training ALL tickers: {tickers}")
+
+            for ticker in tickers:
+                logger.info("=" * 80)
+                logger.info(f"Training ticker: {ticker}")
+                logger.info("=" * 80)
+
+                ticker_path = args.features_path / ticker
+                data = load_feature_data(ticker_path)
+
+                output_dir = build_output_dir(ticker)
+                setup_logger(
+                    log_file=f"{output_dir}/{ticker}_train.log",
+                    level="INFO",
+                    mode=LogFileMode.OVERWRITE,
+                )
+                train_baseline_lstm(
+                    X_train=data["X_train"],
+                    y_train=data["y_train"],
+                    X_val=data["X_val"],
+                    y_val=data["y_val"],
+                    config=config,
+                    output_dir=output_dir,
+                )
 
         logger.info("=" * 80)
-        logger.info("BASELINE LSTM TRAINING SUCCESSFUL")
-        logger.info("=" * 80)
-        logger.info(" Model trained and frozen")
-        logger.info(" Model saved to disk")
-        logger.info(" Ready for walk-forward evaluation")
+        logger.info("TRAINING COMPLETE")
         logger.info("=" * 80)
 
         sys.exit(0)

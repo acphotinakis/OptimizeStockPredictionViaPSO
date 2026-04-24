@@ -1,275 +1,54 @@
 """
 XGBoost Regression Model for Financial Time-Series
 
-Production-grade implementation of XGBoost regressor for stock return prediction.
-Strictly consumes features from the unified feature pipeline with NO internal
-feature engineering or transformation.
+Production-grade inference wrapper around xgboost.XGBRegressor.
+Training logic has been moved to XGBoostTrainer; this class owns
+prediction, evaluation, and persistence only.
 
 TRD Compliance:
 - Tabular input format (N, F_selected)
 - No feature engineering in model layer
-- No scaler fitting in model layer
-- No feature selection in model layer
+- No normalization in model layer
 - Regression objective (next-period return)
 
-Paper Attribution:
-- Zeng et al. 2025: XGBoost baseline comparison
-- TRD1-3: Feature pipeline compatibility
-
 Author: System Architect
-Version: 1.0.0 UNIFIED CANONICAL
+Version: 2.0.0 REFACTORED
 """
 
-import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import xgboost as xgb
 
 logger = logging.getLogger(__name__)
 
-from tqdm import tqdm
-
-
-class TQDMCallback(xgb.callback.TrainingCallback):
-    def __init__(self, total_rounds: int):
-        self.pbar = tqdm(total=total_rounds, desc="Training")
-
-    def after_iteration(self, model, epoch, evals_log):
-        self.pbar.update(1)
-        return False  # continue training
-
-    def after_training(self, model):
-        self.pbar.close()
-        return model
-
 
 class XGBoostModel:
     """
-    Production XGBoost regressor for financial time-series.
+    Production XGBoost regressor inference wrapper.
 
-    Architecture:
-        - Gradient boosted decision trees
-        - Regression objective (next-period return)
-        - Early stopping on validation set
-        - Feature importance tracking
-
-    Constraints:
-        - NO feature engineering (consumes pipeline output)
-        - NO normalization (expects pre-normalized features)
-        - NO feature selection (expects selected features)
-        - Temporal validation split only
+    This class does NOT own training logic. Use XGBoostTrainer to train,
+    then this wrapper for prediction, evaluation, and I/O.
 
     Example:
-        >>> model = XGBoostModel(config, seed=42)
-        >>> model.train(X_train, y_train, X_val, y_val)
+        >>> model = XGBoostModel(trained_regressor=xgb_regressor)
         >>> predictions = model.predict(X_test)
         >>> metrics = model.evaluate(X_test, y_test)
+        >>> model.save("model.json")
     """
 
     def __init__(
         self,
-        config: Dict,
-        seed: int = 42,
+        booster: xgb.Booster,
+        feature_names: List[str],
+        feature_importance: Dict[str, float],
+        name: str = "XGBoost-v1.0",
     ):
-        """
-        Initialize XGBoost model.
-
-        Args:
-            config: Configuration dictionary with:
-                - objective: 'reg:squarederror'
-                - n_estimators: int (e.g., 200)
-                - max_depth: int (e.g., 4)
-                - learning_rate: float (e.g., 0.01)
-                - subsample: float (e.g., 0.7)
-                - colsample_bytree: float (e.g., 0.6)
-                - min_child_weight: float (e.g., 5)
-                - gamma: float (e.g., 0.1)
-                - reg_alpha: float (L1 regularization)
-                - reg_lambda: float (L2 regularization)
-                - early_stopping_rounds: int (e.g., 50)
-            seed: Random seed for reproducibility
-        """
-        self.config = config
-        self.seed = seed
-        self.model: Optional[xgb.XGBRegressor] = None
-        self.feature_names: Optional[List[str]] = None
-        self.feature_importance: Optional[Dict[str, float]] = None
-        self.evals_result: Optional[Dict] = None
-        self.best_iteration: int = 0
-
-        logger.info("XGBoostModel initialized")
-        logger.info(f"Config: {config}")
-
-    def _build_model(self, callbacks: Optional[List] = None) -> xgb.XGBRegressor:
-        """
-        Build XGBoost regressor from configuration.
-
-        Args:
-            callbacks: Optional list of callbacks to include in the model.
-
-        Returns:
-            Initialized XGBRegressor
-        """
-        # Extract parameters with defaults
-        params = {
-            "objective": self.config.get("objective", "reg:squarederror"),
-            "n_estimators": int(self.config.get("n_estimators", 200)),
-            "max_depth": int(self.config.get("max_depth", 4)),
-            "learning_rate": float(self.config.get("learning_rate", 0.01)),
-            "subsample": float(self.config.get("subsample", 0.7)),
-            "colsample_bytree": float(self.config.get("colsample_bytree", 0.6)),
-            "min_child_weight": float(self.config.get("min_child_weight", 5)),
-            "gamma": float(self.config.get("gamma", 0.1)),
-            "reg_alpha": float(self.config.get("reg_alpha", 0.0)),
-            "reg_lambda": float(self.config.get("reg_lambda", 1.0)),
-            "random_state": self.seed,
-            "n_jobs": -1,  # Use all cores
-            "verbosity": 0,  # Suppress XGBoost internal logging
-            "early_stopping_rounds": int(self.config.get("early_stopping_rounds", 50)),
-            "callbacks": callbacks,
-        }
-
-        # Tree method (GPU if available)
-        tree_method = self.config.get("tree_method", "hist")
-        if tree_method in ["gpu_hist", "hist"]:
-            params["tree_method"] = tree_method
-
-        # Max bin for memory control
-        if "max_bin" in self.config:
-            params["max_bin"] = int(self.config["max_bin"])
-
-        logger.info("Building XGBoost regressor:")
-        logger.info(f"  Objective: {params['objective']}")
-        logger.info(f"  Estimators: {params['n_estimators']}")
-        logger.info(f"  Max depth: {params['max_depth']}")
-        logger.info(f"  Learning rate: {params['learning_rate']}")
-        logger.info(f"  Tree method: {params.get('tree_method', 'auto')}")
-        logger.info(f"  Early stopping rounds: {params['early_stopping_rounds']}")
-
-        return xgb.XGBRegressor(**params)
-
-    def train(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-        feature_names: Optional[List[str]] = None,
-    ) -> "XGBoostModel":
-        """
-        Train XGBoost model with early stopping.
-
-        Args:
-            X_train: Training features (N_train, F) - TABULAR
-            y_train: Training targets (N_train,)
-            X_val: Validation features (N_val, F)
-            y_val: Validation targets (N_val,)
-            feature_names: Optional feature names for interpretability
-
-        Returns:
-            Self (for method chaining)
-
-        Raises:
-            ValueError: If input validation fails
-        """
-        # Validate inputs
-        self._validate_inputs(X_train, y_train, "train")
-        self._validate_inputs(X_val, y_val, "val")
-
-        if X_train.shape[1] != X_val.shape[1]:
-            raise ValueError(
-                f"Feature dimension mismatch: train={X_train.shape[1]}, "
-                f"val={X_val.shape[1]}"
-            )
-
-        logger.info("=" * 80)
-        logger.info("STARTING XGBOOST TRAINING")
-        logger.info("=" * 80)
-        logger.info(f"Training samples: {len(X_train)}")
-        logger.info(f"Validation samples: {len(X_val)}")
-        logger.info(f"Features: {X_train.shape[1]}")
-
-        # Store feature names
-        if feature_names is not None:
-            self.feature_names = feature_names
-            if len(feature_names) != X_train.shape[1]:
-                logger.warning(
-                    f"Feature names count ({len(feature_names)}) != "
-                    f"feature dimension ({X_train.shape[1]}). Ignoring names."
-                )
-                self.feature_names = None
-
-        # Build callbacks
-        n_estimators = int(self.config.get("n_estimators", 200))
-        tqdm_callback = TQDMCallback(n_estimators)
-        callbacks = [tqdm_callback]
-
-        # Build model with callbacks and early stopping rounds
-        self.model = self._build_model(callbacks=callbacks)
-
-        # Train
-        eval_set = [(X_train, y_train), (X_val, y_val)]
-
-        logger.info("Training...")
-
-        self.model.fit(
-            X_train,
-            y_train,
-            eval_set=eval_set,
-            verbose=False,
-        )
-
-        # Store results
-        self.evals_result = self.model.evals_result()
-        self.best_iteration = self.model.best_iteration
-
-        # Extract feature importance
-        if self.model.feature_importances_ is not None:
-            importance_values = self.model.feature_importances_
-
-            if self.feature_names and len(self.feature_names) == len(importance_values):
-                self.feature_importance = dict(
-                    zip(self.feature_names, importance_values)
-                )
-            else:
-                self.feature_importance = {
-                    f"f{i}": v for i, v in enumerate(importance_values)
-                }
-
-            # Log top features
-            top_features = sorted(self.feature_importance.items(), key=lambda x: -x[1])[
-                :10
-            ]
-
-            logger.info("\nTop 10 important features:")
-            for feat, imp in top_features:
-                logger.info(f"  {feat}: {imp:.6f}")
-
-        logger.info("=" * 80)
-        logger.info("TRAINING COMPLETE")
-        logger.info("=" * 80)
-        logger.info(f"Best iteration: {self.best_iteration}")
-
-        if self.evals_result:
-            # XGBoost Scikit-Learn API uses validation_0, validation_1 etc.
-            # If there are multiple metrics, we check for rmse (default)
-            train_key = "validation_0"
-            val_key = "validation_1"
-            
-            if train_key in self.evals_result:
-                # Get the first available metric if rmse is not explicitly there
-                metric = "rmse" if "rmse" in self.evals_result[train_key] else list(self.evals_result[train_key].keys())[0]
-                train_rmse = self.evals_result[train_key][metric][-1]
-                logger.info(f"Final train {metric}: {train_rmse:.6f}")
-            
-            if val_key in self.evals_result:
-                metric = "rmse" if "rmse" in self.evals_result[val_key] else list(self.evals_result[val_key].keys())[0]
-                val_rmse = self.evals_result[val_key][metric][-1]
-                logger.info(f"Final val {metric}: {val_rmse:.6f}")
-
-        return self
+        self.booster = booster
+        self.feature_names = feature_names
+        self.feature_importance = feature_importance
+        self.name = name
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -284,14 +63,13 @@ class XGBoostModel:
         Raises:
             RuntimeError: If model not trained
         """
-        if self.model is None:
-            raise RuntimeError("Model not trained. Call train() first.")
+        if self.booster is None:
+            raise RuntimeError("Model not trained. Use XGBoostTrainer to train.")
 
         self._validate_inputs(X, None, "predict")
-
-        predictions = self.model.predict(X)
-
-        return predictions.astype(np.float32)
+        dmatrix = xgb.DMatrix(X, feature_names=self.feature_names)
+        preds = self.booster.predict(dmatrix)
+        return preds.astype(np.float32)
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
         """
@@ -302,22 +80,19 @@ class XGBoostModel:
             y_test: Test targets (N_test,)
 
         Returns:
-            Dictionary of metrics (mse, mae, rmse)
+            Dictionary of metrics (mse, mae, rmse, directional_accuracy)
         """
-        if self.model is None:
-            raise RuntimeError("Model not trained. Call train() first.")
+        if self.booster is None:
+            raise RuntimeError("Model not trained. Use XGBoostTrainer to train.")
 
         self._validate_inputs(X_test, y_test, "test")
 
-        # Predict
-        y_pred = self.predict(X_test)
+        y_pred = self.booster.predict(X_test)
 
-        # Compute metrics
         mse = float(np.mean((y_test - y_pred) ** 2))
         mae = float(np.mean(np.abs(y_test - y_pred)))
         rmse = float(np.sqrt(mse))
 
-        # Directional accuracy (optional)
         correct_direction = np.sum(np.sign(y_test) == np.sign(y_pred))
         directional_accuracy = float(correct_direction / len(y_test))
 
@@ -339,21 +114,19 @@ class XGBoostModel:
 
         return metrics
 
-    def save_model(self, filepath: str) -> None:
+    def save(self, filepath: str) -> None:
         """Save model to disk (XGBoost JSON format)."""
-        if self.model is None:
-            raise RuntimeError("Model not trained. Call train() first.")
-
-        self.model.save_model(filepath)
+        if self.booster is None:
+            raise RuntimeError("Model not trained. Use XGBoostTrainer to train.")
+        self.booster.save_model(filepath)
         logger.info(f"Model saved to {filepath}")
 
-    def load_model(self, filepath: str) -> None:
-        """Load model from disk."""
-        if self.model is None:
-            self.model = self._build_model()
-
-        self.model.load_model(filepath)
-        logger.info(f"Model loaded from {filepath}")
+    @classmethod
+    def load(cls, path: str, feature_names: List[str], feature_importance: Dict):
+        booster = xgb.Booster()
+        booster.load_model(path)
+        logger.info(f"Model loaded from {path}")
+        return cls(booster, feature_names, feature_importance)
 
     def _validate_inputs(
         self, X: np.ndarray, y: Optional[np.ndarray], split_name: str
@@ -405,31 +178,3 @@ class XGBoostModel:
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")
-
-
-def create_xgboost_model(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
-    config: Dict,
-    seed: int = 42,
-) -> Tuple[XGBoostModel, Dict]:
-    """
-    Factory function to create and train XGBoost model in one call.
-
-    Args:
-        X_train: Training features
-        y_train: Training targets
-        X_val: Validation features
-        y_val: Validation targets
-        config: Model configuration dict
-        seed: Random seed
-
-    Returns:
-        Tuple of (XGBoostModel instance, evaluation results)
-    """
-    model = XGBoostModel(config, seed=seed)
-    model.train(X_train, y_train, X_val, y_val)
-
-    return model, model.evals_result

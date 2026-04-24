@@ -120,7 +120,7 @@ class LSTMAdapter(ModelAdapter):
         if predictions.ndim > 1:
             predictions = predictions.flatten()
 
-        logger.info(f"✓ Generated {len(predictions)} predictions")
+        logger.info(f" Generated {len(predictions)} predictions")
 
         return predictions
 
@@ -185,7 +185,7 @@ class XGBoostAdapter(ModelAdapter):
         if predictions.ndim > 1:
             predictions = predictions.flatten()
 
-        logger.info(f"✓ Generated {len(predictions)} predictions")
+        logger.info(f" Generated {len(predictions)} predictions")
 
         return predictions
 
@@ -270,7 +270,7 @@ def load_model(
             model.load_weights(str(model_path))
 
             adapter = LSTMAdapter(model, "pso_lstm", lookback=20)
-            logger.info("✓ PSO-LSTM model loaded successfully")
+            logger.info(" PSO-LSTM model loaded successfully")
 
             return adapter
 
@@ -305,7 +305,7 @@ def load_model(
             adapter = LSTMAdapter(
                 model, "lstm_baseline", lookback=config.lstm_baseline.lookback
             )
-            logger.info("✓ Baseline LSTM model loaded successfully")
+            logger.info(" Baseline LSTM model loaded successfully")
 
             return adapter
 
@@ -335,7 +335,7 @@ def load_model(
             model.load_model(str(model_path))
 
             adapter = XGBoostAdapter(model)
-            logger.info("✓ XGBoost model loaded successfully")
+            logger.info(" XGBoost model loaded successfully")
 
             return adapter
 
@@ -383,4 +383,4 @@ def validate_model_compatibility(model_adapter: ModelAdapter, test_data: dict) -
 
         logger.info(f"  XGBoost expects {expected_features} features")
 
-    logger.info("✓ Model-data compatibility validated")
+    logger.info(" Model-data compatibility validated")

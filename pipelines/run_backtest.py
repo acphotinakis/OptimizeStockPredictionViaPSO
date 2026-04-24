@@ -185,7 +185,7 @@ def run_unified_backtest(
         y_test = y_test[:min_len]
         dates = dates[:min_len]
 
-    logger.info(f"✓ Generated {len(predictions)} predictions")
+    logger.info(f" Generated {len(predictions)} predictions")
 
     # Initialize canonical backtest engine
     bt_config = config.backtesting
@@ -281,7 +281,7 @@ def main():
     # Load model
     logger.info("STEP 1: Loading model...")
     model_adapter = load_model(args.model_type, args.model_path, config)
-    logger.info(f"✓ Model loaded: {model_adapter.get_metadata()}")
+    logger.info(f" Model loaded: {model_adapter.get_metadata()}")
 
     # Load test data
     logger.info("STEP 2: Loading test data...")
@@ -310,15 +310,19 @@ def main():
     strategy_returns = backtest_df["strategy_return"].values
     equity_curve = backtest_df["capital"].values
     trade_costs = backtest_df["trade_cost"].values
-    
+
     # Align dates with backtest results (in case of length mismatch)
-    backtest_dates = backtest_df["date"].values if "date" in backtest_df.columns else None
+    backtest_dates = (
+        backtest_df["date"].values if "date" in backtest_df.columns else None
+    )
     if backtest_dates is None and len(test_data["dates"]) >= len(predictions):
-        backtest_dates = test_data["dates"][:len(predictions)]
-    
+        backtest_dates = test_data["dates"][: len(predictions)]
+
     # Log lengths for debugging
-    logger.info(f"Array lengths: predictions={len(predictions)}, actual_returns={len(actual_returns)}, "
-                f"signals={len(signals)}, equity={len(equity_curve)}")
+    logger.info(
+        f"Array lengths: predictions={len(predictions)}, actual_returns={len(actual_returns)}, "
+        f"signals={len(signals)}, equity={len(equity_curve)}"
+    )
 
     results = BacktestResults(
         model_type=args.model_type,
@@ -361,7 +365,7 @@ def main():
     logger.info(f"Results saved to: {output_dir}")
     logger.info("=" * 80)
 
-    logger.info("✓ PIPELINE COMPLETE")
+    logger.info(" PIPELINE COMPLETE")
 
 
 if __name__ == "__main__":

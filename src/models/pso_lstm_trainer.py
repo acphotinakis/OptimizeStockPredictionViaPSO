@@ -236,7 +236,7 @@ class PSOLSTMTrainer:
             ).flatten()
             y_true = target_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
             metric_space = "original"
-            logger.info("✓ Inverse transform applied (metrics on ORIGINAL scale)")
+            logger.info(" Inverse transform applied (metrics on ORIGINAL scale)")
         else:
             y_pred = y_pred_scaled
             y_true = y_test

@@ -197,22 +197,22 @@ def run_clean_and_align_synchronized(args, cfg: Config, tickers: list[str]) -> N
     # STEP 3: APPLY BOUNDED FORWARD-FILL PER-TICKER
     # ========================================================================
     logger.info("Step 3: Applying bounded forward-fill (limit=5) per ticker")
-    
+
     tickers_in_aligned = aligned_raw.columns.get_level_values("ticker").unique()
-    
+
     for ticker in tickers_in_aligned:
         df_ticker = aligned_raw[ticker].copy()
-        
+
         # Apply bounded forward-fill to this ticker
         for col in fields:
             if col not in df_ticker.columns:
                 continue
-            
+
             values = df_ticker[col].values.copy()
             last_valid = None
             gap_count = 0
             filled_count = 0
-            
+
             for i in range(len(values)):
                 if not np.isnan(values[i]):
                     # Reset on valid value
@@ -221,24 +221,24 @@ def run_clean_and_align_synchronized(args, cfg: Config, tickers: list[str]) -> N
                 else:
                     # Increment gap counter on NaN
                     gap_count += 1
-                    
+
                     # Fill if within limit and we have a valid value
                     if last_valid is not None and gap_count <= MAX_GAP_FILL_BARS:
                         values[i] = last_valid
                         filled_count += 1
                     # else: leave as NaN (gap too long or no prior value)
-            
+
             df_ticker[col] = values
-            
+
             remaining_nans = np.isnan(values).sum()
             logger.info(
                 f"[{ticker}][{col}] Forward-filled {filled_count} values, "
                 f"{remaining_nans} NaN remain"
             )
-        
+
         # Update aligned_raw with filled values
         aligned_raw[ticker] = df_ticker
-    
+
     logger.info("Forward-fill complete for all tickers")
 
     # ========================================================================
@@ -250,11 +250,11 @@ def run_clean_and_align_synchronized(args, cfg: Config, tickers: list[str]) -> N
 
     for ticker in tickers_in_aligned:
         df_ticker = aligned_raw[ticker].copy()
-        
+
         # If columns have MultiIndex, flatten to get just field names
         if isinstance(df_ticker.columns, pd.MultiIndex):
             df_ticker.columns = df_ticker.columns.get_level_values(-1)
-        
+
         # Get invalid mask for this ticker (after forward-fill)
         # This will mark ALL remaining NaN as invalid
         ticker_invalid = cleaner.get_invalid_mask(df_ticker, after_forward_fill=True)
@@ -293,34 +293,32 @@ def run_clean_and_align_synchronized(args, cfg: Config, tickers: list[str]) -> N
     # Check for NaN in any ticker
     for ticker in tickers_in_aligned:
         df_ticker = aligned_clean[ticker]
-        
+
         # Handle MultiIndex columns if present
         if isinstance(df_ticker.columns, pd.MultiIndex):
             df_ticker_flat = df_ticker.copy()
             df_ticker_flat.columns = df_ticker_flat.columns.get_level_values(-1)
         else:
             df_ticker_flat = df_ticker
-        
+
         # Check for NaN in OHLCV fields
         fields_present = [f for f in fields if f in df_ticker_flat.columns]
         nan_count = df_ticker_flat[fields_present].isna().sum().sum()
-        
+
         if nan_count > 0:
             # Show which columns have NaN
             nan_by_col = df_ticker_flat[fields_present].isna().sum()
             nan_cols = nan_by_col[nan_by_col > 0].to_dict()
-            
+
             logger.error(
                 f"[{ticker}] CRITICAL: {nan_count} NaN remaining after cleaning!"
             )
             logger.error(f"[{ticker}] NaN by column: {nan_cols}")
-            
+
             # Show sample of rows with NaN
             nan_rows = df_ticker_flat[df_ticker_flat[fields_present].isna().any(axis=1)]
-            logger.error(
-                f"[{ticker}] Sample NaN rows (first 5):\n{nan_rows.head()}"
-            )
-            
+            logger.error(f"[{ticker}] Sample NaN rows (first 5):\n{nan_rows.head()}")
+
             raise ValueError(
                 f"NaN present in {ticker} after synchronized cleaning. "
                 f"This indicates a bug in the cleaning logic. "

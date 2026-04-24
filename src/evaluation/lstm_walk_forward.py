@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from src.features.scaler import FrozenMinMaxScaler
-from src.models import build_lstm_windows
+from src.data.windowing import build_lstm_windows
 from src.models.pso_lstm_model import PSOLSTMModel
 from src.models.pso_lstm_trainer import PSOLSTMTrainer
 from src.optimizer import IPSO

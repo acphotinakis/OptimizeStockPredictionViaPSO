@@ -14,6 +14,7 @@ Author: System Architect
 Version: 2.0.0 REFACTORED
 """
 
+import json
 import logging
 from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
@@ -135,10 +136,6 @@ class LSTMNetwork(nn.Module):
         Returns:
             (batch, H) where H = prediction_horizon or output_units
         """
-        # Optional safety check (remove for performance if needed)
-        if x.shape[1] != self.lookback:
-            raise ValueError(f"Expected lookback={self.lookback}, got {x.shape[1]}")
-
         # LSTM 1
         out, _ = self.lstm_1(x)
         out = self.activation(out)
@@ -157,6 +154,24 @@ class LSTMNetwork(nn.Module):
         out = self.output_activation(out)
 
         return out
+
+    def __str__(self) -> str:
+        total_params = sum(p.numel() for p in self.parameters())
+
+        payload = {
+            "input_size": self.input_size,
+            "hidden_size_1": self.hidden_size_1,
+            "hidden_size_2": self.hidden_size_2,
+            "dropout_rate": self.dropout_rate,
+            "activation": type(self.activation).__name__,
+            "output_activation": type(self.output_activation).__name__,
+            "total_params": total_params,
+        }
+
+        return json.dumps(payload, indent=2)
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class LSTMModel:
@@ -185,12 +200,13 @@ class LSTMModel:
         set_seeds(seed)
         logger.info(f"LSTMModel initialized on device: {self.device}")
 
-    def build_model(self, config: Dict[str, Any], input_size: int) -> LSTMNetwork:
+    def build_model(self, config: Dict[str, Any]) -> Tuple[LSTMNetwork, "LSTMModel"]:
         """
         Build 2-layer LSTM architecture from configuration.
 
         Args:
             config: Dictionary containing:
+                - input_size: int (X_train.shape[2])
                 - lstm_units_1: int (50-300)
                 - lstm_units_2: int (20-200)
                 - dropout_rate: float (0.0-0.5)
@@ -203,6 +219,7 @@ class LSTMModel:
             Initialized LSTMNetwork
         """
         required_keys = [
+            "input_size",
             "lstm_units_1",
             "lstm_units_2",
             "dropout_rate",
@@ -214,48 +231,51 @@ class LSTMModel:
             if key not in config:
                 raise KeyError(f"Required config key missing: {key}")
 
-        units_1 = int(config["lstm_units_1"])
-        units_2 = int(config["lstm_units_2"])
-        dropout_rate = float(config["dropout_rate"])
-        output_units = int(config.get("output_units", 1))
-        activation = str(config.get("activation", "relu"))
-        output_activation = str(config.get("output_activation", "linear"))
+        self.input_size = int(config["input_size"])
+        self.units_1 = int(config["lstm_units_1"])
+        self.units_2 = int(config["lstm_units_2"])
+        self.dropout_rate = float(config["dropout_rate"])
+        self.output_units = int(config.get("output_units", 1))
+        self.activation = str(config.get("activation", "relu"))
+        self.output_activation = str(config.get("output_activation", "linear"))
 
-        if not (50 <= units_1 <= 300):
-            raise ValueError(f"lstm_units_1 must be in [50, 300], got {units_1}")
-        if not (20 <= units_2 <= 200):
-            raise ValueError(f"lstm_units_2 must be in [20, 200], got {units_2}")
-        if not (0.0 <= dropout_rate <= 0.5):
-            raise ValueError(f"dropout_rate must be in [0.0, 0.5], got {dropout_rate}")
+        if not (50 <= self.units_1 <= 300):
+            raise ValueError(f"lstm_units_1 must be in [50, 300], got {self.units_1}")
+        if not (20 <= self.units_2 <= 200):
+            raise ValueError(f"lstm_units_2 must be in [20, 200], got {self.units_2}")
+        if not (0.0 <= self.dropout_rate <= 0.5):
+            raise ValueError(
+                f"dropout_rate must be in [0.0, 0.5], got {self.dropout_rate}"
+            )
 
         logger.info(
-            f"Building LSTM model: LSTM_1={units_1}, LSTM_2={units_2}, "
-            f"dropout={dropout_rate}, input_size={input_size}, "
-            f"output_units={output_units}, activation={activation}, "
-            f"output_activation={output_activation}"
+            f"Building LSTM model: LSTM_1={self.units_1}, LSTM_2={self.units_2}, "
+            f"dropout={self.dropout_rate}, input_size={self.input_size}, "
+            f"output_units={self.output_units}, activation={self.activation}, "
+            f"output_activation={self.output_activation}"
         )
 
         self.model = LSTMNetwork(
-            input_size=input_size,
-            hidden_size_1=units_1,
-            hidden_size_2=units_2,
-            dropout_rate=dropout_rate,
-            output_units=output_units,
-            activation=activation,
-            output_activation=output_activation,
+            input_size=self.input_size,
+            hidden_size_1=self.units_1,
+            hidden_size_2=self.units_2,
+            dropout_rate=self.dropout_rate,
+            output_units=self.output_units,
+            activation=self.activation,
+            output_activation=self.output_activation,
         ).to(self.device)
 
         self.config = config
 
-        total_params = sum(p.numel() for p in self.model.parameters())
-        trainable_params = sum(
+        self.total_params = sum(p.numel() for p in self.model.parameters())
+        self.trainable_params = sum(
             p.numel() for p in self.model.parameters() if p.requires_grad
         )
         logger.info(
-            f"Model built: {total_params:,} total params, {trainable_params:,} trainable"
+            f"Model built: {self.total_params:,} total params, {self.trainable_params:,} trainable"
         )
 
-        return self.model
+        return self.model, self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -411,32 +431,37 @@ class LSTMModel:
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")
 
+    def __str__(self) -> str:
+        if self.model is None:
+            return json.dumps({"LSTMModel": "uninitialized"}, indent=2)
 
-def create_lstm_model(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
-    config: Dict[str, Any],
-    seed: int = 42,
-) -> Tuple["LSTMModel", Dict[str, List[float]]]:
-    """
-    Factory function to create and train LSTM model in one call.
+        net = self.model
 
-    Args:
-        X_train: Training features
-        y_train: Training targets
-        X_val: Validation features
-        y_val: Validation targets
-        config: Model configuration dict
-        seed: Random seed
+        payload = {
+            "LSTMModel": {
+                "device": self.device,
+                "input_size": self.input_size,
+                "lookback": 20,
+                "hidden_size_1": self.units_1,
+                "hidden_size_2": self.units_2,
+                "dropout_rate": self.dropout_rate,
+                "activation": self.activation,
+                "output_activation": self.output_activation,
+                "total_params": self.total_params,
+                "trainable_params": self.trainable_params,
+                "LSTMNetwork": {
+                    "input_size": net.input_size,
+                    "hidden_size_1": net.hidden_size_1,
+                    "hidden_size_2": net.hidden_size_2,
+                    "dropout_rate": net.dropout_rate,
+                    "activation": type(net.activation).__name__,
+                    "output_activation": type(net.output_activation).__name__,
+                    "num_parameters": sum(p.numel() for p in net.parameters()),
+                },
+            }
+        }
 
-    Returns:
-        Tuple of (LSTMModel instance, training history)
-    """
-    from .lstm_trainer import LSTMTrainer
+        return json.dumps(payload, indent=2)
 
-    set_seeds(seed)
-    trainer = LSTMTrainer(config=config, seed=seed)
-    model, history = trainer.train(X_train, y_train, X_val, y_val)
-    return model, history
+    def __repr__(self) -> str:
+        return self.__str__()
