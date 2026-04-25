@@ -178,46 +178,6 @@ class AlpacaIngestor:
             # df.index = df.index.round("1min")  # Optional rounding
             df.index.name = "timestamp"
 
-            # =====================================================
-            # STAGE 1.2: SCHEMA VALIDATION (STRICT)
-            # =====================================================
-
-            required_cols = {"open", "high", "low", "close", "volume"}
-            missing_cols = required_cols - set(df.columns)
-
-            if missing_cols:
-                raise ValueError(f"Missing required columns: {missing_cols}")
-
-            # OHLCV VALIDATION (NO CORRECTIONS ALLOWED)
-            invalid_ohlc = (
-                (df["high"] < df["low"])
-                | (df["open"] <= 0)
-                | (df["close"] <= 0)
-                | (df["volume"] < 0)
-                | (df["close"] < df["low"])
-                | (df["close"] > df["high"])
-            )
-
-            if invalid_ohlc.any():
-                raise ValueError(
-                    f"Invalid OHLCV detected for {ticker}. "
-                    f"Rows failing validation: {invalid_ohlc.sum()}"
-                )
-            # =====================================================
-            # STAGE 1.3: TEMPORAL ORDER GUARANTEE
-            # =====================================================
-
-            df = df.sort_index()
-
-            if not df.index.is_monotonic_increasing:
-                raise ValueError("Timestamp ordering invariant violated")
-
-            # =====================================================
-            # STAGE 1.4: FINAL STRUCTURAL OUTPUT CONTRACT
-            # =====================================================
-            df = df[["open", "high", "low", "close", "volume"]].copy()
-            df["ticker"] = ticker
-
             logger.info(f"Index of data (UTC): {df.index}")
             logger.info(f"Index dtype: {df.index.dtype}")
 
@@ -238,7 +198,8 @@ class AlpacaIngestor:
         output_dir: str | Path,
         start: str,
         end: str,
-        config: Config,
+        timeframe: str,
+        data_feed: str,
         skip_existing: bool = False,
     ) -> None:
         """Download all tickers and persist each as a Parquet file.
@@ -269,27 +230,70 @@ class AlpacaIngestor:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        start_dt = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
+
         for idx, ticker in enumerate(tickers, 1):
             out_path = output_dir / f"{ticker}.parquet"
+
             if skip_existing and out_path.exists():
                 logger.info(
-                    "[%d/%d] %s already cached — skipping", idx, len(tickers), ticker
+                    "[%d/%d] %s already exists — skipping", idx, len(tickers), ticker
                 )
                 continue
 
-            logger.info("[%d/%d] Downloading %s ...", idx, len(tickers), ticker)
-            df = self.download_bars(
-                ticker, start=start, end=end, timeframe=config.data.freq
-            )
-            if not df.empty:
-                df.to_parquet(
-                    out_path, engine="pyarrow", compression="zstd", index=True
-                )
-                logger.info("  Saved %d bars to %s", len(df), out_path)
-            else:
-                logger.info("  No data for %s — file not written", ticker)
+            logger.info("[%d/%d] Processing %s", idx, len(tickers), ticker)
 
-            time.sleep(self.RATE_LIMIT_SLEEP)
+            for chunk_start, chunk_end in self._chunk_time_range(
+                start_dt, end_dt, years=2
+            ):
+                logger.info(
+                    "  Fetching %s [%s → %s]",
+                    ticker,
+                    chunk_start.date(),
+                    chunk_end.date(),
+                )
+
+                df = self.download_bars(
+                    ticker=ticker,
+                    start=chunk_start.isoformat(),
+                    end=chunk_end.isoformat(),
+                    timeframe=timeframe,
+                    data_feed=data_feed,
+                )
+
+                if df.empty:
+                    continue
+
+                self._append_parquet(df, out_path)
+
+                logger.info("  Wrote %d rows", len(df))
+
+                time.sleep(self.RATE_LIMIT_SLEEP)
+        # output_dir = Path(output_dir)
+        # output_dir.mkdir(parents=True, exist_ok=True)
+
+        # for idx, ticker in enumerate(tickers, 1):
+        #     out_path = output_dir / f"{ticker}.parquet"
+        #     if skip_existing and out_path.exists():
+        #         logger.info(
+        #             "[%d/%d] %s already cached — skipping", idx, len(tickers), ticker
+        #         )
+        #         continue
+
+        #     logger.info("[%d/%d] Downloading %s ...", idx, len(tickers), ticker)
+        #     df = self.download_bars(
+        #         ticker, start=start, end=end, timeframe=config.data.freq
+        #     )
+        #     if not df.empty:
+        #         df.to_parquet(
+        #             out_path, engine="pyarrow", compression="zstd", index=True
+        #         )
+        #         logger.info("  Saved %d bars to %s", len(df), out_path)
+        #     else:
+        #         logger.info("  No data for %s — file not written", ticker)
+
+        #     time.sleep(self.RATE_LIMIT_SLEEP)
 
     def load_bars(self, path: str | Path) -> pd.DataFrame:
         df = pd.read_parquet(path)
@@ -336,3 +340,34 @@ class AlpacaIngestor:
         if "volume" in df.columns:
             df["volume"] = df["volume"].astype("int32")
         return df
+
+    def _chunk_time_range(self, start: datetime, end: datetime, years: int = 2):
+        """Yield (start, end) pairs in N-year chunks."""
+        current = start
+
+        while current < end:
+            next_end = datetime(
+                year=current.year + years,
+                month=current.month,
+                day=current.day,
+                tzinfo=timezone.utc,
+            )
+
+            if next_end > end:
+                next_end = end
+
+            yield current, next_end
+            current = next_end
+
+    def _append_parquet(self, df: pd.DataFrame, path: Path) -> None:
+        """Append or create parquet safely (via concat + rewrite)."""
+        if path.exists():
+            existing = pd.read_parquet(path)
+            df = pd.concat([existing, df])
+
+            # remove duplicates (critical for overlapping ranges)
+            df = df[~df.index.duplicated(keep="last")]
+
+            df = df.sort_index()
+
+        df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)

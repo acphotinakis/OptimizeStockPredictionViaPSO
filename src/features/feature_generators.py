@@ -106,17 +106,17 @@ def generate_raw_features(
     logger.info(f"[{target_ticker}] {split_name}: Volume features: {block_volume.shape[1]}")
     
     # Cross-ticker features (strict alignment)
-    block_cross = compute_cross_ticker_features_strict(
-        target_ticker, 
-        dfs, 
-        peer_tickers, 
-        split_name=split_name,
-        market_context=market_context,
-        sector_etf=sector_etf,
-        market_internals=market_internals,
-    )
-    blocks.append(block_cross)
-    logger.info(f"[{target_ticker}] {split_name}: Cross-ticker features: {block_cross.shape[1]}")
+    # block_cross = compute_cross_ticker_features_strict(
+    #     target_ticker, 
+    #     dfs, 
+    #     peer_tickers, 
+    #     split_name=split_name,
+    #     market_context=market_context,
+    #     sector_etf=sector_etf,
+    #     market_internals=market_internals,
+    # )
+    # blocks.append(block_cross)
+    # logger.info(f"[{target_ticker}] {split_name}: Cross-ticker features: {block_cross.shape[1]}")
     
     # ========================================================================
     # STEP 2: CONCATENATE BLOCKS WITH DEDUPLICATION
@@ -158,7 +158,7 @@ def generate_raw_features(
     # ========================================================================
     # CRITICAL: This computes y[t] = log(close[t+1] / close[t])
     # The last sample will be NaN and dropped in Step 4.
-    y_sries = compute_canonical_target(df_target["close"], horizon=1)e
+    y_series = compute_canonical_target(df_target["close"], horizon=1)
     y = y_series.values.astype(np.float32)
     
     # ========================================================================
