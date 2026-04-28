@@ -1,20 +1,3 @@
-"""
-Model Loader - Unified Model Loading and Prediction Interface
-
-Provides adapter pattern for loading and using different model types
-(PSO-LSTM, Baseline LSTM, XGBoost) with a consistent interface.
-
-Architecture:
-- ModelAdapter: Abstract base class with unified predict() interface
-- LSTMAdapter: Handles LSTM models (baseline and PSO)
-- XGBoostAdapter: Handles XGBoost models
-- load_model(): Factory function for model loading
-
-Author: Production System
-Version: 1.0
-Source: BACKTEST_DESIGN.md Section 3
-"""
-
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path

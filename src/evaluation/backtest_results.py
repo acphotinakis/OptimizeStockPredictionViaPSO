@@ -1,14 +1,3 @@
-"""
-Backtest Results - Persistence and Loading for Backtesting Results
-
-Provides standardized storage and retrieval for backtesting outputs,
-including metrics, time series, and metadata.
-
-Author: Production System
-Version: 1.0
-Source: BACKTEST_DESIGN.md Section 16.2
-"""
-
 import json
 import logging
 from dataclasses import dataclass

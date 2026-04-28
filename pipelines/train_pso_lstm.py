@@ -1,31 +1,3 @@
-#!/usr/bin/env python3
-"""
-TRD-Compliant PSO-LSTM Two-Phase Training Script
-
-Implements two-phase PSO-LSTM training as defined in TRD1 §7, TRD2 §7.4, TRD3.
-
-TWO-PHASE PROTOCOL (TRD2 §7.4):
-Phase 1: PSO hyperparameter search on 72% train, validate on 8% val
-Phase 2: Final training on combined 80% (train+val) with PSO-optimized parameters
-
-CRITICAL TRD RULES:
-- TRD2 §7.4: 72/8/20 split (train/pso_val/test) MANDATORY
-- TRD1 §8.1 L-6: Test set NEVER accessed during PSO
-- TRD1 §8.1 L-1: NO shuffling (shuffle=False mandatory)
-- TRD1 §9.1: Full reproducibility (seeds fixed)
-- TRD1 §9.2: Metadata versioning required
-
-Usage:
-    python pipelines/train_pso_lstm.py \\
-        --data-path data/processed/features_unified/AAPL \\
-        --config config/default_config.yaml \\
-        --output-dir results/models/pso_lstm
-
-Author: TRD Compliance System
-Version: TRD-COMPLIANT 1.0
-Source: TRD1 §7, TRD2 §7.4, TRD3
-"""
-
 import argparse
 import hashlib
 import json
@@ -323,11 +295,11 @@ def phase1_pso_search(
         assert (
             current_hash == _test_data_hash
         ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
-        
+
         # Return (predictions, model) tuple for MSW computation
         # PSO core expects this format and will pass both to fitness function
         return y_pred, trained_model
-    
+
     # Initialize spec-compliant fitness function (MSE + MSW)
     # PSO core will call this with (y_true, y_pred, model)
     fitness_fn = SpecCompliantFitness(gamma=0.9)

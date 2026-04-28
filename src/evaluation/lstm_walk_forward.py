@@ -1,26 +1,3 @@
-"""
-Production-Grade Expanding-Window Walk-Forward Validation with PSO
-
-Implements expanding-window walk-forward validation as specified in WALK_FORWARD_PLAN.md.
-
-CRITICAL ARCHITECTURE:
-- Expanding training window (not rolling)
-- Per-fold independent scaling (feature + target)
-- Per-fold PSO optimization
-- Per-fold model training (fresh initialization)
-- Inverse transform before metrics
-- TRD-compliant (no leakage)
-
-TRD Compliance:
-- TRD1 §8: All data leakage rules enforced
-- TRD2 §7.4: PSO per-fold with internal 90/10 split
-- TRD1 §9.1: Full reproducibility
-
-Author: Production System
-Version: 1.0
-Source: WALK_FORWARD_PLAN.md Phase 4
-"""
-
 import hashlib
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -671,6 +648,7 @@ class ExpandingWindowWalkForward:
 
         # FIXED (2026-04-28): Use corrected directional accuracy
         from src.evaluation.metrics import directional_accuracy as da_corrected
+
         da = da_corrected(y_true, y_pred, threshold=0.0, exclude_zeros=True)
 
         return {

@@ -1,14 +1,3 @@
-"""
-Backtesting Visualization - Standardized Plotting for Backtest Results
-
-Generates comprehensive visualizations for backtesting analysis including
-equity curves, drawdowns, returns distributions, and signal analysis.
-
-Author: Production System
-Version: 1.0
-Source: BACKTEST_DESIGN.md Section 7
-"""
-
 import logging
 from pathlib import Path
 from typing import Union

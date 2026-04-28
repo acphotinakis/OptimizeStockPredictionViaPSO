@@ -1,28 +1,3 @@
-#!/usr/bin/env python3
-"""
-Canonical XGBoost Training Script
-
-Implements static (single-fit) XGBoost training as defined in FINAL_PLAN.md Section 4.3.
-
-CRITICAL RULES:
-- Train EXACTLY ONCE on 70% training data
-- Use 10% validation for early stopping
-- Fixed hyperparameters (or grid-searched once)
-- Lag-based feature representation (NOT flattened sequences)
-- Model is FROZEN after training
-- NO retraining during walk-forward
-
-Usage:
-    python pipelines/train_xgboost.py \
-        --data-path data/processed/features_unified/AAPL \
-        --config config/canonical_config.yaml \
-        --output-dir results/canonical/models/xgboost
-
-Author: System Architect
-Version: 2.0.0 REFACTORED
-Source: FINAL_PLAN.md Section 4.3
-"""
-
 import argparse
 import json
 import logging

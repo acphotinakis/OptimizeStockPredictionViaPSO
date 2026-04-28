@@ -25,9 +25,6 @@ Outputs:
     - Signal analysis (PNG)
     - Backtest report (Markdown)
 
-Author: Production System
-Version: 1.0
-Source: BACKTEST_DESIGN.md
 """
 
 import argparse

@@ -1,31 +1,3 @@
-#!/usr/bin/env python3
-"""
-Production Feature Engineering Pipeline (TRD-Compliant, Leakage-Free)
-
-CRITICAL ARCHITECTURE:
-This pipeline implements the SPLIT-FIRST paradigm to prevent data leakage.
-
-Pipeline Flow (STRICT ORDER):
-1. Load raw OHLCV data for all tickers
-2. Compute log_return for all tickers (causal operation)
-3. TEMPORAL SPLIT (70/10/20) - BEFORE any fitting
-4. Select universe & peers on TRAINING data only
-5. Generate raw features per split independently
-6. FIT transformations on TRAINING data only:
-   - Wavelet threshold
-   - Feature selector
-   - Feature scaler
-   - Target scaler
-7. TRANSFORM validation and test using frozen parameters
-8. Save artifacts with full provenance
-
-TRD Compliance: TRD1, TRD2, TRD3, FINAL_PLAN.md
-Audit: FEA_ENG_AUDIT.md - All CRITICAL issues addressed
-
-Author: System Architect
-Version: 2.0.0 - AUDIT REMEDIATION
-"""
-
 import argparse
 import gc
 import hashlib

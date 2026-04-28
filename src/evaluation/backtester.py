@@ -1,9 +1,3 @@
-"""
-src/evaluation/backtester.py
-
-Refactored backtesting engine with separated concerns for testability.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
