@@ -91,4 +91,5 @@ streamlit/
 
 plans/
 
-.gemini/.gemini/
+.gemini/
+.gemini/
