@@ -20,6 +20,7 @@ from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 from src.evaluation.metrics import compute_and_log_all_statistical_metrics
 from src.utils.config_loader import Config
@@ -305,13 +306,15 @@ class LSTMModel:
         N = X.shape[0]
 
         with torch.no_grad():
-            for i in range(0, N, batch_size):
+            for i in tqdm(
+                range(0, N, batch_size),
+                total=(N + batch_size - 1) // batch_size,
+                desc="Predicting",
+                unit="batch"
+            ):
                 X_batch = X[i : i + batch_size]
 
-                # X_t = torch.from_numpy(X_batch.astype(np.float32)).to(
-                #     self.device, non_blocking=True
-                # )
-                X_t = X_t = torch.from_numpy(X_batch.astype(np.float32)).to(
+                X_t = torch.from_numpy(X_batch.astype(np.float32)).to(
                     self.device, non_blocking=True
                 )
 
@@ -319,7 +322,6 @@ class LSTMModel:
 
                 preds.append(y_batch.cpu().numpy())
 
-                # IMPORTANT: prevent memory accumulation
                 del X_t, y_batch
                 if self.device == "cuda":
                     torch.cuda.empty_cache()

@@ -7,7 +7,7 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 
-from .metrics import (
+from ..evaluation.metrics import (
     sharpe_ratio,
     sortino_ratio,
     max_drawdown,

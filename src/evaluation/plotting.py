@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .backtester import BacktestResult
+from ..backtesting.backtester import BacktestResult
 
 logger = logging.getLogger(__name__)
 

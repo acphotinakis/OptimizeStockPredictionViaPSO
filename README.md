@@ -1,347 +1,692 @@
-# LSTM Hyperparameter Tuning with Improved PSO for Stock Price Prediction
+# PSO-LSTM Stock Price Prediction System
 
-> **CSCI 633 — Biologically-Inspired Intelligent Systems | Application Study**
-> Authors: Andrew Photinakis · Dory VanKlootwyk-Ford · Osita Ukwuaba | March 2026
+**A production-grade financial machine learning system for stock return prediction using LSTM neural networks optimized via Particle Swarm Optimization (PSO).**
 
----
-
-## Project Overview
-
-This project implements and evaluates a hybrid **Improved Particle Swarm Optimization (IPSO) + Long Short-Term Memory (LSTM)** system for intraday stock price prediction using high-frequency (1-minute) OHLCV data. The IPSO algorithm automatically tunes LSTM hyperparameters (layers, hidden units, dropout, learning rate, lookback window) to maximize a composite fitness function combining prediction accuracy and trading performance.
-
-### Key Features
-
-- **51-ticker universe** (50 equities + SPY benchmark) via Alpaca Markets API
-- **100+ engineered features** per ticker per timestep
-- **Many-to-One LSTM** predicting next-period log returns / mid-price movement
-- **Improved PSO** with non-linear inertia weight (tanh) and adaptive mutation factor
-- **Walk-forward backtesting** with transaction costs, slippage, Sharpe, drawdown, CAGR
-- **Baselines**: Persistence model, standard LSTM, XGBoost
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.2+-red.svg)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
 
-## Repository Structure
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Technology Stack](#technology-stack)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+  - [Data Ingestion](#1-data-ingestion)
+  - [Feature Engineering](#2-feature-engineering)
+  - [Model Training](#3-model-training)
+  - [Evaluation](#4-evaluation)
+- [Project Structure](#project-structure)
+- [Technical Requirements Documents (TRDs)](#technical-requirements-documents-trds)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [References](#references)
+
+---
+
+## Overview
+
+This system implements a **hybrid financial forecasting architecture** that combines:
+
+- **Deep Learning**: 2-layer LSTM networks for temporal pattern recognition in stock price time series
+- **Hyperparameter Optimization**: Improved Particle Swarm Optimization (IPSO) for automatic LSTM tuning
+- **Gradient Boosting**: XGBoost as a comparative baseline
+- **Rigorous Evaluation**: Walk-forward validation, backtesting with transaction costs, and production-grade metrics
+
+### What Problem Does This Solve?
+
+Stock price prediction is notoriously difficult due to:
+- High noise-to-signal ratios
+- Non-stationary market dynamics
+- Complex temporal dependencies
+- Overfitting risks with hyperparameter tuning
+
+This system addresses these challenges through:
+1. **Temporal Causality Enforcement**: Strict split-first architecture prevents data leakage
+2. **Fit-Once-Freeze-Forever**: Feature pipelines trained once to ensure reproducibility
+3. **PSO Hyperparameter Search**: Automatic LSTM optimization without manual tuning
+4. **Comprehensive Backtesting**: Realistic trading simulation with costs and slippage
+
+---
+
+## Key Features
+
+### ✅ **Production-Grade ML Pipeline**
+- YAML-based configuration management
+- Modular architecture with clear separation of concerns
+- Extensive logging and error handling
+- Reproducible experiments with seed control
+
+### ✅ **Advanced Feature Engineering**
+- **45+ Technical Indicators**: EMA, MACD, Bollinger Bands, ATR, RSI, Stochastic, ADX, etc.
+- **Cross-Ticker Features**: Market context (SPY/QQQ), peer correlation, sector rotation
+- **Wavelet Denoising**: Haar wavelet (3-level) with soft thresholding
+- **4-Stage Feature Selection**: Variance threshold → Correlation → VIF → Mutual Information
+- **MinMax Scaling**: Separate scalers for features and targets (prevents leakage)
+
+### ✅ **Rigorous Data Leakage Prevention**
+- **Split-First Architecture**: Chronological 70/10/20 train/val/test split before any fitting
+- **Frozen Pipeline State**: Scalers, selectors, wavelet thresholds fit on train only
+- **SPY-Aligned Timestamps**: All tickers synchronized to S&P 500 trading calendar
+- **No Future Data Access**: Strict backward-looking features and causal forward-fill (≤5 bars)
+
+### ✅ **IPSO-LSTM Hyperparameter Optimization**
+- **6D Search Space**: Units (layer 1 & 2), dropout, learning rate, batch size, epochs
+- **Fitness Function**: `f(x) = 0.9 × MSE + 0.1 × MSW` (accuracy + model complexity)
+- **20 Particles × 50 Iterations**: Adaptive inertia weight (IPSO)
+- **Two-Phase Protocol**: Phase 1 (PSO search) → Phase 2 (final training with best params)
+
+### ✅ **Comprehensive Evaluation**
+- **Walk-Forward Validation**: Expanding-window, per-fold retraining, per-fold PSO
+- **Backtesting**: Transaction costs (0.15% one-way), slippage, stop-loss, daily limits
+- **15+ Metrics**: RMSE, R², Directional Accuracy, Sharpe, Sortino, CAGR, Max Drawdown, Calmar, Profit Factor, Win Rate
+
+---
+
+## System Architecture
+
+### High-Level Data Flow
 
 ```
-pso_lstm_stock/
-│
-├── README.md
-├── requirements.txt
-├── config/
-│   ├── default_config.yaml          # Hyperparameter ranges, PSO settings
-│   └── tickers.txt                  # List of 51 tickers
-│
-├── data/
-│   ├── raw/                         # Raw Alpaca API downloads (gitignored)
-│   ├── processed/                   # Cleaned & aligned OHLCV
-│   └── features/                    # Engineered feature matrices
-│
-├── src/
-│   ├── __init__.py
-│   ├── data/
-│   │   ├── alpaca_ingestor.py       # Alpaca API integration
-│   │   ├── cleaner.py               # Data cleaning pipeline
-│   │   ├── aligner.py               # Multi-ticker alignment
-│   │   └── splitter.py              # Train/val/test split
-│   │
-│   ├── features/
-│   │   ├── technical.py             # RSI, MACD, Bollinger, etc.
-│   │   ├── statistical.py           # Rolling stats, skew, kurtosis
-│   │   ├── volume.py                # VWAP, OBV, liquidity features
-│   │   ├── cross_ticker.py          # SPY correlation, relative strength
-│   │   ├── selector.py              # XGBoost importance + PSO mask
-│   │   └── pipeline.py              # Unified feature pipeline
-│   │
-│   ├── models/
-│   │   ├── lstm_model.py            # LSTM class (configurable)
-│   │   ├── baselines.py             # Persistence, XGBoost
-│   │   └── trainer.py               # Training loop with early stopping
-│   │
-│   ├── optimizer/
-│   │   ├── pso_core.py              # Standard PSO equations
-│   │   ├── ipso.py                  # Improved PSO (tanh inertia + mutation)
-│   │   ├── particle.py              # Particle encoding / decoding
-│   │   └── fitness.py               # Composite fitness function
-│   │
-│   ├── evaluation/
-│   │   ├── metrics.py               # RMSE, Sharpe, Drawdown, CAGR, F1
-│   │   ├── walk_forward.py          # Walk-forward validation
-│   │   └── backtester.py            # Signal generation + backtest engine
-│   │
-│   └── utils/
-│       ├── logger.py
-│       ├── seed.py                  # Global seed management
-│       └── config_loader.py
-│
-├── scripts/
-│   ├── 01_ingest_data.py
-│   ├── 02_build_features.py
-│   ├── 03_run_pso.py
-│   ├── 04_evaluate.py
-│   ├── 05_backtest.py
-│   ├── run_lstm_baseline.py      # LSTM baseline (no PSO)
-│   └── run_xgboost.py             # XGBoost baseline
-│
-├── notebooks/
-│   ├── EDA.ipynb
-│   └── Results_Analysis.ipynb
-│
-├── ai_outputs/                      # All design documents (this folder)
-│   ├── README.md
-│   ├── technical_design_document.md
-│   ├── feature_engineering_spec.md
-│   ├── pso_mathematical_spec.md
-│   ├── model_architecture.md
-│   ├── data_pipeline.md
-│   ├── experiment_plan.md
-│   ├── backtesting_framework.md
-│   ├── reproducibility.md
-│   ├── literature_review.md
-│   └── application_study.md
-│
-└── tests/
-    ├── test_pso.py
-    ├── test_lstm.py
-    └── test_features.py
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DATA INGESTION                               │
+│  Alpaca API → Raw OHLCV → Cleaning → SPY Alignment → Synchronized  │
+└─────────────────────┬───────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     FEATURE ENGINEERING                             │
+│  Technical Indicators → Cross-Ticker Features → Wavelet Denoising   │
+│  → Feature Selection → MinMax Scaling → Temporal Windowing          │
+└─────────────────────┬───────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│               CHRONOLOGICAL SPLIT (70/10/20)                        │
+│  Train (fit all transformations) | Val (monitor) | Test (frozen)   │
+└───────┬─────────────────┬─────────────────────────┬─────────────────┘
+        │                 │                         │
+        ▼                 ▼                         ▼
+┌───────────────┐  ┌──────────────┐        ┌──────────────┐
+│ BASELINE LSTM │  │  PSO-LSTM    │        │   XGBoost    │
+│ Fixed Params  │  │ IPSO Search  │        │  Baseline    │
+└───────┬───────┘  └──────┬───────┘        └──────┬───────┘
+        │                 │                        │
+        └─────────────────┴────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                  EVALUATION & BACKTESTING                           │
+│  Walk-Forward Validation → Metrics → Trading Simulation → Plots    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Module Responsibilities
+
+| Module | Purpose | Key Components |
+|--------|---------|----------------|
+| **`src/data/`** | Data pipeline | `alpaca_ingestor.py`, `cleaner.py`, `windowing.py` |
+| **`src/features/`** | Feature engineering | `feature_generators.py`, `scaler.py`, `selector.py`, `wavelet.py` |
+| **`src/models/`** | Model implementations | `lstm_model.py`, `lstm_trainer.py`, `xgboost_model.py` |
+| **`src/optimizer/`** | PSO/IPSO algorithms | `pso_core.py`, `ipso.py`, `particle.py`, `fitness.py` |
+| **`src/evaluation/`** | Evaluation & backtesting | `metrics.py`, `backtest.py`, `walk_forward_pso.py` |
+| **`pipelines/`** | CLI entry points | `run_lstm.py`, `train_pso_lstm.py`, `run_backtest.py` |
+| **`config/`** | Configuration | `default_config.yaml`, `symbol_universe.yaml` |
 
 ---
 
-## Setup Instructions
+## Technology Stack
 
-### 1. Prerequisites
+### Core Dependencies
 
-- Python 3.10+
-- CUDA-capable GPU (recommended; CPU-only is ~10× slower for PSO evaluation)
-- Alpaca Markets account (free paper-trading tier is sufficient for data access)
+- **Python**: 3.10+
+- **Deep Learning**: PyTorch 2.2+ (CUDA support optional)
+- **Machine Learning**: scikit-learn 1.4+, XGBoost 2.0+
+- **Data Processing**: NumPy 1.26+, Pandas 2.1+
+- **Signal Processing**: PyWavelets (via `pywt`)
+- **Data Acquisition**: Alpaca Trade API 3.0+
+- **Configuration**: PyYAML 6.0+
+- **Visualization**: Matplotlib 3.8+, Seaborn 0.13+
 
-### 2. Clone and install
+### Full Dependency List
+
+See [`requirements.txt`](requirements.txt) for complete list.
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.10 or higher
+- CUDA 11.8+ (optional, for GPU acceleration)
+- Alpaca API key (for data ingestion)
+
+### Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/<team>/pso_lstm_stock.git
-cd pso_lstm_stock
+git clone https://github.com/acphotinakis/OptimizeStockPredictionViaPSO.git
+cd OptimizeStockPredictionViaPSO
+```
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate          # Linux/Mac
-# venv\Scripts\activate           # Windows
+### Step 2: Create Virtual Environment
 
-# Install dependencies
+```bash
+python3.10 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+### Step 3: Install Dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Environment variables
+### Step 4: Set Up Environment Variables
+
+Create a `.env` file in the project root:
 
 ```bash
-cp .env.example .env
-# Edit .env with your credentials:
-# ALPACA_API_KEY=your_key
-# ALPACA_API_SECRET=your_secret
-# ALPACA_BASE_URL=https://paper-api.alpaca.markets
+# Alpaca API Credentials (for data ingestion)
+ALPACA_API_KEY=your_api_key_here
+ALPACA_SECRET_KEY=your_secret_key_here
+ALPACA_BASE_URL=https://paper-api.alpaca.markets  # or live URL
+
+# Optional: CUDA Configuration
+CUDA_VISIBLE_DEVICES=0
 ```
 
-### 4. Download data
+### Step 5: Verify Installation
 
 ```bash
-python scripts/01_ingest_data.py --start 2019-01-01 --end 2024-01-01 \
-    --tickers config/tickers.txt --output data/raw/
+python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+python -c "import xgboost; print(f'XGBoost: {xgboost.__version__}')"
 ```
 
 ---
 
-## Pipeline Execution
+## Configuration
 
-### Step 1 — Data Ingestion & Cleaning
+All system parameters are controlled via **YAML configuration files** in the `config/` directory.
 
-```bash
-python scripts/01_ingest_data.py
+### Main Configuration: `config/default_config.yaml`
+
+Key sections:
+
+#### Data Settings
+```yaml
+data:
+  start_date: "2020-01-01"
+  end_date: "2026-01-01"
+  freq: "1Day"  # Options: 1Min, 5Min, 15Min, 1Hour, 1Day
+  benchmark_ticker: "SPY"
+  max_missing_fraction: 0.05
+  max_ffill_bars: 5
 ```
 
-Downloads 5 years of 1-minute OHLCV data for all 51 tickers from the Alpaca Markets API. Outputs aligned parquet files to `data/processed/`.
-
-### Step 2 — Feature Engineering
-
-```bash
-python scripts/02_build_features.py --config config/default_config.yaml
+#### LSTM Baseline Settings
+```yaml
+lstm_baseline:
+  lookback: 20  # Temporal window size
+  lstm_units_1: 128  # First LSTM layer units
+  lstm_units_2: 64   # Second LSTM layer units
+  dropout_rate: 0.2
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 100
+  early_stopping:
+    enabled: true
+    patience: 10
 ```
 
-Computes 100+ features per ticker, performs XGBoost importance filtering, and saves feature matrices to `data/features/`.
-
-### Step 3 — PSO Hyperparameter Search
-
-```bash
-python scripts/03_run_pso.py \
-    --ticker AAPL \
-    --particles 30 \
-    --iterations 50 \
-    --seed 42
-```
-
-Runs the IPSO algorithm. Logs fitness per iteration to `logs/pso_run_<ticker>.json`. Outputs best hyperparameter set to `results/best_params_<ticker>.json`.
-
-### Step 4 — Final Model Evaluation
-
-```bash
-python scripts/04_evaluate.py \
-    --ticker AAPL \
-    --params results/best_params_AAPL.json
-```
-
-Trains the LSTM with IPSO-optimal hyperparameters on the full training set and evaluates on the held-out test set. Prints RMSE, Directional Accuracy, Sharpe, Drawdown.
-
-### Step 5 — Backtest
-
-```bash
-python scripts/05_backtest.py \
-    --ticker AAPL \
-    --transaction_cost 0.001 \
-    --slippage 0.0005
-```
-
-Runs the walk-forward backtest and outputs performance report to `results/backtest_<ticker>.csv`.
-
-### Alternative: LSTM Baseline (No PSO)
-
-For quick baseline comparisons without PSO optimization:
-
-```bash
-# Train baseline LSTM with fixed hyperparameters
-python scripts/run_lstm_baseline.py \
-    --ticker AAPL \
-    --mode train \
-    --seed 42
-
-# Validate
-python scripts/run_lstm_baseline.py \
-    --ticker AAPL \
-    --mode val \
-    --seed 42
-
-# Test
-python scripts/run_lstm_baseline.py \
-    --ticker AAPL \
-    --mode test \
-    --seed 42
-```
-
-The LSTM baseline uses manually chosen "sensible" hyperparameters (2 layers, 128 hidden units, 0.2 dropout, 0.001 learning rate, 30 lookback) based on literature recommendations. Training completes in ~10-30 minutes vs. 6-12 hours for PSO optimization.
-
-See [LSTM Baseline Usage Guide](docs/guides/LSTM_BASELINE_USAGE.md) for details.
-
----
-
-## Example Usage (Python API)
-
-```python
-from src.optimizer.ipso import IPSO
-from src.models.lstm_model import LSTMModel
-from src.optimizer.fitness import composite_fitness
-
-# Define search space
-search_space = {
-    "num_layers":    (1, 4),
-    "hidden_units":  (32, 512),
-    "dropout":       (0.0, 0.5),
-    "learning_rate": (1e-5, 1e-1),
-    "lookback":      [10, 30, 60, 120],
-}
-
-# Initialize improved PSO
-optimizer = IPSO(
-    n_particles=30,
-    n_iterations=50,
-    search_space=search_space,
-    fitness_fn=composite_fitness,
-    w_min=0.4, w_max=0.9,
-    c1=1.5, c2=1.5,
-    seed=42
-)
-
-best_params, best_fitness = optimizer.run(X_train, y_train, X_val, y_val)
-print(f"Best params: {best_params}")
-print(f"Best fitness: {best_fitness:.4f}")
-
-# Build final model
-model = LSTMModel(**best_params)
-model.fit(X_train, y_train)
-predictions = model.predict(X_test)
-```
-
----
-
-## Configuration File (`config/default_config.yaml`)
-
+#### PSO Settings
 ```yaml
 pso:
-  n_particles: 30
+  n_particles: 20
   n_iterations: 50
-  w_min: 0.4
-  w_max: 0.9
-  c1: 1.5
-  c2: 1.5
-  seed: 42
+  w_inertia: 0.7
+  c1_cognitive: 1.5
+  c2_social: 1.5
+  search_space:
+    units_1: [64, 256]
+    units_2: [32, 128]
+    dropout: [0.1, 0.5]
+    learning_rate: [0.0001, 0.01]
+    batch_size: [32, 128]
+    epochs: [50, 200]
+```
 
-lstm:
-  num_layers: [1, 2, 3, 4]
-  hidden_units: [32, 512]
-  dropout: [0.0, 0.5]
-  learning_rate: [1e-5, 1e-1]
-  lookback: [10, 30, 60, 120]
-  max_epochs: 100
-  batch_size: 256
-  early_stopping_patience: 10
+### Universe Configuration: `config/symbol_universe.yaml`
 
-fitness:
-  rmse_weight: 0.4
-  sharpe_weight: 0.4
-  drawdown_weight: 0.2
+Define ticker universe and peer selection:
 
-data:
-  train_years: 3
-  val_years: 1
-  test_years: 1
-  freq: "1Min"
+```yaml
+tickers:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - NVDA
+  - TSLA
+  # ... more tickers
+
+peer_selection:
+  mode: "dynamic"  # Options: dynamic, manual, hybrid
+  max_peers: 3
+  min_correlation: 0.3
+  sector_constrained: true
 ```
 
 ---
 
-## Reproducing Results
+## Usage
 
-See `ai_outputs/reproducibility.md` for full instructions including Docker setup, seed handling, and expected runtimes.
+### 1. Data Ingestion
 
----
+Fetch and clean raw OHLCV data from Alpaca API:
 
-## Documentation Index
-
-| Document | Description |
-|---|---|
-| `technical_design_document.md` | Full system architecture & module breakdown |
-| `feature_engineering_spec.md` | 100+ feature dictionary with math definitions |
-| `pso_mathematical_spec.md` | IPSO equations, particle encoding, convergence |
-| `model_architecture.md` | LSTM structure, training loop, regularization |
-| `data_pipeline.md` | Alpaca API integration, cleaning, alignment |
-| `experiment_plan.md` | PSO config, baselines, evaluation budget |
-| `backtesting_framework.md` | Signal generation, risk management, metrics |
-| `reproducibility.md` | Environment setup, seeds, run commands |
-| `literature_review.md` | Synthesis of all provided research papers |
-| `application_study.md` | Full research paper (Abstract --> Future Work) |
-
----
-
-## Citation
-
-```bibtex
-@misc{photinakis2026pso,
-  title={LSTM Hyperparameter Tuning with Improved Particle Swarm Optimization for Stock Price Prediction},
-  author={Photinakis, Andrew and VanKlootwyk-Ford, Dory and Ukwuaba, Osita},
-  year={2026},
-  institution={Rochester Institute of Technology, CSCI 633},
-  note={Course project, Biologically-Inspired Intelligent Systems}
-}
+```bash
+python pipelines/data_ingest_align_clean.py \
+  --tickers AAPL MSFT GOOGL \
+  --start-date 2020-01-01 \
+  --end-date 2026-01-01 \
+  --timeframe 1Day \
+  --output-dir data/raw/1Day
 ```
 
+**Output:**
+- `data/raw/1Day/{ticker}.parquet` - Raw OHLCV data
+- `data/cleaned/1Day/{ticker}.parquet` - Cleaned data (gap handling, OHLCV validation)
+- `data/aligned/1Day/{ticker}.parquet` - SPY-aligned synchronized data
 
-ClaudePaper  on  fixing ❯  mamba create -n rapids_gpu \
-  -c rapidsai -c nvidia -c conda-forge \
-  cudf=23.08 cuml=23.08 cupy python=3.10 "cuda-version>=12.0,<12.4" \
-  --channel-priority flexible
+### 2. Feature Engineering
+
+Generate features, split data, and fit feature pipeline:
+
+```bash
+python pipelines/run_build_features.py \
+  --ticker AAPL \
+  --timeframe 1Day \
+  --data-dir data/aligned/1Day \
+  --output-dir data/features_v2/AAPL \
+  --config config/default_config.yaml
+```
+
+**Output:**
+- `data/features_v2/AAPL/X_train.npy` - Training features (N_train, F)
+- `data/features_v2/AAPL/y_train.npy` - Training targets (N_train,)
+- `data/features_v2/AAPL/X_val.npy` - Validation features
+- `data/features_v2/AAPL/X_test.npy` - Test features
+- `data/features_v2/AAPL/frozen_pipeline.pkl` - Fitted scalers/selectors/wavelets
+
+**Key Operations:**
+1. Technical indicators (45+ features)
+2. Cross-ticker features (market context, peers, sector)
+3. Wavelet denoising (Haar, 3-level)
+4. Feature selection (4-stage: variance → correlation → VIF → MI)
+5. MinMax scaling ([-1, 1])
+6. Chronological split (70/10/20)
+
+### 3. Model Training
+
+#### Option A: Baseline LSTM (Fixed Hyperparameters)
+
+```bash
+python pipelines/run_lstm.py \
+  --ticker AAPL \
+  --timeframe 1Day \
+  --data-path data/features_v2/AAPL \
+  --config config/default_config.yaml \
+  --device cuda
+```
+
+**Output:**
+- `results/experiments/AAPL_1Day_lstm_baseline_{run_id}/train/`
+  - `baseline_lstm_model.pt` - Trained model weights
+  - `model_config.json` - Architecture metadata
+  - `training_history.json` - Loss curves
+
+#### Option B: PSO-LSTM (Hyperparameter Search)
+
+```bash
+python pipelines/train_pso_lstm.py \
+  --ticker AAPL \
+  --timeframe 1Day \
+  --data-path data/features_v2/AAPL \
+  --config config/default_config.yaml \
+  --device cuda
+```
+
+**PSO Process:**
+1. **Phase 1**: 20 particles × 50 iterations (1000 LSTM trainings)
+2. **Phase 2**: Final training with best hyperparameters
+3. **Fitness**: `0.9 × MSE + 0.1 × MSW` (Mean Squared Weights penalty)
+
+**Output:**
+- `results/pso_lstm/AAPL_1Day/best_model.pt`
+- `results/pso_lstm/AAPL_1Day/pso_history.json` - Convergence tracking
+- `results/pso_lstm/AAPL_1Day/best_params.json` - Optimal hyperparameters
+
+#### Option C: XGBoost Baseline
+
+```bash
+python pipelines/run_xgboost.py \
+  --ticker AAPL \
+  --timeframe 1Day \
+  --data-path data/features_v2/AAPL \
+  --config config/default_config.yaml
+```
+
+### 4. Evaluation
+
+#### Backtesting
+
+Run unified backtesting with trading simulation:
+
+```bash
+python pipelines/run_backtest.py \
+  --model-type lstm_baseline \
+  --model-path results/experiments/AAPL_1Day_lstm_baseline_{run_id}/train/baseline_lstm_model.pt \
+  --data-path data/features_v2/AAPL \
+  --output-dir results/backtest/AAPL \
+  --config config/default_config.yaml
+```
+
+**Output:**
+- `results/backtest/AAPL/metrics.json` - Full metrics
+- `results/backtest/AAPL/equity_curve.csv` - Time series results
+- `results/backtest/AAPL/plots/` - Visualization (equity, drawdown, returns, signals)
+
+**Metrics Computed:**
+- **Statistical**: RMSE, MAE, R², Directional Accuracy, MAPE
+- **Trading**: Sharpe Ratio, Sortino Ratio, CAGR, Max Drawdown, Calmar Ratio, Profit Factor, Win Rate, Information Ratio
+
+#### Walk-Forward Validation
+
+Expanding-window validation with per-fold retraining:
+
+```bash
+python pipelines/lstm_walk_forward_evaluation.py \
+  --ticker AAPL \
+  --timeframe 1Day \
+  --data-path data/features_v2/AAPL \
+  --config config/default_config.yaml \
+  --n-folds 5
+```
+
+**Walk-Forward Protocol:**
+1. Initial split: 70/10/20
+2. Each fold: retrain on expanding window
+3. Per-fold: independent scaling, PSO search (if applicable)
+4. Aggregate metrics across folds
+
+---
+
+## Project Structure
+
+```
+OptimizeStockPredictionViaPSO/
+├── config/                          # Configuration files
+│   ├── default_config.yaml         # Main system configuration
+│   ├── symbol_universe.yaml        # Ticker universe and peer selection
+│   └── tickers.txt                 # Ticker list
+│
+├── data/                           # Data storage (Git-ignored)
+│   ├── raw/                        # Raw OHLCV from Alpaca
+│   ├── cleaned/                    # Cleaned data (gap handling)
+│   ├── aligned/                    # SPY-aligned synchronized data
+│   └── features_v2/                # Feature-engineered datasets
+│
+├── docs/                           # Technical documentation
+│   ├── TRD1.md                     # Feature Engineering TRD
+│   ├── TRD2.md                     # Model Architecture TRD
+│   └── TRD3.md                     # Evaluation TRD
+│
+├── logs/                           # Execution logs
+│
+├── pipelines/                      # CLI entry points
+│   ├── data_ingest_align_clean.py  # Data acquisition pipeline
+│   ├── run_build_features.py       # Feature engineering pipeline
+│   ├── run_lstm.py                 # Baseline LSTM training
+│   ├── train_pso_lstm.py           # PSO-LSTM training
+│   ├── run_xgboost.py              # XGBoost training
+│   ├── run_backtest.py             # Unified backtesting
+│   └── lstm_walk_forward_evaluation.py  # Walk-forward validation
+│
+├── plans/                          # Design specifications and audits
+│   ├── design_specs/               # TRD documents
+│   ├── audits_and_analysis/        # Compliance audits
+│   └── completion_summaries/       # Implementation summaries
+│
+├── results/                        # Experiment outputs
+│   ├── experiments/                # Training results
+│   ├── pso_lstm/                   # PSO-LSTM outputs
+│   └── backtest/                   # Backtesting results
+│
+├── src/                            # Core library modules
+│   ├── data/                       # Data ingestion and preprocessing
+│   │   ├── alpaca_ingestor.py     # Alpaca API client
+│   │   ├── cleaner.py             # Data cleaning (gap handling, validation)
+│   │   └── windowing.py           # Temporal window construction
+│   │
+│   ├── features/                   # Feature engineering
+│   │   ├── feature_generators.py  # Technical indicators + cross-ticker
+│   │   ├── scaler.py              # MinMax scaling (frozen)
+│   │   ├── selector.py            # 4-stage feature selection
+│   │   └── wavelet.py             # Wavelet denoising (Haar, 3-level)
+│   │
+│   ├── models/                     # Model implementations
+│   │   ├── lstm_model.py          # PyTorch LSTM wrapper
+│   │   ├── lstm_trainer.py        # LSTM training loop (early stopping)
+│   │   ├── xgboost_model.py       # XGBoost wrapper
+│   │   └── utils.py               # Model utilities (seed control, etc.)
+│   │
+│   ├── optimizer/                  # PSO/IPSO algorithms
+│   │   ├── pso_core.py            # PSO core logic
+│   │   ├── ipso.py                # Improved PSO (adaptive inertia)
+│   │   ├── particle.py            # Particle representation
+│   │   └── fitness.py             # Fitness function (0.9×MSE + 0.1×MSW)
+│   │
+│   ├── evaluation/                 # Evaluation and backtesting
+│   │   ├── metrics.py             # Statistical + trading metrics
+│   │   ├── backtest.py            # Trading simulation
+│   │   ├── walk_forward_pso.py    # Walk-forward with PSO
+│   │   ├── model_loader.py        # Unified model loading (adapter pattern)
+│   │   └── plotting.py            # Visualization utilities
+│   │
+│   └── utils/                      # Shared utilities
+│       ├── config_loader.py       # YAML configuration loader
+│       ├── logger.py              # Logging setup
+│       └── seed.py                # Reproducibility utilities
+│
+├── .gemini/                        # Gemini CLI skills (custom agents)
+│   ├── GEMINI.md                  # Global agent rules
+│   └── skills/                    # Custom skill definitions
+│
+├── requirements.txt                # Python dependencies
+├── README.md                       # This file
+└── .env                           # Environment variables (not in Git)
+```
+
+---
+
+## Technical Requirements Documents (TRDs)
+
+The system is governed by three authoritative Technical Requirements Documents:
+
+### TRD1: Feature Engineering Pipeline
+**File**: `docs/TRD1.md`
+
+Specifies:
+- 45+ technical indicators (formulas, parameters, edge cases)
+- Cross-ticker feature computation (market context, peers, sector)
+- Wavelet denoising protocol (Haar, 3-level, soft thresholding)
+- 4-stage feature selection (variance → correlation → VIF → MI)
+- Scaling protocol (separate feature/target scalers)
+- Target definition: `r_t = (Close_{t+1} - Close_t) / Close_t`
+
+### TRD2: Model Architecture
+**File**: `docs/TRD2.md`
+
+Specifies:
+- LSTM architecture (2-layer, ReLU activation, dropout)
+- Training protocol (Adam optimizer, MSE loss, early stopping)
+- PSO/IPSO hyperparameter search (6D space, fitness function)
+- XGBoost configuration (tree-based gradient boosting)
+- Reproducibility requirements (seed control, deterministic=True)
+
+### TRD3: Evaluation & Backtesting
+**File**: `docs/TRD3.md`
+
+Specifies:
+- Data splitting (70/10/20, chronological)
+- Walk-forward validation (expanding window, per-fold retraining)
+- Backtesting protocol (transaction costs, slippage, stop-loss)
+- Metrics definitions (statistical + trading)
+- Visualization requirements
+
+### Canonical Specification: FINAL_PLAN.md
+**File**: `plans/design_specs/FINAL_PLAN.md`
+
+Consolidates all TRDs and resolves conflicts. This is the **single source of truth** for system design.
+
+---
+
+## Testing
+
+### Unit Tests
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run specific test module
+pytest tests/test_features.py
+
+# Run with coverage
+pytest --cov=src --cov-report=html tests/
+```
+
+### Integration Tests
+
+```bash
+# Test full pipeline (small dataset)
+python scripts/test_pipeline.py --ticker AAPL --n-samples 1000
+```
+
+### Validation Tests
+
+```bash
+# Verify data alignment
+python scripts/verify_alignment.py --data-dir data/aligned/1Day
+
+# Verify split correctness
+python scripts/explore_splits.py --data-path data/features_v2/AAPL
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. `RuntimeError: Model not built. Call build_model() first.`
+
+**Solution**: LSTM models require explicit architecture construction before loading weights.
+
+```python
+# Incorrect
+model = LSTMModel(seed=42)
+model.load("model.pt")  # ERROR
+
+# Correct
+model = LSTMModel(seed=42)
+model.build_model(model_config)  # Build architecture first
+model.load("model.pt")
+```
+
+#### 2. `ValueError: Cannot align tickers`
+
+**Cause**: Mismatched timestamp indices across tickers.
+
+**Solution**: Ensure all tickers are SPY-aligned:
+
+```bash
+python pipelines/data_ingest_align_clean.py \
+  --tickers AAPL MSFT SPY \
+  --force-realign
+```
+
+#### 3. `ValueError: All arrays must be of the same length`
+
+**Cause**: LSTM windowing reduces sample count (N - lookback + 1).
+
+**Solution**: Ensure all arrays are windowed consistently or truncated to match.
+
+#### 4. Directional Accuracy ~99.96% (Suspiciously High)
+
+**Cause**: Bug in `np.sign()` usage where `sign(0) = 0` creates false positives.
+
+**Status**: FIXED in commit `[2026-04-28]` via corrected `directional_accuracy()` in `src/evaluation/metrics.py`.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. **Fork** the repository
+2. Create a **feature branch** (`git checkout -b feature/your-feature`)
+3. Follow **TRD specifications** for any changes
+4. Add **tests** for new functionality
+5. Update **documentation** (README, docstrings)
+6. Submit a **pull request**
+
+### Code Quality Standards
+
+- PEP 8 compliance (max line length: 120)
+- Type hints for all function signatures
+- Google-style docstrings
+- Logging for key operations
+- No data leakage (verify split-first architecture)
+
+---
+
+## References
+
+### Academic Papers
+
+1. **Ji et al. (2021)**: "Application of LSTM Model based on Particle Swarm Optimization Algorithm in Stock Market Trend Prediction"
+2. **Zeng et al. (2025)**: "Enhancing stock index prediction: A hybrid LSTM-PSO model for improved forecasting accuracy"
+3. **Deng & Peng (2025)**: "A Novel Improved Particle Swarm Optimization for LSTM"
+
+### Related Documentation
+
+- [Alpaca API Documentation](https://alpaca.markets/docs/)
+- [PyTorch LSTM Tutorial](https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html)
+- [XGBoost Documentation](https://xgboost.readthedocs.io/)
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- **Alpaca Markets** for data API access
+- **PyTorch Team** for the deep learning framework
+- **XGBoost Contributors** for the gradient boosting library
+- Research papers cited above for algorithmic foundations
+
+---
+
+**⚠️ Disclaimer**: This system is for **educational and research purposes only**. It is NOT financial advice. Do NOT use for live trading without extensive backtesting and risk management. Past performance does not guarantee future results.

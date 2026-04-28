@@ -39,8 +39,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.backtesting.backtester import Backtester
-
 # Add project root to path
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -86,6 +84,62 @@ def load_backtest_data(data_path: Path) -> dict:
         "y_test": y_test,
         "dates": dates,
     }
+
+
+def run_unified_backtest(
+    model_adapter: Any,
+    test_data: dict,
+    config: Config,
+) -> tuple:
+    """
+    Run unified backtesting engine.
+
+    Args:
+        model_adapter: ModelAdapter instance
+        test_data: Test data dictionary
+        config: Configuration object
+
+    Returns:
+        Tuple of (backtest_results, predictions, actual_returns)
+    """
+    logger.info("=" * 80)
+    logger.info("RUNNING UNIFIED BACKTEST")
+    logger.info("=" * 80)
+
+    X_test = test_data["X_test"]
+    y_test = test_data["y_test"]
+    dates = test_data["dates"]
+
+    # Generate predictions
+    logger.info("Generating predictions...")
+    predictions = model_adapter.predict(X_test)
+
+    # Ensure alignment
+    if len(predictions) != len(y_test):
+        logger.warning(
+            f"Prediction length mismatch: {len(predictions)} vs {len(y_test)}"
+        )
+        # Truncate to shorter length
+        min_len = min(len(predictions), len(y_test))
+        predictions = predictions[:min_len]
+        y_test = y_test[:min_len]
+        dates = dates[:min_len]
+
+    logger.info(f" Generated {len(predictions)} predictions")
+
+    # Initialize canonical backtest engine
+    bt_config = config.backtesting
+    backtest_engine = CanonicalBacktest(
+        transaction_cost=bt_config.transaction_cost,
+        initial_capital=bt_config.initial_capital,
+    )
+
+    # Run backtest
+    backtest_df = backtest_engine.run_backtest(predictions, y_test, dates)
+
+    logger.info("=" * 80)
+
+    return backtest_df, predictions, y_test
 
 
 def compute_all_metrics(
@@ -245,21 +299,13 @@ def backtest_baseline_lstm(
 
     # Initialize canonical backtest engine
     bt_config = config.backtesting
-    # backtest_engine = CanonicalBacktest(
-    #     transaction_cost=bt_config.transaction_cost,
-    #     initial_capital=bt_config.initial_capital,
-    # )
-
-    # # Run backtest
-    # backtest_df = backtest_engine.run_backtest(y_pred, y_test, dates)
-    bt = Backtester(
-        initial_capital=bt_config.initial_capital,
-        position_fraction=bt_config.position_fraction,
+    backtest_engine = CanonicalBacktest(
         transaction_cost=bt_config.transaction_cost,
-        slippage=bt_config.slippage,
-        stop_loss=bt_config.stop_loss,
-        daily_loss_limit=bt_config.daily_loss_limit,
+        initial_capital=bt_config.initial_capital,
     )
+
+    # Run backtest
+    backtest_df = backtest_engine.run_backtest(y_pred, y_test, dates)
 
     logger.info("=" * 80)
 

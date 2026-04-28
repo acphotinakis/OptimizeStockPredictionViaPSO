@@ -11,8 +11,6 @@ class CanonicalBacktest:
     """
     Backtesting engine with canonical signal generation and transaction costs.
 
-    FINAL_PLAN.md Section 6: Backtesting Protocol
-
     Enforces:
     - Directional signal generation
     - Transaction cost application
@@ -36,7 +34,7 @@ class CanonicalBacktest:
         self.initial_capital = initial_capital
 
         logger.info("=" * 80)
-        logger.info("CANONICAL BACKTEST ENGINE (FINAL_PLAN.md)")
+        logger.info("CANONICAL BACKTEST ENGINE")
         logger.info("=" * 80)
         logger.info(f"Transaction cost: {transaction_cost*100:.2f}% (one-way)")
         logger.info(f"Round-trip cost: {transaction_cost*2*100:.2f}%")

@@ -149,14 +149,15 @@ def save_results(
     y_pred: np.ndarray,
     metrics: Dict[str, float],
     model_dir: Path,
+    prefix: str = "test",
 ) -> None:
     """Persist predictions, metrics, and provenance metadata."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    np.save(output_dir / "test_predictions.npy", y_pred)
-    np.save(output_dir / "test_ground_truth.npy", y_true)
+    np.save(output_dir / f"{prefix}_predictions.npy", y_pred)
+    np.save(output_dir / f"{prefix}_ground_truth.npy", y_true)
 
-    metrics_path = output_dir / "test_metrics.json"
+    metrics_path = output_dir / f"{prefix}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=4)
 
@@ -171,7 +172,7 @@ def save_results(
             "protocol": "CANONICAL_1.0",
         },
     }
-    with open(output_dir / "test_results.json", "w") as f:
+    with open(output_dir / f"{prefix}_results.json", "w") as f:
         json.dump(results, f, indent=4)
 
     logger.info(f"Results saved to {output_dir}")
