@@ -48,9 +48,6 @@ PROJECT_ROOT = CURRENT_FILE.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.splitter import DataSplitter
-from src.data.aligner import TickerAligner
-from src.features.universe_builder import SymbolUniverseBuilder
 from src.features.feature_generators import generate_raw_features
 from src.features.target import compute_canonical_target
 from src.features.wavelet import compute_wavelet_threshold, apply_wavelet_denoising
@@ -62,79 +59,71 @@ from src.utils.config_loader import Config, load_config
 logger = logging.getLogger(__name__)
 
 
-def compute_log_return_all(dfs: Dict[str, pd.DataFrame]) -> None:
+def compute_log_return_all(df: pd.DataFrame, ticker: str) -> None:
     """
-    Compute log_return for all tickers in-place.
+    Compute log_return
 
     Formula: log_return[t] = log(close[t] / close[t-1])
 
     This is a CAUSAL operation (uses only historical data).
     """
-    for ticker, df in dfs.items():
-        if "close" not in df.columns:
-            raise ValueError(f"[{ticker}] Missing 'close' column")
 
-        # Compute log return (causal - uses only prior close)
-        df["log_return"] = np.log(df["close"]).diff()
+    # Compute log return (causal - uses only prior close)
+    df["log_return"] = np.log(df["close"]).diff()
 
-        logger.info(
-            f"[{ticker}] Computed log_return: "
-            f"{len(df)} samples, {df['log_return'].isna().sum()} NaN"
-        )
+    logger.info(
+        f"[{ticker}] Computed log_return: "
+        f"{len(df)} samples, {df['log_return'].isna().sum()} NaN"
+    )
 
 
 def temporal_split_all(
-    dfs: Dict[str, pd.DataFrame],
+    df: pd.DataFrame,
+    ticker: str,
     train_pct: float = 0.70,
     val_pct: float = 0.10,
     test_pct: float = 0.20,
-) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Perform chronological split on ALL tickers simultaneously.
 
     CRITICAL: This must happen BEFORE any fitting operations.
 
     Args:
-        dfs: Dictionary of ticker -> DataFrame
+        df:  DataFrame
         train_pct: Training fraction (default 0.70)
         val_pct: Validation fraction (default 0.10)
         test_pct: Test fraction (default 0.20)
 
     Returns:
-        Tuple of (dfs_train, dfs_val, dfs_test)
+        Tuple of (df_train, dfs_val, dfs_test)
     """
     if abs(train_pct + val_pct + test_pct - 1.0) > 1e-6:
         raise ValueError(
             f"Split fractions must sum to 1.0, got {train_pct + val_pct + test_pct}"
         )
 
-    dfs_train = {}
-    dfs_val = {}
-    dfs_test = {}
+    N = len(df)
+    train_end = int(N * train_pct)
+    val_end = int(N * (train_pct + val_pct))
 
-    for ticker, df in dfs.items():
-        N = len(df)
-        train_end = int(N * train_pct)
-        val_end = int(N * (train_pct + val_pct))
+    df_train = df.iloc[:train_end].copy()
+    dfs_val = df.iloc[train_end:val_end].copy()
+    dfs_test = df.iloc[val_end:].copy()
 
-        dfs_train[ticker] = df.iloc[:train_end].copy()
-        dfs_val[ticker] = df.iloc[train_end:val_end].copy()
-        dfs_test[ticker] = df.iloc[val_end:].copy()
+    logger.info(
+        f"[{ticker}] Split: train={len(df_train)} "
+        f"val={len(dfs_val)} test={len(dfs_test)}"
+    )
 
-        logger.info(
-            f"[{ticker}] Split: train={len(dfs_train[ticker])} "
-            f"val={len(dfs_val[ticker])} test={len(dfs_test[ticker])}"
-        )
-
-    return dfs_train, dfs_val, dfs_test
+    return df_train, dfs_val, dfs_test
 
 
 def process_ticker_split_first(
     ticker: str,
-    dfs_train: Dict[str, pd.DataFrame],
-    dfs_val: Dict[str, pd.DataFrame],
-    dfs_test: Dict[str, pd.DataFrame],
-    universe_builder: SymbolUniverseBuilder,
+    df_train: pd.DataFrame,
+    dfs_val: pd.DataFrame,
+    dfs_test: pd.DataFrame,
     output_dir: Path,
     config: Config,
 ) -> None:
@@ -150,104 +139,32 @@ def process_ticker_split_first(
     4. TRANSFORM val/test with frozen parameters
     5. Save artifacts with provenance
     """
-    if ticker not in dfs_train:
-        logger.warning(f"Skipping {ticker} (not in training data)")
-        return
-
     logger.info(f"=" * 80)
     logger.info(f"[{ticker}] START SPLIT-FIRST PIPELINE")
     logger.info(f"=" * 80)
-
-    # ============================================================================
-    # STAGE 1: UNIVERSE & PEERS (FIT ON TRAINING ONLY)
-    # ============================================================================
-    logger.info(f"[{ticker}] Stage 1: Universe & Peer Selection (TRAINING ONLY)")
-
-    # Select universe and peers with error handling
-    try:
-        universe = universe_builder.get_universe(ticker, dfs_train, fit=True)
-        peers = universe_builder.get_fitted_peers(ticker)
-
-        logger.info(f"[{ticker}] Universe size: {len(universe)}")
-        logger.info(f"[{ticker}] Selected peers: {peers}")
-
-        # Validate peer data availability
-        missing_peers = [p for p in peers if p not in dfs_train]
-        if missing_peers:
-            logger.warning(
-                f"[{ticker}] Missing peer data: {missing_peers}. "
-                "These will be excluded from cross-ticker features."
-            )
-            # Remove missing peers
-            peers = [p for p in peers if p in dfs_train]
-
-        if not peers:
-            logger.warning(
-                f"[{ticker}] No valid peers available. "
-                "Cross-ticker features will be limited to market context only."
-            )
-    except Exception as e:
-        logger.error(f"[{ticker}] Peer selection failed: {e}", exc_info=True)
-        raise
-
-    # Extract universe context for feature generation
-    sector_etf = universe_builder.sector_map.get(ticker)
-    market_context = universe_builder.market_context
-    market_internals = universe_builder.market_internals
-
-    logger.info(f"[{ticker}] Sector ETF: {sector_etf}")
-    logger.info(f"[{ticker}] Market context: {market_context}")
-    logger.info(f"[{ticker}] Market internals: {market_internals}")
-
-    # Filter to available tickers per split
-    def filter_universe(
-        dfs: Dict[str, pd.DataFrame], split_name: str
-    ) -> Dict[str, pd.DataFrame]:
-        filtered = {t: dfs[t] for t in universe if t in dfs}
-        missing = set(universe) - set(filtered.keys())
-        if missing:
-            logger.warning(
-                f"[{ticker}] {split_name}: Missing {len(missing)} universe tickers: {missing}"
-            )
-        return filtered
-
-    dfs_train_u = filter_universe(dfs_train, "TRAIN")
-    dfs_val_u = filter_universe(dfs_val, "VAL")
-    dfs_test_u = filter_universe(dfs_test, "TEST")
 
     # ============================================================================
     # STAGE 2: RAW FEATURE GENERATION (PER SPLIT INDEPENDENTLY)
     # ============================================================================
     logger.info(f"[{ticker}] Stage 2: Raw Feature Generation")
 
+    peers = []
     X_train_raw, y_train_raw, feat_names_train, idx_train = generate_raw_features(
         ticker,
-        dfs_train_u,
-        peers,
+        df_train,
         split_name="TRAIN",
-        market_context=market_context,
-        sector_etf=sector_etf,
-        market_internals=market_internals,
     )
 
     X_val_raw, y_val_raw, feat_names_val, idx_val = generate_raw_features(
         ticker,
-        dfs_val_u,
-        peers,
+        dfs_val,
         split_name="VAL",
-        market_context=market_context,
-        sector_etf=sector_etf,
-        market_internals=market_internals,
     )
 
     X_test_raw, y_test_raw, feat_names_test, idx_test = generate_raw_features(
         ticker,
-        dfs_test_u,
-        peers,
+        dfs_test,
         split_name="TEST",
-        market_context=market_context,
-        sector_etf=sector_etf,
-        market_internals=market_internals,
     )
 
     # Verify feature consistency
@@ -415,59 +332,56 @@ def process_ticker_split_first(
     # ============================================================================
     logger.info(f"[{ticker}] Stage 8: Saving Artifacts")
 
-    ticker_dir = output_dir / ticker
-    ticker_dir.mkdir(parents=True, exist_ok=True)
-
     # Save arrays
     np.save(
-        ticker_dir / "X_train.npy",
+        output_dir / "X_train.npy",
         X_train_scaled.astype(np.float32),
         allow_pickle=False,
     )
     np.save(
-        ticker_dir / "y_train.npy",
+        output_dir / "y_train.npy",
         y_train_scaled.astype(np.float32),
         allow_pickle=False,
     )
     np.save(
-        ticker_dir / "X_val.npy", X_val_scaled.astype(np.float32), allow_pickle=False
+        output_dir / "X_val.npy", X_val_scaled.astype(np.float32), allow_pickle=False
     )
     np.save(
-        ticker_dir / "y_val.npy", y_val_scaled.astype(np.float32), allow_pickle=False
+        output_dir / "y_val.npy", y_val_scaled.astype(np.float32), allow_pickle=False
     )
     np.save(
-        ticker_dir / "X_test.npy", X_test_scaled.astype(np.float32), allow_pickle=False
+        output_dir / "X_test.npy", X_test_scaled.astype(np.float32), allow_pickle=False
     )
     np.save(
-        ticker_dir / "y_test.npy", y_test_scaled.astype(np.float32), allow_pickle=False
+        output_dir / "y_test.npy", y_test_scaled.astype(np.float32), allow_pickle=False
     )
 
     # Save indices
     np.save(
-        ticker_dir / "train_index.npy",
+        output_dir / "train_index.npy",
         idx_train.values.astype("datetime64[ns]"),
         allow_pickle=False,
     )
     np.save(
-        ticker_dir / "val_index.npy",
+        output_dir / "val_index.npy",
         idx_val.values.astype("datetime64[ns]"),
         allow_pickle=False,
     )
     np.save(
-        ticker_dir / "test_index.npy",
+        output_dir / "test_index.npy",
         idx_test.values.astype("datetime64[ns]"),
         allow_pickle=False,
     )
 
     # Save DataFrames (audit trail)
     pd.DataFrame(X_train_scaled, columns=selected_names, index=idx_train).to_parquet(
-        ticker_dir / f"{ticker}_train_features.parquet"
+        output_dir / f"{ticker}_train_features.parquet"
     )
     pd.DataFrame(X_val_scaled, columns=selected_names, index=idx_val).to_parquet(
-        ticker_dir / f"{ticker}_val_features.parquet"
+        output_dir / f"{ticker}_val_features.parquet"
     )
     pd.DataFrame(X_test_scaled, columns=selected_names, index=idx_test).to_parquet(
-        ticker_dir / f"{ticker}_test_features.parquet"
+        output_dir / f"{ticker}_test_features.parquet"
     )
 
     # Save frozen pipeline state
@@ -475,8 +389,6 @@ def process_ticker_split_first(
         "pipeline_version": "2.0.0_split_first",
         "ticker": ticker,
         "timestamp": datetime.utcnow().isoformat(),
-        "peers": peers,
-        "universe_size": len(universe),
         "feature_names_raw": feature_names,
         "feature_names_selected": selected_names,
         "wavelet": {
@@ -521,10 +433,10 @@ def process_ticker_split_first(
         },
     }
 
-    with open(ticker_dir / f"{ticker}_frozen_state.json", "w") as f:
+    with open(output_dir / f"{ticker}_frozen_state.json", "w") as f:
         json.dump(frozen_state, f, indent=2)
 
-    logger.info(f"[{ticker}] Artifacts saved to {ticker_dir}")
+    logger.info(f"[{ticker}] Artifacts saved to {output_dir}")
     logger.info(f"[{ticker}] PIPELINE COMPLETE")
     logger.info(f"=" * 80)
 
@@ -535,14 +447,57 @@ def process_ticker_split_first(
     gc.collect()
 
 
+def _parse_timeframe(timeframe: str) -> pd.Timedelta:
+    mapping = {
+        "1Min": pd.Timedelta(minutes=1),
+        "5Min": pd.Timedelta(minutes=5),
+        "15Min": pd.Timedelta(minutes=15),
+        "1Hour": pd.Timedelta(hours=1),
+        "1Day": pd.Timedelta(days=1),
+    }
+
+    if timeframe not in mapping:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    return mapping[timeframe]
+
+
+mapping = {
+    "1Min": "1min",
+    "5Min": "5min",
+    "15Min": "15min",
+    "1Hour": "1h",
+    "1Day": "1D",
+}
+
+
+def _load_tickers(path: str) -> list[str]:
+    with open(path) as f:
+        return [
+            l.split()[0] for l in f if l.split() and not l.split()[0].startswith("#")
+        ]
+
+
+def _load_parquet(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Parquet file not found: {path}")
+
+    df = pd.read_parquet(path)
+    df = df.sort_index()
+    logger.info(f"Loaded {path} | Rows: {len(df)}")
+    logger.info(f"Columns: {df.columns.tolist()}")
+
+    return df
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="TRD-Compliant Split-First Feature Engineering Pipeline"
     )
-
     parser.add_argument("--config", default="config/default_config.yaml")
+    parser.add_argument("--tickers", default="config/tickers.txt")
     parser.add_argument("--output", default="data/features_v2")
-    parser.add_argument("--prediction-target", type=str, default="AAPL")
+    parser.add_argument("--processed-dir", default="data/processed")
     parser.add_argument("--universe-config", default="config/symbol_universe.yaml")
 
     args = parser.parse_args()
@@ -560,148 +515,73 @@ def main() -> None:
 
     config = load_config(args.config)
 
-    # Load universe config
-    with open(args.universe_config) as f:
-        u_cfg = yaml.safe_load(f)
+    tickers = _load_tickers(args.tickers)
+    timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
 
-    valid_targets = set(u_cfg.get("prediction_targets", []))
-    all_symbols = set(
-        u_cfg.get("context_only", [])
-        + list(valid_targets)
-        + u_cfg.get("market_context", [])
-    )
+    def get_path(base_dir: Path, timeframe: str, ticker: str) -> Path:
+        return base_dir / timeframe / f"{ticker}.parquet"
 
-    target = args.prediction_target
+    processed_dir = Path(args.processed_dir)
+    features_dir = Path(args.output)
 
-    if target not in valid_targets:
-        raise ValueError(
-            f"Invalid prediction target: {target}. "
-            f"Must be one of: {sorted(valid_targets)}"
-        )
+    def ensure_directories_exist() -> None:
+        """
+        Ensures all required pipeline directories exist.
+        No deletion or modification of existing data is permitted.
+        """
 
-    logger.info(f"Selected prediction target: {target}")
-    logger.info(f"Universe symbols: {sorted(all_symbols)}")
+        required_dirs = [processed_dir, features_dir]
 
-    # ============================================================================
-    # STAGE 1: LOAD RAW DATA (ALL TICKERS)
-    # ============================================================================
-    logger.info("Stage 1: Loading raw OHLCV data")
+        dirs = []
+        for n in required_dirs:
+            for tf in timeframes:
+                path = n / tf
+                dirs.append(path)
 
-    processed_dir = Path("data/processed")
-    dfs = {}
+        for d in dirs:
+            d.mkdir(parents=True, exist_ok=True)
 
-    for symbol in all_symbols:
-        p = processed_dir / f"{symbol}.parquet"
-        if p.exists():
-            df = pd.read_parquet(p)
-            df.index = pd.to_datetime(df.index)
+    ensure_directories_exist()
 
+    for ticker in tickers:
+        logger.info("===== FEATURES PIPELINE START: %s =====", ticker)
+
+        for tf in timeframes:
+            logger.info("----- TIMEFRAME: %s -----", tf)
+            processed_path = get_path(processed_dir, tf, ticker)
+            if not processed_path.exists():
+                logger.warning("Missing processed data: %s", processed_path)
+                continue
+            processed_df = _load_parquet(processed_path)
             # Verify monotonic
-            if not df.index.is_monotonic_increasing:
-                logger.warning(f"[{symbol}] Non-monotonic index, sorting")
-                df = df.sort_index()
+            if not processed_df.index.is_monotonic_increasing:
+                logger.warning(f"[{ticker}] Non-monotonic index, sorting")
+                processed_df = processed_df.sort_index()
 
-            dfs[symbol] = df
-            logger.info(
-                f"[{symbol}] Loaded: {len(df)} samples, range=[{df.index.min()}, {df.index.max()}]"
+            compute_log_return_all(processed_df, ticker)
+            logger.info("Stage 4: Temporal Split (70/10/20) - CRITICAL STEP")
+
+            df_train, dfs_val, dfs_test = temporal_split_all(
+                processed_df, ticker=ticker, train_pct=0.70, val_pct=0.10, test_pct=0.20
             )
-        else:
-            logger.warning(f"[{symbol}] Missing parquet file: {p}")
 
-    logger.info(f"Loaded {len(dfs)} ticker DataFrames")
+            logger.info(
+                f"[{ticker}] Split complete: {len(df_train)} train, {len(dfs_val)} val, {len(dfs_test)} test"
+            )
+            output_dir = Path(args.output) / ticker / tf
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Validate universe data availability
-    missing_symbols = [s for s in all_symbols if s not in dfs]
-    if missing_symbols:
-        logger.warning(
-            f"Missing {len(missing_symbols)} universe symbols: {missing_symbols}. "
-            "This may affect feature quality. Consider ingesting missing data."
-        )
-        logger.warning(
-            "Impact: Some cross-ticker features may be unavailable or less informative."
-        )
-
-    # ============================================================================
-    # STAGE 2: SPY-ALIGNED REINDEXING (CRITICAL FOR CROSS-TICKER)
-    # ============================================================================
-    # logger.info("Stage 2: SPY-Aligned Reindexing (BEFORE split)")
-
-    # # CRITICAL: Align all tickers to SPY's index BEFORE splitting
-    # # This ensures all tickers have the SAME date range
-    # aligner = TickerAligner(benchmark_ticker="SPY")
-    # aligned_df = aligner.align(dfs, fields=["open", "high", "low", "close", "volume"])
-
-    # # Extract back to individual DataFrames
-    # dfs_aligned = {}
-    # tickers = aligned_df.columns.get_level_values("ticker").unique()
-    # for ticker in tickers:
-    #     dfs_aligned[ticker] = aligned_df[ticker].copy()
-    #     # dfs_aligned[ticker].columns = dfs_aligned[ticker].columns.droplevel(0)  # Remove ticker level
-    #     logger.info(
-    #         f"[{ticker}] Aligned: {len(dfs_aligned[ticker])} samples, "
-    #         f"NaN: {dfs_aligned[ticker].isna().sum().sum()}"
-    #     )
-
-    # dfs = dfs_aligned  # Replace with aligned data
-
-    # logger.info(f"All tickers aligned to SPY index: {len(dfs)} tickers")
-
-    # ============================================================================
-    # STAGE 3: COMPUTE LOG_RETURN (CAUSAL OPERATION)
-    # ============================================================================
-    logger.info("Stage 3: Computing log_return for all tickers")
-
-    compute_log_return_all(dfs)
-
-    # ============================================================================
-    # STAGE 4: TEMPORAL SPLIT (70/10/20) - BEFORE ANY FITTING
-    # ============================================================================
-    logger.info("Stage 4: Temporal Split (70/10/20) - CRITICAL STEP")
-
-    dfs_train, dfs_val, dfs_test = temporal_split_all(
-        dfs, train_pct=0.70, val_pct=0.10, test_pct=0.20
-    )
-
-    logger.info(
-        f"Split complete: {len(dfs_train)} train, {len(dfs_val)} val, {len(dfs_test)} test"
-    )
-
-    # ============================================================================
-    # STAGE 5: INITIALIZE UNIVERSE BUILDER
-    # ============================================================================
-    logger.info("Stage 5: Initializing Universe Builder")
-
-    universe_builder = SymbolUniverseBuilder.from_config(args.universe_config)
-
-    # ============================================================================
-    # STAGE 6: PROCESS TARGET TICKER
-    # ============================================================================
-    logger.info(f"Stage 6: Processing target ticker: {target}")
-
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    process_ticker_split_first(
-        target,
-        dfs_train,
-        dfs_val,
-        dfs_test,
-        universe_builder,
-        output_dir,
-        config,
-    )
-
-    # ============================================================================
-    # STAGE 7: SAVE UNIVERSE METADATA
-    # ============================================================================
-    peers_path = output_dir / "fitted_peers.json"
-    universe_builder.save_peers(peers_path)
-
-    logger.info(f"Saved peers metadata to {peers_path}")
-
-    logger.info("=" * 80)
-    logger.info(f"FEATURE ENGINEERING COMPLETE FOR TARGET={target}")
-    logger.info("=" * 80)
+            process_ticker_split_first(
+                ticker,
+                df_train,
+                dfs_val,
+                dfs_test,
+                output_dir,
+                config,
+            )
+            logger.info("=" * 80)
+            logger.info(f"FEATURE ENGINEERING COMPLETE FOR TARGET={ticker}")
+            logger.info("=" * 80)
 
 
 if __name__ == "__main__":

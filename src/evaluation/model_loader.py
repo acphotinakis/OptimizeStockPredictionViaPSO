@@ -100,7 +100,7 @@ class LSTMAdapter(ModelAdapter):
             logger.info(
                 f"Converting 2D features to 3D windows (lookback={self.lookback})"
             )
-            from src.models import build_lstm_windows
+            from src.data.windowing import build_lstm_windows
 
             # Create dummy targets for windowing
             dummy_y = np.zeros(len(X))

@@ -22,6 +22,7 @@ Version: 2.1.0 CONFIG-COMPLIANT
 """
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
 import numpy as np
@@ -29,6 +30,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .lstm_model import LSTMModel
 from .utils import set_seeds

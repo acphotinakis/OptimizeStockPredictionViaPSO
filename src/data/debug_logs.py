@@ -27,9 +27,7 @@ print("Project root:", PROJECT_ROOT)
 print("sys.path updated:")
 print(sys.path)
 
-from src.data.aligner import TickerAligner
 from src.data.alpaca_ingestor import AlpacaIngestor
-from src.data.cleaner import DataCleaner
 from src.utils.logger import setup_logger
 from src.utils.config_loader import Config, load_config
 from constants import MAX_GAP_FILL_BARS
@@ -402,7 +400,7 @@ def log_all_timeframe_rows(rows: list[dict]):
     df["volatility"] = df["df"].apply(lambda x: x["close"].pct_change().std())
     df["missing_rate"] = df["df"].apply(lambda x: x.isna().mean().mean())
 
-    df = df.drop(columns=["df"]).sort_values(["ticker", "feed", "timeframe"])
+    # df = df.drop(columns=["df"]).sort_values(["ticker", "feed", "timeframe"])
 
     table = PrettyTable()
     table.field_names = list(df.columns)

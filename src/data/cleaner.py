@@ -1,34 +1,23 @@
-"""
-src/data/cleaner.py
-
-TRD Stage 2: Data Cleaning (STRICT)
-
-Guarantees:
-- Causal (no look-ahead bias)
-- Observation-based gap classification
-- Bounded forward-fill (≤ MAX_GAP)
-- Deterministic long-gap removal
-- Strict OHLCV validity
-- No NaNs in output OHLCV
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import logging
 import sys
 from pathlib import Path
+from pandas import Timedelta
 
-project_root = Path(__file__).parent.parent.parent
+
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 logger = logging.getLogger(__name__)
 
 from constants import MAX_GAP_FILL_BARS
+from src.data.debug_logs import _log_ohlcv_validation_report
 
 
 class DataCleaner:
@@ -47,24 +36,60 @@ class DataCleaner:
 
     def __init__(
         self,
+        ticker: str,
+        timeframe: str,
         max_gap_fill: int = MAX_GAP_FILL_BARS,
     ) -> None:
         self.max_gap_fill = max_gap_fill
-        self.validation_errors: List[str] = []
+        self.validation_errors: Dict[str, Dict[str, Any]] = {}
+        self.ticker = ticker
+        self.timeframe = timeframe
+
+    def _parse_timeframe(self, timeframe: str) -> pd.Timedelta:
+        mapping = {
+            "1Min": Timedelta(minutes=1),
+            "5Min": Timedelta(minutes=5),
+            "15Min": Timedelta(minutes=15),
+            "1Hour": Timedelta(hours=1),
+            "1Day": Timedelta(days=1),
+        }
+
+        if timeframe not in mapping:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        return mapping[timeframe]
+
+    def _reindex_to_full_grid(self, df: pd.DataFrame) -> pd.DataFrame:
+        freq = self._parse_timeframe(self.timeframe)
+        logger.info(f"First 10 rows BEFORE reindex")
+        logger.info(df[:10])
+        full_index = pd.date_range(
+            start=df.index.min(),
+            end=df.index.max(),
+            freq=freq,
+            # tz=df.index.tz,
+            tz="America/New_York",
+        )
+
+        df = df.reindex(full_index)
+
+        logger.info(f"First 10 rows AFTER reindex")
+        logger.info(df[:10])
+        return df
 
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
-    def clean(self, df: pd.DataFrame) -> pd.DataFrame:
+    def clean(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         df = df.copy()
 
         # Handle empty DataFrame early
         if len(df) == 0:
             logger.info("Empty DataFrame provided to clean(); returning as-is")
-            return df
+            return df, {}
 
         if df.empty:
-            return df
+            return df, {}
 
         # -----------------------------
         # 1. Ensure ordering invariant
@@ -90,53 +115,125 @@ class DataCleaner:
         # -----------------------------
         # 3. Strict OHLCV validation
         # -----------------------------
-        df = self._validate_ohlcv(df)
+        df, ohlcv_report = self._validate_ohlcv(df)
+        self.validation_errors["ohlcv_report"] = ohlcv_report
 
         # -----------------------------
         # 4. Gap classification (OBSERVATION-BASED)
         # -----------------------------
+        # df = self._reindex_to_full_grid(df)
+
         gap_info = self._compute_observation_gaps(df)
+        self.validation_errors["gap_info"] = gap_info
 
         # -----------------------------
         # 5. Apply bounded causal forward fill
         # -----------------------------
-        df = self._bounded_forward_fill(df, gap_info)
+        df, _bounded_forward_fill_report = self._bounded_forward_fill(df, gap_info)
+        self.validation_errors["_bounded_forward_fill_report"] = (
+            _bounded_forward_fill_report
+        )
+        logger.info(f"First 10 rows FORWARD FILL")
+        logger.info(f"\n{df[:10]}")
+        # sys.exit(0)
+        # df, _remove_long_gaps_report = self._remove_long_gaps(df, gap_info)
+        # self.validation_errors["_remove_long_gaps_report"] = _remove_long_gaps_report
 
         # -----------------------------
         # 6. Remove long gaps (> 5)
         # -----------------------------
-        df = self._remove_long_gaps(df, gap_info)
+        df, _remove_long_gaps_report = self._remove_long_gaps_by_segments(
+            df, gap_info["gap_segments"]
+        )
+        self.validation_errors["_remove_long_gaps_report"] = _remove_long_gaps_report
+        logger.info(f"First 10 rows LONG GAP REMOVAL")
+        logger.info(f"\n{df[:10]}")
 
         # -----------------------------
         # 7. Final invariant enforcement
         # -----------------------------
-        df = self._final_validation(df)
+        df, _final_validation_report = self._final_validation(df)
+        self.validation_errors["_final_validation_report"] = _final_validation_report
 
         logger.info("Cleaned DataFrame: %d rows", len(df))
-        return df
+        return df, self.validation_errors
+
+    def _remove_long_gaps_by_segments(self, df: pd.DataFrame, gaps: list[dict]):
+        report = {
+            "rows_before": len(df),
+            "max_gap_fill": self.max_gap_fill,
+            "long_gap_count": 0,
+            "removed_indices_sample": [],
+            "removed_fraction": 0.0,
+        }
+
+        mask = pd.Series(False, index=df.index)
+
+        long_gaps = [g for g in gaps if g["missing_observations"] > self.max_gap_fill]
+        report["long_gap_count"] = len(long_gaps)
+
+        # build removal mask
+        for g in long_gaps:
+            gap_mask = (df.index > g["start"]) & (df.index < g["end"])
+            mask |= gap_mask
+
+        removed = int(mask.sum())
+
+        if removed > 0:
+            report["removed_indices_sample"] = list(df.index[mask][:10])
+
+        df = df[~mask].copy()
+
+        report["rows_after"] = len(df)
+        report["rows_removed"] = removed
+        report["removed_fraction"] = (
+            removed / report["rows_before"] if report["rows_before"] > 0 else 0.0
+        )
+
+        logger.info(
+            "Long gap removal | removed_rows=%d | remaining=%d",
+            removed,
+            len(df),
+        )
+
+        return df, report
 
     # =========================================================
     # STEP 3: OHLCV VALIDATION
     # =========================================================
 
-    def _validate_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _validate_ohlcv(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         logger.info(
-            "STEP 3 | OHLCV validation started | rows=%d | cols=%d",
+            "OHLCV validation started | rows=%d | cols=%d",
             len(df),
             len(df.columns),
         )
 
         required = ["open", "high", "low", "close", "volume"]
 
-        missing = set(required) - set(df.columns)
+        report: Dict = {
+            "initial_rows": len(df),
+            "missing_columns": [],
+            "invalid_count": 0,
+            "valid_count": 0,
+            "dropped_count": 0,
+        }
+
+        # ------------------------------------------------------------------
+        # Column validation
+        # ------------------------------------------------------------------
+        missing = list(set(required) - set(df.columns))
+        report["missing_columns"] = missing
+
         if missing:
             logger.error("OHLCV validation failed | missing_columns=%s", missing)
             raise ValueError(f"Missing required columns: {missing}")
 
         logger.info("OHLCV validation | required columns present=%s", required)
 
-        initial_rows = len(df)
-
+        # ------------------------------------------------------------------
+        # Row validation mask
+        # ------------------------------------------------------------------
         mask = (
             (df["high"] >= df["low"])
             & (df["open"] > 0)
@@ -148,98 +245,102 @@ class DataCleaner:
             & (df["close"] <= df["high"])
         )
 
-        invalid_count = (~mask).sum()
+        invalid_mask = ~mask
 
-        logger.info(
-            "OHLCV validation | invalid_rows_detected=%d | valid_rows=%d",
-            invalid_count,
-            mask.sum(),
-        )
+        invalid_count = int(invalid_mask.sum())
+        valid_count = int(mask.sum())
 
+        report["invalid_count"] = invalid_count
+        report["valid_count"] = valid_count
+        report["drop_rate"] = invalid_count / len(df) if len(df) > 0 else 0.0
+
+        # ------------------------------------------------------------------
+        # Breakdown stats
+        # ------------------------------------------------------------------
         if invalid_count > 0:
-            # Optional breakdown for debugging
-            logger.info(
-                "Invalid OHLCV breakdown | high<low=%d | open<=0=%d | high<=0=%d | low<=0=%d | close<=0=%d | volume<0=%d | close_out_of_bounds=%d",
-                (df["high"] < df["low"]).sum(),
-                (df["open"] <= 0).sum(),
-                (df["high"] <= 0).sum(),
-                (df["low"] <= 0).sum(),
-                (df["close"] <= 0).sum(),
-                (df["volume"] < 0).sum(),
-                ((df["close"] < df["low"]) | (df["close"] > df["high"])).sum(),
-            )
+            report["breakdown"] = {
+                "high_lt_low": int((df["high"] < df["low"]).sum()),
+                "open_le_0": int((df["open"] <= 0).sum()),
+                "high_le_0": int((df["high"] <= 0).sum()),
+                "low_le_0": int((df["low"] <= 0).sum()),
+                "close_le_0": int((df["close"] <= 0).sum()),
+                "volume_lt_0": int((df["volume"] < 0).sum()),
+                "close_out_of_bounds": int(
+                    ((df["close"] < df["low"]) | (df["close"] > df["high"])).sum()
+                ),
+            }
 
             logger.info(
                 "Dropping invalid OHLCV rows | dropped=%d | remaining=%d",
                 invalid_count,
-                mask.sum(),
+                valid_count,
             )
 
-        df = df[mask]
+        # ------------------------------------------------------------------
+        # Apply filter
+        # ------------------------------------------------------------------
+        df = df[mask].copy()
+
+        report["dropped_count"] = invalid_count
+        report["final_rows"] = len(df)
 
         logger.info(
-            "STEP 3 | OHLCV validation complete | rows_before=%d | rows_after=%d | dropped=%d",
-            initial_rows,
-            len(df),
-            initial_rows - len(df),
+            "OHLCV validation complete | rows_before=%d | rows_after=%d | dropped=%d",
+            report["initial_rows"],
+            report["final_rows"],
+            report["dropped_count"],
         )
 
-        return df
+        return df, report
 
     # =========================================================
     # STEP 4: GAP CLASSIFICATION (OBSERVATION-BASED)
     # =========================================================
 
     def _compute_observation_gaps(self, df: pd.DataFrame) -> dict:
-        """
-        Classify gaps in time series data (observation-based).
-
-        FIX Issue #3: For daily data, median time delta correctly handles
-        weekends/holidays (2-4 day gaps are common and expected).
-        Gap sizes are measured in multiples of the expected interval.
-
-        The max_gap_fill=5 parameter means: 5 consecutive MISSING observations,
-        not 5 days. For daily data with weekends, this typically means ~2 weeks.
-        """
         logger.info("STEP 4 | Gap classification started | rows=%d", len(df))
 
-        time_deltas = df.index.to_series().diff()
+        is_missing = df["close"].isna()
 
-        expected = time_deltas.median()
+        gaps = []
+        in_gap = False
+        start = None
+        length = 0
 
-        logger.info("Gap classification | inferred_expected_interval=%s", expected)
+        for i, missing in enumerate(is_missing.values):
+            if missing:
+                if not in_gap:
+                    in_gap = True
+                    start = df.index[i]
+                    length = 1
+                else:
+                    length += 1
+            else:
+                if in_gap:
+                    gaps.append(
+                        {
+                            "start": start,
+                            "end": df.index[i - 1],
+                            "missing_observations": length,
+                        }
+                    )
+                    in_gap = False
+                    length = 0
 
-        gap_sizes = (time_deltas / expected).fillna(0).astype(int)
-
-        gap_start = gap_sizes > 1
-
-        gap_lengths = gap_sizes.cumsum()
-
-        total_gaps = gap_start.sum()
-        max_gap = gap_sizes.max()
-
-        logger.info(
-            "Gap classification summary | total_gap_starts=%d | max_gap_size=%d",
-            total_gaps,
-            max_gap,
-        )
-
-        # Optional deeper diagnostics
-        if total_gaps > 0:
-            logger.info(
-                "Gap sizes distribution | min=%d | median=%.2f | max=%d",
-                gap_sizes.min(),
-                gap_sizes.median(),
-                gap_sizes.max(),
+        if in_gap:
+            gaps.append(
+                {
+                    "start": start,
+                    "end": df.index[-1],
+                    "missing_observations": length,
+                }
             )
 
-            logger.info("Gap start indices sample=%s", list(df.index[gap_start][:10]))
-
         return {
-            "gap_start": gap_start,
-            "gap_sizes": gap_sizes,
-            "gap_lengths": gap_lengths,
-            "expected_interval": expected,
+            "gap_segments": gaps,
+            "max_gap": max((g["missing_observations"] for g in gaps), default=0),
+            "min_gap": min((g["missing_observations"] for g in gaps), default=0),
+            "total_gaps": len(gaps),
         }
 
     # =========================================================
@@ -250,7 +351,7 @@ class DataCleaner:
         self,
         df: pd.DataFrame,
         gap_info: dict,
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, Dict]:
 
         logger.info(
             "STEP 5 | Bounded forward fill started | max_gap_fill=%d | rows=%d",
@@ -260,44 +361,93 @@ class DataCleaner:
 
         cols = ["open", "high", "low", "close", "volume"]
 
-        result = df.copy()
+        result = df.copy(deep=True)
+
+        report = {
+            "max_gap_fill": self.max_gap_fill,
+            "rows_before": len(df),
+            "rows_after": len(df),
+            "gap_info_present": gap_info is not None,
+            "columns": {},
+            "total_filled": 0,
+            "total_skipped": 0,
+            "total_leading_nan": 0,
+            "total_gap_exceeded": 0,
+        }
+
+        # Safer NaN counting
+        report["nan_before"] = int(pd.isna(result[cols]).sum().sum())
 
         for col in cols:
             logger.info("Forward-fill processing column=%s", col)
 
-            values = result[col].values
+            # Always operate on a copy (avoid numpy view issues)
+            values = result[col].to_numpy(copy=True)
 
             last_valid = None
             gap_count = 0
 
             filled = 0
             skipped = 0
+            leading_nan = 0
+            gap_exceeded = 0
+
+            # Total NaNs in this column BEFORE filling
+            total_nan_col = int(pd.isna(values).sum())
 
             for i in range(len(values)):
-                if not np.isnan(values[i]):
+                if not pd.isna(values[i]):
                     last_valid = values[i]
                     gap_count = 0
                 else:
-                    if last_valid is not None and gap_count < self.max_gap_fill:
+                    if last_valid is None:
+                        # No previous value → cannot fill
+                        leading_nan += 1
+                        skipped += 1
+                    elif gap_count < self.max_gap_fill:
                         values[i] = last_valid
                         gap_count += 1
                         filled += 1
                     else:
-                        values[i] = np.nan
+                        # Gap exceeded
+                        gap_exceeded += 1
                         skipped += 1
 
             result[col] = values
 
+            fill_ratio = filled / total_nan_col if total_nan_col > 0 else -1
+
+            report["columns"][col] = {
+                "filled": filled,
+                "skipped": skipped,
+                "leading_nan": leading_nan,
+                "gap_exceeded": gap_exceeded,
+                "fill_ratio": fill_ratio,
+                "nan_before": total_nan_col,
+            }
+
+            report["total_filled"] += filled
+            report["total_skipped"] += skipped
+            report["total_leading_nan"] += leading_nan
+            report["total_gap_exceeded"] += gap_exceeded
+
             logger.info(
-                "Forward-fill column complete | column=%s | filled=%d | left_as_nan=%d",
+                "Forward-fill column complete | column=%s | filled=%d | skipped=%d | leading_nan=%d | gap_exceeded=%d",
                 col,
                 filled,
                 skipped,
+                leading_nan,
+                gap_exceeded,
             )
+
+        report["nan_after"] = int(pd.isna(result[cols]).sum().sum())
+
+        # Row-level validity (all OHLCV present)
+        report["rows_fully_valid_after"] = int(result[cols].notna().all(axis=1).sum())
 
         logger.info("STEP 5 complete | bounded forward fill finished")
 
-        return result
+        return result, report
 
     # =========================================================
     # STEP 6: LONG GAP REMOVAL (> 5 OBSERVATIONS)
@@ -307,9 +457,16 @@ class DataCleaner:
         self,
         df: pd.DataFrame,
         gap_info: dict,
-    ) -> pd.DataFrame:
-
+    ):
         logger.info("STEP 6 | Long gap removal started | rows=%d", len(df))
+
+        report = {
+            "rows_before": len(df),
+            "max_gap_fill": self.max_gap_fill,
+            "long_gap_count": 0,
+            "removed_indices_sample": [],
+            "removed_fraction": 0.0,
+        }
 
         is_missing = df["close"].isna()
 
@@ -318,7 +475,10 @@ class DataCleaner:
 
         long_gap_mask = is_missing & (gap_lengths > self.max_gap_fill)
 
-        long_gap_count = long_gap_mask.sum()
+        long_gap_count = int(long_gap_mask.sum())
+
+        report["long_gap_count"] = long_gap_count
+        report["removed_fraction"] = long_gap_count / len(df) if len(df) > 0 else 0.0
 
         logger.info(
             "Long gap detection | long_gap_rows=%d | threshold=%d",
@@ -326,42 +486,73 @@ class DataCleaner:
             self.max_gap_fill,
         )
 
+        # ------------------------------------------------------------
+        # Sample indices for debugging
+        # ------------------------------------------------------------
         if long_gap_count > 0:
+            sample_idx = list(df.index[long_gap_mask][:10])
+
+            report["removed_indices_sample"] = sample_idx
+
             logger.info(
-                "Long gap indices sample=%s", list(df.index[long_gap_mask][:10])
+                "Long gap indices sample=%s",
+                sample_idx,
             )
 
-        df = df[~long_gap_mask]
+        # ------------------------------------------------------------
+        # Apply removal
+        # ------------------------------------------------------------
+        df = df[~long_gap_mask].copy()
+
+        report["rows_after"] = len(df)
+        report["rows_removed"] = long_gap_count
 
         logger.info(
             "STEP 6 complete | rows_after_removal=%d | removed=%d",
-            len(df),
+            report["rows_after"],
             long_gap_count,
         )
 
-        return df
+        return df, report
 
     # =========================================================
     # STEP 7: FINAL INVARIANT ENFORCEMENT
     # =========================================================
 
-    def _final_validation(self, df: pd.DataFrame) -> pd.DataFrame:
-
+    def _final_validation(self, df: pd.DataFrame):
         logger.info("STEP 7 | Final invariant validation started | rows=%d", len(df))
 
         cols = ["open", "high", "low", "close", "volume"]
 
-        null_count = df[cols].isna().sum().sum()
+        report = {
+            "rows": len(df),
+            "nan_count": 0,
+            "close_invalid": 0,
+            "volume_invalid": 0,
+            "is_valid": True,
+        }
+
+        # ------------------------------------------------------------
+        # NaN validation
+        # ------------------------------------------------------------
+        null_count = int(df[cols].isna().sum().sum())
+        report["nan_count"] = null_count
 
         if null_count > 0:
             logger.error("Final validation failed | NaNs_remaining=%d", null_count)
+            report["is_valid"] = False
             raise ValueError(f"NaNs present in OHLCV after cleaning: {null_count}")
 
         logger.info("No NaNs in OHLCV confirmed")
 
-        # value sanity checks
-        close_invalid = (df["close"] <= 0).sum()
-        volume_invalid = (df["volume"] < 0).sum()
+        # ------------------------------------------------------------
+        # Value sanity checks
+        # ------------------------------------------------------------
+        close_invalid = int((df["close"] <= 0).sum())
+        volume_invalid = int((df["volume"] < 0).sum())
+
+        report["close_invalid"] = close_invalid
+        report["volume_invalid"] = volume_invalid
 
         logger.info(
             "Value validation | close_invalid=%d | volume_invalid=%d",
@@ -369,12 +560,22 @@ class DataCleaner:
             volume_invalid,
         )
 
-        assert (df["close"] > 0).all()
-        assert (df["volume"] >= 0).all()
+        # ------------------------------------------------------------
+        # Hard invariants
+        # ------------------------------------------------------------
+        if not (df["close"] > 0).all():
+            report["is_valid"] = False
+            raise ValueError("Invalid close values detected (<= 0)")
+
+        if not (df["volume"] >= 0).all():
+            report["is_valid"] = False
+            raise ValueError("Invalid volume values detected (< 0)")
+
+        report["is_valid"] = True
 
         logger.info("STEP 7 complete | dataset is TRD-compliant")
 
-        return df
+        return df, report
 
     # =========================================================
     # SYNCHRONIZED CLEANING SUPPORT (Issue #2 Fix)

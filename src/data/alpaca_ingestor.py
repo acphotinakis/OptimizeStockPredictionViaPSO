@@ -199,7 +199,7 @@ class AlpacaIngestor:
         start: str,
         end: str,
         timeframe: str,
-        data_feed: str,
+        data_feed: str = "sip",
         skip_existing: bool = False,
     ) -> None:
         """Download all tickers and persist each as a Parquet file.
@@ -295,28 +295,6 @@ class AlpacaIngestor:
 
         #     time.sleep(self.RATE_LIMIT_SLEEP)
 
-    def load_bars(self, path: str | Path) -> pd.DataFrame:
-        df = pd.read_parquet(path)
-
-        df.index = pd.to_datetime(df.index, utc=True)
-
-        df = df.sort_index()
-
-        if not df.index.is_monotonic_increasing:
-            raise ValueError("Timestamp ordering violated on load")
-
-        return df
-
-    @staticmethod
-    def _load_bars(path: str | Path) -> pd.DataFrame:
-        df = pd.read_parquet(path)
-
-        df.index = pd.to_datetime(df.index, utc=True)
-
-        df = df.sort_index()
-
-        return df
-
     def downcast_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reduce memory by downcasting numeric types.
 
@@ -361,6 +339,7 @@ class AlpacaIngestor:
 
     def _append_parquet(self, df: pd.DataFrame, path: Path) -> None:
         """Append or create parquet safely (via concat + rewrite)."""
+
         if path.exists():
             existing = pd.read_parquet(path)
             df = pd.concat([existing, df])
@@ -370,4 +349,5 @@ class AlpacaIngestor:
 
             df = df.sort_index()
 
+        logger.info(f"appending to parquet: {path}")
         df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)

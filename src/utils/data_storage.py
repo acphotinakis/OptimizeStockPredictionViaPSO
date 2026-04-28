@@ -25,6 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# LOAD DATA FUNCTIONS
+# ---------------------------------------------------------------------------
+
+
 def load_training_data(ticker_dir: Path):
     logger.info("\n[TRAIN] Loading data...")
 
@@ -99,3 +104,80 @@ def load_feature_names(features_dir: Path, ticker: str) -> list:
         raise TypeError(f"'feature_names' in {path} is not a list")
 
     return feature_names
+
+
+def _load_parquet(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Parquet file not found: {path}")
+
+    df = pd.read_parquet(path)
+    df = df.sort_index()
+    logger.info(f"Loaded {path} | Rows: {len(df)}")
+    logger.info(f"Columns: {df.columns.tolist()}")
+
+    return df
+
+
+mapping = {
+    "1Min": "1min",
+    "5Min": "5min",
+    "15Min": "15min",
+    "1Hour": "1h",
+    "1Day": "1D",
+}
+
+
+def _load_parquet_close_volume(path: Path, tf: str) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Parquet file not found: {path}")
+
+    df = pd.read_parquet(path)
+    df = df.asfreq(mapping[tf])
+    df = df[["close"]]
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    logger.info(f"Loaded {path} | Rows: {len(df)}")
+    logger.info(f"Columns: {df.columns.tolist()}")
+
+    return df
+
+
+def load_all_timeframes(raw_output_dir: Path, ticker: str, timeframes: list[str]):
+    data = {}
+
+    for tf in timeframes:
+        path = raw_output_dir / tf / f"{ticker}.parquet"
+        if not path.exists():
+            logger.warning("Missing %s", path)
+            continue
+
+        df = _load_parquet(path)
+        cols = ["open", "high", "low", "close", "volume"]
+        df = df[cols]
+
+        # ------------------------------------------------------------
+        # 1. Ensure datetime index
+        # ------------------------------------------------------------
+        df.index = pd.to_datetime(df.index, utc=True)
+
+        # ------------------------------------------------------------
+        # 2. Convert UTC → America/New_York (DST-aware)
+        # ------------------------------------------------------------
+        # df.index = df.index.tz_convert("America/New_York")
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("America/New_York")
+        else:
+            df.index = df.index.tz_convert("America/New_York")
+
+        data[tf] = df
+
+    return data
+
+
+# ---------------------------------------------------------------------------
+# SAVE DATA FUNCTIONS
+# ---------------------------------------------------------------------------
+def _save_parquet(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)
+    logger.info("Saved %s (%d rows)", path.name, len(df))

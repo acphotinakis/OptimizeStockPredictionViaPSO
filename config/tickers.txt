@@ -6,24 +6,28 @@
 AAPL
 MSFT
 GOOGL
-META
-INTC
+#META
+#INTC
 
 NVDA
-ADBE
-CRM
+#ADBE
+#CRM
+
+TSLA
+AMD
+
 
 # Market internals
-UVXY
-GLD
-TLT
+#UVXY
+#GLD
+#TLT
 
 # ETF
-XLK
-SOXX
+#XLK
+#SOXX
 
 # Benchmark ETF
 SPY
 QQQ
-IWM
-DIA
+#IWM
+#DIA

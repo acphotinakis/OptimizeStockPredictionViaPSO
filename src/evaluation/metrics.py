@@ -329,17 +329,17 @@ def _log_metrics(
 
         if metric_type == "stats":
             if k in {"rmse", "mae", "mape"}:
-                parts.append(f"{k.upper()}={v:.6f}")
+                parts.append(f"{k.upper()}={v:.10f}")
             else:
-                parts.append(f"{k.upper()}={v:.4f}")
+                parts.append(f"{k.upper()}={v:.10f}")
 
         elif metric_type == "trading":
             if k == "n_bars":
                 parts.append(f"{k.upper()}={int(v)}")
             elif k in {"max_drawdown", "cagr", "win_rate"}:
-                parts.append(f"{k.upper()}={v:.4%}")
+                parts.append(f"{k.upper()}={v:.10%}")
             else:
-                parts.append(f"{k.upper()}={v:.4f}")
+                parts.append(f"{k.upper()}={v:.10f}")
 
     logger.info(f"{label} — " + "  ".join(parts))
 
@@ -351,10 +351,10 @@ def _log_results(
 ) -> None:
     logger.info("=" * 55)
     logger.info("STATISTICAL METRICS")
-    logger.info("  RMSE : %.6f", stat_metrics["rmse"])
-    logger.info("  DA   : %.4f", stat_metrics["directional_accuracy"])
-    logger.info("  F1   : %.4f", stat_metrics["f1_ternary"])
-    logger.info("  R²   : %.4f", stat_metrics["r2"])
+    logger.info("  RMSE : %.10f", stat_metrics["rmse"])
+    logger.info("  DA   : %.10f", stat_metrics["directional_accuracy"])
+    logger.info("  F1   : %.10f", stat_metrics["f1_ternary"])
+    logger.info("  R²   : %.10f", stat_metrics["r2"])
     logger.info("TRADING METRICS (θ=%.5f)", theta)
     logger.info("  Sharpe        : %.3f", result.sharpe)
     logger.info("  Sortino       : %.3f", result.sortino)
