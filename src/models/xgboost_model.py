@@ -1,25 +1,11 @@
-"""
-XGBoost Regression Model for Financial Time-Series
-
-Production-grade inference wrapper around xgboost.XGBRegressor.
-Training logic has been moved to XGBoostTrainer; this class owns
-prediction, evaluation, and persistence only.
-
-TRD Compliance:
-- Tabular input format (N, F_selected)
-- No feature engineering in model layer
-- No normalization in model layer
-- Regression objective (next-period return)
-
-Author: System Architect
-Version: 2.0.0 REFACTORED
-"""
-
 import logging
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import xgboost as xgb
+
+from src.evaluation.metrics import compute_and_log_all_statistical_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +57,9 @@ class XGBoostModel:
         preds = self.booster.predict(dmatrix)
         return preds.astype(np.float32)
 
-    def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
+    def evaluate(
+        self, X_test: np.ndarray, y_test: np.ndarray
+    ) -> Tuple[Dict[str, float], np.ndarray]:
         """
         Evaluate model on test set.
 
@@ -87,32 +75,30 @@ class XGBoostModel:
 
         self._validate_inputs(X_test, y_test, "test")
 
-        y_pred = self.booster.predict(X_test)
+        # y_pred = self.booster.predict(X_test)
+        y_pred = self.predict(X_test)
 
-        mse = float(np.mean((y_test - y_pred) ** 2))
-        mae = float(np.mean(np.abs(y_test - y_pred)))
-        rmse = float(np.sqrt(mse))
+        metrics = compute_and_log_all_statistical_metrics(
+            y_test, y_pred, "XGBoost Evaluate Metrics"
+        )
 
-        correct_direction = np.sum(np.sign(y_test) == np.sign(y_pred))
-        directional_accuracy = float(correct_direction / len(y_test))
-
-        metrics = {
-            "mse": mse,
-            "mae": mae,
-            "rmse": rmse,
-            "directional_accuracy": directional_accuracy,
-        }
+        metrics["n_samples"] = len(y_test)
 
         logger.info("=" * 80)
         logger.info("TEST EVALUATION")
         logger.info("=" * 80)
-        logger.info(f"MSE:  {mse:.6f}")
-        logger.info(f"MAE:  {mae:.6f}")
-        logger.info(f"RMSE: {rmse:.6f}")
-        logger.info(f"Directional Accuracy: {directional_accuracy:.2%}")
-        logger.info("=" * 80)
 
-        return metrics
+        logger.info(f"RMSE: {metrics['rmse']:.6f}")
+        logger.info(f"MAE:  {metrics['mae']:.6f}")
+        logger.info(f"MAPE: {metrics['mape']:.6f}")
+        logger.info(f"R²:   {metrics['r2']:.6f}")
+        logger.info(f"DA:   {metrics['directional_accuracy']:.4f}")
+        logger.info(f"F1:   {metrics['f1_ternary']:.4f}")
+        logger.info(f"AUC:  {metrics['auc_ternary']:.4f}")
+        logger.info(f"N:    {metrics['n_samples']}")
+
+        logger.info("=" * 80)
+        return metrics, y_pred
 
     def save(self, filepath: str) -> None:
         """Save model to disk (XGBoost JSON format)."""
@@ -122,7 +108,7 @@ class XGBoostModel:
         logger.info(f"Model saved to {filepath}")
 
     @classmethod
-    def load(cls, path: str, feature_names: List[str], feature_importance: Dict):
+    def load(cls, path: Path, feature_names: List[str], feature_importance: Dict):
         booster = xgb.Booster()
         booster.load_model(path)
         logger.info(f"Model loaded from {path}")

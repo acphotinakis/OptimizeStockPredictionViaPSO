@@ -1,27 +1,3 @@
-#!/usr/bin/env python3
-"""
-Canonical Baseline LSTM Training Script
-
-Implements static (single-fit) Baseline LSTM training as defined in FINAL_PLAN.md Section 4.1.
-
-CRITICAL RULES:
-- Train EXACTLY ONCE on 70% training data
-- Use 10% validation for early stopping
-- Fixed hyperparameters (NEVER tuned)
-- NO shuffling (shuffle=False mandatory)
-- Model is FROZEN after training
-- NO retraining during walk-forward
-
-Usage:
-    python pipelines/canonical_train_baseline_lstm.py \\
-        --data-path data/processed/features_unified/AAPL \\
-        --config config/canonical_config.yaml \\
-        --output-dir results/canonical/models/baseline_lstm
-
-Author: System Architect
-Version: CANONICAL 1.0
-Source: FINAL_PLAN.md Section 4.1
-"""
 from __future__ import annotations
 
 import argparse
@@ -33,11 +9,13 @@ from typing import Dict, Optional
 
 import numpy as np
 import yaml
+import uuid
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from plots.lstm_baseline_plots import generate_all_plots
 from src.models import LSTMModel, LSTMTrainer, set_seeds
 from src.data.windowing import build_lstm_windows
 from src.utils.config_loader import Config, load_config
@@ -46,10 +24,6 @@ from src.utils.logger import LogFileMode, setup_logger
 logger = logging.getLogger(__name__)
 
 MODEL_TYPE = "lstm_baseline"
-
-
-def build_output_dir(ticker: str) -> Path:
-    return PROJECT_ROOT / "results" / "train" / ticker / MODEL_TYPE / "v1"
 
 
 def load_feature_data(data_path: Path) -> dict:
@@ -138,7 +112,7 @@ def load_test_data(data_path: Path, lookback: int) -> tuple[np.ndarray, np.ndarr
 
 
 def load_trained_model(
-    model_dir: Path, config, device: Optional[str] = None
+    model_dir: Path, config: Config, device: Optional[str] = None
 ) -> LSTMModel:
     """Reconstruct LSTM architecture and load frozen weights."""
     model_path = model_dir / "baseline_lstm_model.pt"
@@ -193,7 +167,7 @@ def save_results(
         "metrics": metrics,
         "provenance": {
             "model_dir": str(model_dir.resolve()),
-            "model_type": "baseline_lstm",
+            "model_type": MODEL_TYPE,
             "protocol": "CANONICAL_1.0",
         },
     }
@@ -203,27 +177,60 @@ def save_results(
     logger.info(f"Results saved to {output_dir}")
 
 
-def run_training_for_ticker(ticker: str, data_path: Path, config: Config):
+def build_experiment_dir(ticker: str, timeframe: str, run_id: str) -> Path:
+    return (
+        PROJECT_ROOT
+        / "results"
+        / "experiments"
+        / f"{ticker}_{timeframe}_{MODEL_TYPE}_{run_id}"
+    )
+
+
+def build_experiment_dirs(base: Path) -> dict:
+    return {
+        "root": base,
+        "train": base / "train",
+        "val": base / "val",
+        "test": base / "test",
+        "model": base / "model",
+        "logs": base / "logs",
+        "plots": base / "plots",
+    }
+
+
+def run_training_for_ticker(
+    ticker: str, data_path: Path, timeframe: str, run_id: str, config: Config
+):
     logger.info("=" * 80)
     logger.info(f"Training ticker: {ticker}")
     logger.info("=" * 80)
     data = load_feature_data(data_path)
 
-    output_dir = build_output_dir(ticker)
+    experiment_dir = build_experiment_dir(
+        ticker=ticker,
+        timeframe=timeframe,
+        run_id=run_id,
+    )
 
+    output_dirs = build_experiment_dirs(experiment_dir)
+
+    log_dir = output_dirs["logs"]
+    logger.info(f"Log Directory --> {log_dir}")
     setup_logger(
-        log_file=f"{output_dir}/{ticker}_train.log",
+        log_file=f"{log_dir}/{ticker}_train.log",
         level="INFO",
         mode=LogFileMode.OVERWRITE,
     )
 
+    train_dir = output_dirs["train"]
+    logger.info(f"Train Directory --> {train_dir}")
     train_baseline_lstm(
         X_train=data["X_train"],
         y_train=data["y_train"],
         X_val=data["X_val"],
         y_val=data["y_val"],
         config=config,
-        output_dir=output_dir,
+        output_dir=train_dir,
     )
 
 
@@ -361,7 +368,7 @@ def train_baseline_lstm(
 
     # Save metadata
     metadata = {
-        "model_type": "baseline_lstm",
+        "model_type": MODEL_TYPE,
         "protocol": "CANONICAL_1.0",
         "source": "FINAL_PLAN.md Section 4.1",
         "training_samples": len(X_train_win),
@@ -404,21 +411,14 @@ def test_baseline_lstm(
     logger.info(f"BASELINE LSTM INFERENCE: {ticker}")
     logger.info("=" * 80)
 
-    # 1. Load test data
     lookback = config.lstm_baseline.lookback
     X_test, y_test = load_test_data(data_path, lookback)
 
-    # 2. Load model
     model = load_trained_model(model_dir, config, device=device)
 
-    # 3. CANONICAL EVALUATION via LSTMModel.evaluate()
     logger.info("Running canonical evaluation via model.evaluate()...")
-    metrics = model.evaluate(X_test, y_test)
+    metrics, y_pred = model.evaluate(X_test, y_test)
 
-    # 4. Generate predictions for persistence (model.predict is deterministic)
-    y_pred = model.predict(X_test)
-
-    # 5. Persist
     save_results(output_dir, y_test, y_pred, metrics, model_dir)
 
     logger.info("=" * 80)
@@ -429,114 +429,94 @@ def test_baseline_lstm(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train/Test Baseline LSTM (static, single-fit)"
-    )
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--config",
-        type=Path,
-        default=PROJECT_ROOT / "config" / "default_config.yaml",
-    )
-    parser.add_argument(
-        "--mode",
-        type=str,
-        required=True,
-        choices=["train", "test"],
-        help="Either train/test model",
-    )
-    # -------------------------
-    # Mode selection (STRICT)
-    # -------------------------
-    group = parser.add_mutually_exclusive_group(required=True)
-
-    group.add_argument(
-        "--train-all",
-        action="store_true",
-        help="Train all tickers",
+        "--config", type=Path, default=PROJECT_ROOT / "config/default_config.yaml"
     )
 
-    group.add_argument(
-        "--ticker",
-        type=str,
-        help="Single ticker to train",
-    )
-    parser.add_argument("--model-dir", type=Path, required=True)
-    # parser.add_argument("--data-path", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--ticker", type=str, required=True)
+    parser.add_argument("--timeframe", type=str, required=True)
+
+    parser.add_argument("--data-path", type=Path, required=True)
+
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"])
+    parser.add_argument("--run-id", type=str, default=None)
 
-    # -------------------------
-    # Paths
-    # -------------------------
-    parser.add_argument("--features-path", type=Path)
-    parser.add_argument("--data-path", type=Path)
+    parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--skip-test", action="store_true")
+    parser.add_argument("--skip-plot", action="store_true")
 
     args = parser.parse_args()
 
-    try:
-        config = load_config(args.config)
+    logger.info(json.dumps(vars(args), indent=4, default=str))
 
-        if args.mode == "train":
-            # ==========================================================
-            # SINGLE TICKER MODE
-            # ==========================================================
-            if args.ticker:
-                if args.data_path is None:
-                    raise ValueError("--data-path required for single ticker mode")
+    config = load_config(args.config)
 
-                logger.info(f"Training single ticker: {args.ticker}")
+    run_id = args.run_id or str(uuid.uuid4())
 
-                run_training_for_ticker(args.ticker, args.data_path, config=config)
+    experiment_dir = build_experiment_dir(
+        ticker=args.ticker,
+        timeframe=args.timeframe,
+        run_id=run_id,
+    )
 
-            # ==========================================================
-            # MULTI TICKER MODE
-            # ==========================================================
-            elif args.train_all:
-                if args.features_path is None:
-                    raise ValueError("--features-path required for --train-all")
+    dirs = build_experiment_dirs(experiment_dir)
 
-                tickers = [d.name for d in args.features_path.iterdir() if d.is_dir()]
+    setup_logger(
+        log_file=f"{dirs['logs']}/{args.ticker}.log",
+        level="INFO",
+        mode=LogFileMode.OVERWRITE,
+    )
 
-                logger.info(f"Training ALL tickers: {tickers}")
+    logger.info(f"RUN ID: {run_id}")
+    logger.info(f"EXPERIMENT: {experiment_dir}")
 
-                for ticker in tickers:
-                    run_training_for_ticker(ticker, args.data_path, config=config)
+    # ==========================================================
+    # STEP 1: TRAIN
+    # ==========================================================
+    if not args.skip_train:
+        logger.info("STEP 1: TRAINING")
 
-            logger.info("=" * 80)
-            logger.info("TRAINING COMPLETE")
-            logger.info("=" * 80)
+        run_training_for_ticker(
+            ticker=args.ticker,
+            data_path=args.data_path,
+            timeframe=args.timeframe,
+            run_id=run_id,
+            config=config,
+        )
 
-        elif args.mode == "test":
-            output_dir = args.output_dir or build_output_dir(args.ticker)
-            output_dir.mkdir(parents=True, exist_ok=True)
+    # ==========================================================
+    # STEP 2: TEST
+    # ==========================================================
+    if not args.skip_test:
+        logger.info("STEP 2: TESTING")
 
-            setup_logger(
-                log_file=f"{output_dir}/{args.ticker}_test.log",
-                level="INFO",
-                mode=LogFileMode.OVERWRITE,
-            )
+        model_dir = dirs["train"]
+        test_metrics = test_baseline_lstm(
+            ticker=args.ticker,
+            model_dir=model_dir,
+            data_path=args.data_path,
+            config=config,
+            output_dir=dirs["test"],
+            device=args.device,
+        )
 
-            metrics = test_baseline_lstm(
-                ticker=args.ticker,
-                model_dir=args.model_dir,
-                data_path=args.data_path,
-                config=config,
-                output_dir=output_dir,
-                device=args.device,
-            )
+        logger.info(f"TEST METRICS: {test_metrics}")
 
-            logger.info("=" * 80)
-            logger.info("TESTING COMPLETE")
-            logger.info("=" * 80)
+    # ==========================================================
+    # STEP 3: PLOT
+    # ==========================================================
+    if not args.skip_plot:
+        logger.info("STEP 3: PLOTTING")
 
-            sys.exit(0 if metrics["r2"] >= 0 else 1)
+        generate_all_plots(
+            experiment_dir,
+            data_path=dirs["train"] / "training_history.json",
+            save_dir=dirs["plots"],
+        )
 
-        sys.exit(0)
-
-    except Exception as e:
-        logger.error(f"LSTM failed: {e}", exc_info=True)
-        sys.exit(1)
+    logger.info("PIPELINE COMPLETE")
 
 
 if __name__ == "__main__":

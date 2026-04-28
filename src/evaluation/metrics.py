@@ -47,10 +47,46 @@ def r_squared(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(1.0 - ss_res / (ss_tot + 1e-10))
 
 
-def directional_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Fraction of predictions with the correct sign."""
-    correct = np.sign(y_pred) == np.sign(y_true)
-    return float(correct.mean())
+# def directional_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+#     """Fraction of predictions with the correct sign."""
+#     correct = np.sign(y_pred) == np.sign(y_true)
+#     return float(correct.mean())
+
+
+def directional_accuracy(y_true, y_pred, threshold=0.0, exclude_zeros=True):
+    """
+    Directional accuracy with correct zero handling.
+    
+    CRITICAL FIX (2026-04-28): Treats near-zero returns correctly.
+    
+    Args:
+        y_true: Actual returns
+        y_pred: Predicted returns  
+        threshold: Minimum absolute value to classify as directional
+        exclude_zeros: If True, exclude near-zero actuals (RECOMMENDED)
+    
+    Returns:
+        Fraction of correct direction predictions
+    """
+    if exclude_zeros:
+        # Only evaluate where actual has clear direction
+        mask = (np.abs(y_true) > threshold)
+        
+        if mask.sum() == 0:
+            logger.warning("No directional samples (all |y| <= threshold)")
+            return float('nan')
+        
+        y_true_filt = y_true[mask]
+        y_pred_filt = y_pred[mask]
+        
+        # Safe to use sign() now (no zeros)
+        correct = (np.sign(y_true_filt) == np.sign(y_pred_filt))
+        return float(correct.mean())
+    else:
+        # Ternary: treats (0,0) as correct but (0,±1) as wrong
+        yt = np.where(np.abs(y_true) < threshold, 0, np.sign(y_true))
+        yp = np.where(np.abs(y_pred) < threshold, 0, np.sign(y_pred))
+        return float((yt == yp).mean())
 
 
 def f1_ternary(

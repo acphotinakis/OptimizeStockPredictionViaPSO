@@ -669,9 +669,9 @@ class ExpandingWindowWalkForward:
         else:
             mape = float("inf")
 
-        # Directional accuracy
-        correct_dir = np.sum(np.sign(y_true) == np.sign(y_pred))
-        da = float(correct_dir / len(y_true))
+        # FIXED (2026-04-28): Use corrected directional accuracy
+        from src.evaluation.metrics import directional_accuracy as da_corrected
+        da = da_corrected(y_true, y_pred, threshold=0.0, exclude_zeros=True)
 
         return {
             "mse": mse,
