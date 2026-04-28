@@ -48,7 +48,7 @@ class LSTMAdapter(ModelAdapter):
     """Adapter for LSTM models (baseline and PSO-LSTM).
 
     Handles:
-    - 2D → 3D windowing if needed
+    - 2D --> 3D windowing if needed
     - Consistent prediction interface
     - Metadata extraction
     """
@@ -78,7 +78,7 @@ class LSTMAdapter(ModelAdapter):
         Returns:
             Predictions (N,) or (N-20,) depending on input
         """
-        # Handle 2D → 3D windowing
+        # Handle 2D --> 3D windowing
         if X.ndim == 2:
             logger.info(
                 f"Converting 2D features to 3D windows (lookback={self.lookback})"
@@ -89,7 +89,7 @@ class LSTMAdapter(ModelAdapter):
             dummy_y = np.zeros(len(X))
             X_windowed, y_aligned = build_lstm_windows(X, dummy_y, self.lookback)
 
-            logger.info(f"Windowed: {X.shape} → {X_windowed.shape}")
+            logger.info(f"Windowed: {X.shape} --> {X_windowed.shape}")
 
             predictions = self.model.predict(X_windowed)
         elif X.ndim == 3:
@@ -122,7 +122,7 @@ class XGBoostAdapter(ModelAdapter):
     """Adapter for XGBoost model.
 
     Handles:
-    - 3D → 2D flattening if needed
+    - 3D --> 2D flattening if needed
     - Consistent prediction interface
     - Metadata extraction
     """
@@ -148,12 +148,12 @@ class XGBoostAdapter(ModelAdapter):
         Returns:
             Predictions (N,)
         """
-        # Handle 3D → 2D flattening
+        # Handle 3D --> 2D flattening
         if X.ndim == 3:
             logger.info(f"Flattening 3D features to 2D for XGBoost: {X.shape}")
-            # Flatten temporal dimension: (N, T, F) → (N, T*F)
+            # Flatten temporal dimension: (N, T, F) --> (N, T*F)
             X_flat = X.reshape(X.shape[0], -1)
-            logger.info(f"Flattened: {X.shape} → {X_flat.shape}")
+            logger.info(f"Flattened: {X.shape} --> {X_flat.shape}")
             predictions = self.model.predict(X_flat)
         elif X.ndim == 2:
             # Already tabular

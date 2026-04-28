@@ -90,7 +90,7 @@ def load_preprocessed_data(data_path: Path) -> dict:
     if timestamps_path.exists():
         timestamps = pd.to_datetime(np.load(timestamps_path, allow_pickle=True))
         logger.info(
-            f"  timestamps: {len(timestamps)} ({timestamps[0]} → {timestamps[-1]})"
+            f"  timestamps: {len(timestamps)} ({timestamps[0]} --> {timestamps[-1]})"
         )
     else:
         logger.warning("  timestamps.npy not found - using indices")

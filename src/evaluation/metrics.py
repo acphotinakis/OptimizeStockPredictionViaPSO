@@ -149,25 +149,6 @@ def auc_ternary(
         return float("nan")
 
 
-# ======================================================================
-# Signal generation
-# ======================================================================
-
-
-def generate_signals(y_pred: np.ndarray, threshold: float = 1e-4) -> np.ndarray:
-    """Convert predicted log returns to ternary trade signals {-1, 0, +1}.
-
-    Args:
-        y_pred: Predicted log returns.
-        threshold: Minimum absolute value to generate a signal (default: 1bp).
-
-    Returns:
-        Array of signals: +1 (long), 0 (flat), -1 (short).
-    """
-    sig = np.zeros(len(y_pred), dtype=np.float32)
-    sig[y_pred > threshold] = 1.0
-    sig[y_pred < -threshold] = -1.0
-    return sig
 
 
 # ======================================================================

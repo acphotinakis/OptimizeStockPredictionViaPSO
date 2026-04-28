@@ -248,7 +248,7 @@ class AlpacaIngestor:
                 start_dt, end_dt, years=2
             ):
                 logger.info(
-                    "  Fetching %s [%s → %s]",
+                    "  Fetching %s [%s --> %s]",
                     ticker,
                     chunk_start.date(),
                     chunk_end.date(),

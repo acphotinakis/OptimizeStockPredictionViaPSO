@@ -93,8 +93,8 @@ def build_lstm_windows(
 
     logger.info(
         f"Built {n_windows} windows: "
-        f"X {X.shape} → {X_windowed.shape}, "
-        f"y {y.shape} → {y_windowed.shape}"
+        f"X {X.shape} --> {X_windowed.shape}, "
+        f"y {y.shape} --> {y_windowed.shape}"
     )
 
     return X_windowed, y_windowed

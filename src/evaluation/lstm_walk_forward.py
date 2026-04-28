@@ -213,9 +213,9 @@ class ExpandingWindowWalkForward:
 
         if timestamps is not None:
             logger.info(
-                f"Dates: {timestamps[train_start]} → "
+                f"Dates: {timestamps[train_start]} --> "
                 f"{timestamps[train_end-1]} (train), "
-                f"{timestamps[val_start]} → {timestamps[val_end-1]} (val)"
+                f"{timestamps[val_start]} --> {timestamps[val_end-1]} (val)"
             )
 
         # Extract fold data (UNSCALED)
@@ -753,7 +753,7 @@ def validate_walk_forward_compliance(
 
         assert (
             train_end_j > train_end_i
-        ), f"TRD VIOLATION: Training window not expanding (fold {i} → {i+1})"
+        ), f"TRD VIOLATION: Training window not expanding (fold {i} --> {i+1})"
 
     logger.info(" Expanding window validated")
 

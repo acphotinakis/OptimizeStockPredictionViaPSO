@@ -80,8 +80,8 @@ def build_lstm_windows(
 
     logger.info(
         f"Built {n_windows} windows: "
-        f"X {X.shape} → {X_windowed.shape}, "
-        f"y {y.shape} → {y_windowed.shape}"
+        f"X {X.shape} --> {X_windowed.shape}, "
+        f"y {y.shape} --> {y_windowed.shape}"
     )
 
     return X_windowed, y_windowed
@@ -94,37 +94,37 @@ def build_xgboost_lag_features(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Build lag-based features for XGBoost from tabular data.
-    
+
     XGBoost Feature Representation Strategy (TRD-Aligned):
     - Uses LAG-BASED representation (NOT flattened sequences)
     - Each sample contains current values + L previous lags
     - More interpretable for tree-based models
     - Lower dimensionality than flattened sequences
-    
+
     Converts:
         X: (N, F) tabular features
         y: (N,) target vector
     Into:
         X_lagged: (N-lookback, F * (lookback+1)) with lag features
         y_aligned: (N-lookback,) aligned targets
-    
+
     For each sample i at time t:
         X_lagged[i] = [X[t], X[t-1], X[t-2], ..., X[t-lookback]]
         y_aligned[i] = y[t]
-    
+
     Args:
         X: Feature matrix (N, F)
         y: Target vector (N,)
         lookback: Number of lags to create (default: 20)
-    
+
     Returns:
         Tuple of (X_lagged, y_aligned)
         - X_lagged: (N-lookback, F*(lookback+1))
         - y_aligned: (N-lookback,)
-    
+
     Raises:
         ValueError: If insufficient samples or shape mismatch
-    
+
     Example:
         >>> X = np.random.randn(1000, 10)  # 1000 samples, 10 features
         >>> y = np.random.randn(1000)
@@ -134,41 +134,41 @@ def build_xgboost_lag_features(
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D (N, F), got shape {X.shape}")
-    
+
     if y.ndim != 1:
         raise ValueError(f"y must be 1D (N,), got shape {y.shape}")
-    
+
     if len(X) != len(y):
         raise ValueError(f"X and y length mismatch: {len(X)} vs {len(y)}")
-    
+
     N, F = X.shape
-    
+
     if N <= lookback:
         raise ValueError(
             f"Not enough samples ({N}) for lookback ({lookback}). "
             f"Need at least {lookback + 1} samples."
         )
-    
+
     # Create lag features
     lag_arrays = []
-    
+
     for lag in range(lookback + 1):
         # lag=0 is current, lag=1 is previous, etc.
         if lag == 0:
             lag_arrays.append(X[lookback:])
         else:
             lag_arrays.append(X[lookback - lag : -lag])
-    
+
     # Concatenate all lags horizontally
     X_lagged = np.concatenate(lag_arrays, axis=1).astype(np.float32)
-    
+
     # Align targets
     y_aligned = y[lookback:].astype(np.float32)
-    
+
     logger.info(
         f"Built {len(y_aligned)} lagged samples: "
-        f"X {X.shape} → {X_lagged.shape} ({lookback+1} lags), "
-        f"y {y.shape} → {y_aligned.shape}"
+        f"X {X.shape} --> {X_lagged.shape} ({lookback+1} lags), "
+        f"y {y.shape} --> {y_aligned.shape}"
     )
-    
+
     return X_lagged, y_aligned

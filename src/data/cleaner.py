@@ -401,7 +401,7 @@ class DataCleaner:
                     gap_count = 0
                 else:
                     if last_valid is None:
-                        # No previous value → cannot fill
+                        # No previous value --> cannot fill
                         leading_nan += 1
                         skipped += 1
                     elif gap_count < self.max_gap_fill:

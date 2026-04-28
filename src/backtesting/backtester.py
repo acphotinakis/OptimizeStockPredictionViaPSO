@@ -1,13 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any
 from enum import Enum
 
 import numpy as np
 import pandas as pd
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from ..evaluation.metrics import (
+import numpy as np
+import pandas as pd
+import logging
+
+
+# Add project root to path
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+
+from src.evaluation.metrics import (
     sharpe_ratio,
     sortino_ratio,
     max_drawdown,
@@ -15,8 +29,9 @@ from ..evaluation.metrics import (
     calmar_ratio,
     profit_factor,
     win_rate,
-    generate_signals,
 )
+
+logger = logging.getLogger(__name__)
 
 SIGNAL_THRESHOLD = 1e-4
 
@@ -58,6 +73,16 @@ class BacktestState:
         self.bar_returns = []
         self.current_step = 0
 
+        logger.info("=" * 80)
+        logger.info("CANONICAL BACKTEST ENGINE")
+        logger.info("=" * 80)
+
+        # FULL CONFIG LOG
+        logger.info("CONFIG DUMP:")
+        logger.info(asdict(self))
+
+        logger.info("=" * 80)
+
     def copy(self) -> Dict[str, Any]:
         """Return mutable copy for iteration."""
         return {
@@ -80,6 +105,8 @@ class BacktestResult:
     equity_curve: np.ndarray
     bar_returns: np.ndarray
     trade_log: pd.DataFrame
+
+    # metrics computed by engine ONLY
     sharpe: float
     sortino: float
     mdd: float
@@ -89,6 +116,63 @@ class BacktestResult:
     win_rate_: float
     n_trades: int
     turnover: float
+
+
+# ======================================================================
+# Signal generation
+# ======================================================================
+
+
+def generate_signals(y_pred: np.ndarray, threshold: float = 1e-4) -> np.ndarray:
+    """Convert predicted log returns to ternary trade signals {-1, 0, +1}.
+
+    Args:
+        y_pred: Predicted log returns.
+        threshold: Minimum absolute value to generate a signal (default: 1bp).
+
+    Returns:
+        Array of signals: +1 (long), 0 (flat), -1 (short).
+    """
+    sig = np.zeros(len(y_pred), dtype=np.float32)
+    sig[y_pred > threshold] = 1.0
+    sig[y_pred < -threshold] = -1.0
+    return sig
+
+
+def alt_generate_signals(
+    predictions: np.ndarray,
+    threshold: float = 0.0,
+) -> np.ndarray:
+    """
+    Convert return predictions to trading signals.
+
+    Rule: signal = sign(predicted_return)
+        +1: Long (if prediction > threshold)
+        -1: Short (if prediction < -threshold)
+         0: Neutral (if |prediction| <= threshold)
+
+    Args:
+        predictions: Predicted returns
+        threshold: Minimum return to trigger signal (default: 0.0)
+
+    Returns:
+        Signals array (+1, 0, -1)
+    """
+    signals = np.zeros_like(predictions, dtype=np.int8)
+    signals[predictions > threshold] = 1  # LONG
+    signals[predictions < -threshold] = -1  # SHORT
+    # |prediction| <= threshold --> 0 (NEUTRAL)
+
+    n_long = np.sum(signals == 1)
+    n_short = np.sum(signals == -1)
+    n_neutral = np.sum(signals == 0)
+
+    logger.info(f"Signals generated: {len(signals)} total")
+    logger.info(f"  Long: {n_long} ({100*n_long/len(signals):.1f}%)")
+    logger.info(f"  Short: {n_short} ({100*n_short/len(signals):.1f}%)")
+    logger.info(f"  Neutral: {n_neutral} ({100*n_neutral/len(signals):.1f}%)")
+
+    return signals
 
 
 class Backtester:
@@ -111,6 +195,22 @@ class Backtester:
         self.stop_loss = stop_loss
         self.daily_limit = daily_loss_limit
         self.threshold = signal_threshold
+        # CONFIG LOG
+        config = {
+            "initial_capital": self.V0,
+            "position_fraction": self.f,
+            "transaction_cost": self.tc,
+            "slippage": self.slip,
+            "stop_loss": self.stop_loss,
+            "daily_loss_limit": self.daily_limit,
+            "signal_threshold": self.threshold,
+        }
+
+        logger.info("=" * 80)
+        logger.info("BACKTESTER CONFIG")
+        logger.info("=" * 80)
+        logger.info(config)
+        logger.info("=" * 80)
 
     def run(
         self,
@@ -196,11 +296,11 @@ class Backtester:
             is_open = et_index[t].hour == 9 and et_index[t].minute == 30
             is_close = et_index[t].hour == 16 and et_index[t].minute == 0
 
-        if is_open:
-            return SessionEvent.OPEN
-        elif is_close:
-            return SessionEvent.CLOSE
-        return SessionEvent.NONE
+        # if is_open:
+        #     return SessionEvent.OPEN
+        # elif is_close:
+        #     return SessionEvent.CLOSE
+        return SessionEvent.OPEN
 
     def _update_position(
         self,

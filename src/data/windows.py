@@ -10,8 +10,8 @@ build_windows()
     Builds windows from a single contiguous array.
     Used for: normal train / val / test splits.
     Output shapes:
-        LSTM    → (M, lookback, F)
-        XGBoost → (M, lookback * F)
+        LSTM    --> (M, lookback, F)
+        XGBoost --> (M, lookback * F)
 
 build_walk_forward_windows()
     Partitions the data into sequential (train, test) folds.
@@ -123,8 +123,8 @@ def build_windows(
         returns:        Log return targets [N], already scaled.
         session_starts: Boolean array [N]. True on first bar of each session.
         lookback:       Number of bars per window.
-        model_type:     "lstm"    → output shape (M, lookback, F)
-                        "xgboost" → output shape (M, lookback * F)
+        model_type:     "lstm"    --> output shape (M, lookback, F)
+                        "xgboost" --> output shape (M, lookback * F)
 
     Returns:
         X_out: Windowed feature array.
@@ -239,7 +239,7 @@ def build_windows(
             X_out.dtype,
         )
     else:
-        # Flatten (M, lookback, F) → (M, lookback * F)
+        # Flatten (M, lookback, F) --> (M, lookback * F)
         # Row-major (C order): oldest bar first, newest bar last.
         X_out = X_3d.reshape(M, lookback * F)
         logger.info(
@@ -315,7 +315,7 @@ def build_walk_forward_windows(
     -----------------------------------------------
     step_size >= forecast_horizon
 
-    If violated, consecutive test windows share target bars → leakage.
+    If violated, consecutive test windows share target bars --> leakage.
     Example with step_size=1, forecast_horizon=5:
         Fold 0 test targets: bars [T+1, T+2, T+3, T+4, T+5]
         Fold 1 test targets: bars [T+2, T+3, T+4, T+5, T+6]  ← overlap!
@@ -334,8 +334,8 @@ def build_walk_forward_windows(
                             Must be > lookback + 1.
                             Recommended: at least several sessions of data.
         model_type:         "lstm" or "xgboost" — forwarded to build_windows().
-        window_type:        "expanding" → training set grows each fold.
-                            "rolling"   → training set slides at fixed width.
+        window_type:        "expanding" --> training set grows each fold.
+                            "rolling"   --> training set slides at fixed width.
         rolling_train_bars: Required when window_type="rolling".
                             Number of bars per rolling training slice.
 

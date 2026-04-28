@@ -66,7 +66,7 @@ class CanonicalBacktest:
         signals = np.zeros_like(predictions, dtype=np.int8)
         signals[predictions > threshold] = 1  # LONG
         signals[predictions < -threshold] = -1  # SHORT
-        # |prediction| <= threshold → 0 (NEUTRAL)
+        # |prediction| <= threshold --> 0 (NEUTRAL)
 
         n_long = np.sum(signals == 1)
         n_short = np.sum(signals == -1)
@@ -90,8 +90,8 @@ class CanonicalBacktest:
         FINAL_PLAN.md Section 6.2: Transaction Cost Application
 
         Cost applied on position changes only:
-        - Long → Short: 2 × transaction_cost (exit + enter)
-        - Long → Neutral: 1 × transaction_cost (exit only)
+        - Long --> Short: 2 × transaction_cost (exit + enter)
+        - Long --> Neutral: 1 × transaction_cost (exit only)
         - Same position: 0 (no cost)
 
         Args:

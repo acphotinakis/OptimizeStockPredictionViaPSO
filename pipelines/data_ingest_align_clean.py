@@ -63,7 +63,7 @@ def load_all_timeframes(raw_output_dir: Path, ticker: str, timeframes: list[str]
         df.index = pd.to_datetime(df.index, utc=True)
 
         # ------------------------------------------------------------
-        # 2. Convert UTC → America/New_York (DST-aware)
+        # 2. Convert UTC --> America/New_York (DST-aware)
         # ------------------------------------------------------------
         # df.index = df.index.tz_convert("America/New_York")
         if df.index.tz is None:

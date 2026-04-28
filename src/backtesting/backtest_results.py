@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 from dataclasses import dataclass
@@ -8,41 +9,76 @@ import numpy as np
 import pandas as pd
 import yaml
 
+import logging
+import sys
+
+
+# Add project root to path
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.backtesting.backtester import BacktestResult
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class BacktestResults:
-    """Container for complete backtesting results.
-
-    Stores all data needed for analysis, visualization, and comparison.
-    """
-
-    # Identification
     model_type: str
     ticker: str
     timestamp: str
 
-    # Predictions & actuals
     predictions: np.ndarray
     actual_returns: np.ndarray
     dates: Optional[pd.DatetimeIndex]
 
-    # Trading simulation
+    backtest_result: BacktestResult
+
     signals: np.ndarray
     strategy_returns: np.ndarray
     equity_curve: np.ndarray
     trade_costs: np.ndarray
 
-    # Metrics
+    model_metadata: Dict
+    backtest_config: Dict
     statistical_metrics: Dict[str, float]
     trading_metrics: Dict[str, float]
 
-    # Model metadata
-    model_metadata: Dict
-
-    # Configuration
-    backtest_config: Dict
+    @staticmethod
+    def from_engine(
+        *,
+        model_type: str,
+        ticker: str,
+        predictions: np.ndarray,
+        actual_returns: np.ndarray,
+        dates: Optional[pd.DatetimeIndex],
+        backtest_result: "BacktestResult",
+        signals: np.ndarray,
+        strategy_returns: np.ndarray,
+        trade_costs: np.ndarray,
+        model_metadata: Dict,
+        backtest_config: Dict,
+        statistical_metrics: Dict[str, float],
+        trading_metrics: Dict[str, float],
+    ) -> "BacktestResults":
+        return BacktestResults(
+            model_type=model_type,
+            ticker=ticker,
+            timestamp=datetime.utcnow().isoformat(),
+            predictions=predictions,
+            actual_returns=actual_returns,
+            dates=dates,
+            backtest_result=backtest_result,
+            signals=signals,
+            strategy_returns=strategy_returns,
+            equity_curve=backtest_result.equity_curve,
+            trade_costs=trade_costs,
+            model_metadata=model_metadata,
+            backtest_config=backtest_config,
+            statistical_metrics=statistical_metrics,
+            trading_metrics=trading_metrics,
+        )
 
 
 def save_backtest_results(
@@ -259,61 +295,3 @@ Backtest completed successfully with {n_trades} trades over {len(results.dates) 
 
     with open(output_path, "w") as f:
         f.write(report)
-
-
-def load_backtest_results(
-    results_dir: Path,
-) -> BacktestResults:
-    """
-    Load saved backtest results from disk.
-
-    Args:
-        results_dir: Directory containing saved results
-
-    Returns:
-        BacktestResults instance
-
-    Raises:
-        FileNotFoundError: If required files missing
-    """
-    results_dir = Path(results_dir)
-
-    logger.info(f"Loading backtest results from {results_dir}")
-
-    # Load metrics
-    metrics_path = results_dir / "backtest_results.json"
-    with open(metrics_path, "r") as f:
-        metrics_data = json.load(f)
-
-    # Load time series
-    equity_path = results_dir / "equity_curve.csv"
-    equity_df = pd.read_csv(equity_path)
-
-    # Load metadata
-    metadata_path = results_dir / "metadata.yaml"
-    with open(metadata_path, "r") as f:
-        metadata = yaml.safe_load(f)
-
-    # Reconstruct BacktestResults
-    results = BacktestResults(
-        model_type=metrics_data["model_type"],
-        ticker=metrics_data["ticker"],
-        timestamp=metrics_data["timestamp"],
-        predictions=equity_df["prediction"].values,
-        actual_returns=equity_df["actual_return"].values,
-        dates=(
-            pd.to_datetime(equity_df["date"]) if "date" in equity_df.columns else None
-        ),
-        signals=equity_df["signal"].values,
-        strategy_returns=equity_df["strategy_return"].values,
-        equity_curve=equity_df["equity"].values,
-        trade_costs=equity_df["trade_cost"].values,
-        statistical_metrics=metrics_data["statistical_metrics"],
-        trading_metrics=metrics_data["trading_metrics"],
-        model_metadata=metadata["model_metadata"],
-        backtest_config=metadata["backtest_config"],
-    )
-
-    logger.info(" Backtest results loaded successfully")
-
-    return results

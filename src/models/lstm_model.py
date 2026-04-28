@@ -58,7 +58,7 @@ class LSTMNetwork(nn.Module):
         PyTorch LSTM network for financial time-series regression.
 
         Architecture:
-            Input(T, F) → LSTM_1 → Act → Dropout → LSTM_2 → Act → Dropout → Dense(H)
+            Input(T, F) --> LSTM_1 --> Act --> Dropout --> LSTM_2 --> Act --> Dropout --> Dense(H)
 
         Notes:
         - Supports configurable activation + output activation
@@ -126,7 +126,7 @@ class LSTMNetwork(nn.Module):
         # -------------------------
         # Output layer
         # -------------------------
-        # If prediction_horizon > 1 → multi-step forecast
+        # If prediction_horizon > 1 --> multi-step forecast
         final_output_dim = output_units
         self.fc = nn.Linear(hidden_size_2, final_output_dim)
 
@@ -310,7 +310,7 @@ class LSTMModel:
                 range(0, N, batch_size),
                 total=(N + batch_size - 1) // batch_size,
                 desc="Predicting",
-                unit="batch"
+                unit="batch",
             ):
                 X_batch = X[i : i + batch_size]
 
@@ -480,6 +480,57 @@ class LSTMModel:
         }
 
         return json.dumps(payload, indent=2)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """
+        Returns fully structured model metadata for experiment tracking,
+        reproducibility, and BacktestResults serialization.
+
+        This is the single source of truth for model identity.
+        """
+
+        if self.model is None:
+            raise RuntimeError("Model not built. Call build_model() first.")
+
+        net = self.model
+
+        return {
+            # Identity
+            "model_name": "LSTMModel",
+            "framework": "pytorch",
+            "device": self.device,
+            "seed": self.seed,
+            # Architecture config
+            "input_size": getattr(self, "input_size", None),
+            "lookback": 20,
+            "hidden_size_1": self.units_1,
+            "hidden_size_2": self.units_2,
+            "dropout_rate": self.dropout_rate,
+            "activation": self.activation,
+            "output_activation": self.output_activation,
+            "output_units": self.output_units,
+            # Runtime config snapshot (frozen at build time)
+            "config": getattr(self, "config", {}),
+            # Parameter counts
+            "total_params": self.total_params,
+            "trainable_params": self.trainable_params,
+            # Network-level introspection
+            "network": {
+                "input_size": net.input_size,
+                "hidden_size_1": net.hidden_size_1,
+                "hidden_size_2": net.hidden_size_2,
+                "dropout_rate": net.dropout_rate,
+                "activation": type(net.activation).__name__,
+                "output_activation": type(net.output_activation).__name__,
+                "num_parameters": sum(p.numel() for p in net.parameters()),
+            },
+            # Inference constraints
+            "inference": {
+                "batch_inference": True,
+                "deterministic": True,
+                "mixed_precision": False,
+            },
+        }
 
     def __repr__(self) -> str:
         return self.__str__()

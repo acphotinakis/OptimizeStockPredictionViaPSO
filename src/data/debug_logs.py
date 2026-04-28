@@ -426,7 +426,7 @@ def log_all_cleaning_reports(rows: list[dict]):
         df["timeframe"], categories=timeframe_order, ordered=True
     )
 
-    # Sort: ticker → timeframe → feed
+    # Sort: ticker --> timeframe --> feed
     df = df.sort_values(["ticker", "timeframe", "feed"])
 
     # ------------------------------------------------------------

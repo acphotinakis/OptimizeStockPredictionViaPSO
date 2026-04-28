@@ -1,32 +1,3 @@
-#!/usr/bin/env python3
-"""
-Unified Backtesting Pipeline - Production Entry Point
-
-Single CLI tool for backtesting all model types (PSO-LSTM, Baseline LSTM, XGBoost)
-with consistent metrics, evaluation, and visualization.
-
-Usage:
-    python pipelines/run_backtest.py \
-        --model_type pso_lstm \
-        --model_path results/pso_lstm/best_model.pt \
-        --ticker AAPL \
-        --config config/default_config.yaml
-
-Supported Models:
-    - pso_lstm: PSO-optimized LSTM
-    - lstm_baseline: Baseline LSTM
-    - xgboost: XGBoost model
-
-Outputs:
-    - Metrics (JSON)
-    - Equity curve (CSV + PNG)
-    - Drawdown chart (PNG)
-    - Returns distribution (PNG)
-    - Signal analysis (PNG)
-    - Backtest report (Markdown)
-
-"""
-
 import argparse
 import json
 import logging
@@ -39,17 +10,19 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.backtesting.backtester import Backtester
 
 # Add project root to path
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.models.lstm_model import LSTMModel
+from src.backtesting.backtester import BacktestResult, Backtester
 from pipelines.run_lstm import (
     load_trained_model as load_trained_lstm_model,
     save_results,
 )
+from src.data.windowing import build_lstm_windows
 from src.utils.config_loader import Config, load_config
 from src.backtesting.backtest import CanonicalBacktest
 from src.backtesting.backtest_results import BacktestResults, save_backtest_results
@@ -60,36 +33,13 @@ from src.evaluation.metrics import (
 from src.evaluation.model_loader import load_model, validate_model_compatibility
 from src.evaluation.plotting import create_all_plots
 from src.utils.logger import LogFileMode, setup_logger
+from src.utils.data_storage import _load_parquet
 
 logger = logging.getLogger(__name__)
 
 
-def load_backtest_data(data_path: Path) -> dict:
-    logger.info(f"Loading preprocessed data from {data_path}")
-
-    X_path = data_path / f"X_test.npy"
-    y_path = data_path / f"y_test.npy"
-    dates = data_path / f"test_index.npy"
-
-    if not X_path.exists() or not y_path.exists():
-        raise FileNotFoundError(
-            f"Missing test data: {X_path} or {y_path}\n"
-            f"Run canonical feature pipeline first."
-        )
-
-    X_test = np.load(X_path)
-    y_test = np.load(y_path)
-    dates = np.load(dates)
-
-    return {
-        "X_test": X_test,
-        "y_test": y_test,
-        "dates": dates,
-    }
-
-
 def compute_all_metrics(
-    backtest_df: pd.DataFrame,
+    backtest_result: BacktestResult,
     predictions: np.ndarray,
     actual_returns: np.ndarray,
     config: Config,
@@ -116,8 +66,8 @@ def compute_all_metrics(
     )
 
     # Trading metrics (portfolio performance)
-    strategy_returns = backtest_df["strategy_return"].values
-    equity_curve = backtest_df["capital"].values
+    equity_curve = backtest_result.equity_curve
+    strategy_returns = backtest_result.bar_returns
 
     trading_metrics = compute_and_log_all_trading_metrics(
         equity_curve=equity_curve,
@@ -153,6 +103,96 @@ def build_experiment_dirs(base: Path) -> dict:
         "plots": base / "plots",
         "backtest": base / "backtest",
         "backtest_plots": base / "backtest" / "plots",
+    }
+
+
+def load_backtest_data(
+    feature_data_path: Path, processed_data_path: Path, timeframe: str, ticker: str
+) -> dict:
+
+    logger.info(f"[LOAD] Feature data: {feature_data_path}")
+
+    X_path = feature_data_path / "X_test.npy"
+    y_path = feature_data_path / "y_test.npy"
+    idx_path = feature_data_path / "test_index.npy"
+
+    if not X_path.exists() or not y_path.exists():
+        raise FileNotFoundError(f"Missing test data: {X_path} or {y_path}")
+
+    # -----------------------------
+    # Load feature arrays
+    # -----------------------------
+    X_test = np.load(X_path)
+    y_test = np.load(y_path)
+    test_index = np.load(idx_path)
+
+    logger.info(f"[FEATURES] X={X_test.shape} y={y_test.shape} idx={test_index.shape}")
+    logger.info(f"[IDX RAW] type={type(test_index)} dtype={test_index.dtype}")
+
+    # -----------------------------
+    # Normalize timestamps (SINGLE SOURCE OF TRUTH)
+    # -----------------------------
+    test_index = pd.to_datetime(test_index, utc=True).tz_convert(None)
+
+    logger.info(
+        f"[INDEX] range={test_index.min()} → {test_index.max()} | n={len(test_index)}"
+    )
+
+    # -----------------------------
+    # Load price data
+    # -----------------------------
+    processed_path = processed_data_path / timeframe / f"{ticker}.parquet"
+    df = pd.read_parquet(processed_path).sort_index()
+
+    # force SAME format as test_index
+    # df.index = df.index.tz_convert("UTC").tz_localize(None)
+    if df.index.tz is not None:
+        df.index = df.index.tz_convert("UTC").tz_localize(None)
+
+    logger.info(f"[PRICES] shape={df.shape} cols={df.columns.tolist()}")
+    logger.info(
+        f"[PRICES] range={df.index.min()} → {df.index.max()} | dtype={df.index.dtype}"
+    )
+
+    # -----------------------------
+    # ALIGNMENT CHECK
+    # -----------------------------
+    missing = test_index.difference(df.index)
+    logger.info(f"[ALIGN] missing={len(missing)}")
+
+    if len(missing) > 0:
+        logger.warning(f"[ALIGN] sample missing={missing[:5]}")
+
+    # -----------------------------
+    # SAFE ALIGNMENT
+    # -----------------------------
+    df_test = df.reindex(test_index)
+
+    logger.info(f"[TEST] shape={df_test.shape}")
+
+    opens = df_test["open"].values
+    closes = df_test["close"].values
+
+    logger.info(f"[PRICES] open(min={opens.min()}, max={opens.max()})")
+    logger.info(f"[PRICES] close(min={closes.min()}, max={closes.max()})")
+
+    idx = df_test.index
+
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")  # OR correct source timezone if known
+
+    # timestamps = idx.tz_convert("America/New_York").to_numpy()
+    timestamps = idx.tz_convert("America/New_York")
+
+    # sys.exit(0)
+
+    return {
+        "X_test": X_test,
+        "y_test": y_test,
+        "dates": test_index,
+        "open": opens,
+        "close": closes,
+        "timestamps": timestamps,
     }
 
 
@@ -196,6 +236,8 @@ def parse_args():
         required=True,
         help="Path to features directory",
     )
+    parser.add_argument("--run-id", type=str, default=None, required=True)
+    parser.add_argument("--processed-dir", default="data/processed")
     parser.add_argument("--timeframe", type=str, required=True)
 
     return parser.parse_args()
@@ -204,11 +246,13 @@ def parse_args():
 def backtest_baseline_lstm(
     ticker: str,
     model_dir: Path,
-    data_path: Path,
+    feature_data_path: Path,
+    processed_data_path: Path,
     config: Config,
     output_dir: Path,
+    timeframe: str,
     device: Optional[str] = None,
-) -> Tuple[Dict[str, float], pd.DataFrame, np.ndarray, np.ndarray]:
+) -> Tuple[Dict[str, float], np.ndarray, np.ndarray, BacktestResult, LSTMModel]:
     """
     End-to-end test pipeline using LSTMModel.evaluate() as the canonical path.
     """
@@ -216,25 +260,36 @@ def backtest_baseline_lstm(
     logger.info(f"BASELINE LSTM INFERENCE: {ticker}")
     logger.info("=" * 80)
 
-    data = load_backtest_data(data_path)
+    data = load_backtest_data(
+        feature_data_path, processed_data_path, timeframe=timeframe, ticker=ticker
+    )
 
     X_test = data["X_test"]
     y_test = data["y_test"]
     dates = data["dates"]
+    opens = data["open"]
+    closes = data["close"]
+    timestamps = data["timestamps"]
 
     model = load_trained_lstm_model(model_dir, config, device=device)
+    lookback = config.lstm_baseline.lookback
 
+    logger.info(f"Building LSTM windows (lookback={lookback})...")
+    X_train_win, y_train_win = build_lstm_windows(X_test, y_test, lookback)
+
+    y_test = y_test[lookback:]
+    dates = dates[lookback:]
+    opens = opens[lookback:]
+    closes = closes[lookback:]
+    timestamps = timestamps[lookback:]
     logger.info("Running canonical evaluation via model.evaluate()...")
-    metrics, y_pred = model.evaluate(X_test, y_test)
+    metrics, y_pred = model.evaluate(X_train_win, y_train_win)
+    logger.info(
+        f"[WINDOWS] X={X_train_win.shape} y={y_train_win.shape} || {y_pred.shape}"
+    )
 
     # Ensure alignment
     if len(y_pred) != len(y_test):
-        logger.warning(f"Prediction length mismatch: {len(y_pred)} vs {len(y_test)}")
-        # Truncate to shorter length
-        min_len = min(len(y_pred), len(y_test))
-        y_pred = y_pred[:min_len]
-        y_test = y_test[:min_len]
-        dates = dates[:min_len]
         raise ValueError(
             f"y_pred len not equal to y_test --> len(y_pred)={len(y_pred)} || len(y_test)={len(y_test)}"
         )
@@ -245,10 +300,6 @@ def backtest_baseline_lstm(
 
     # Initialize canonical backtest engine
     bt_config = config.backtesting
-    # backtest_engine = CanonicalBacktest(
-    #     transaction_cost=bt_config.transaction_cost,
-    #     initial_capital=bt_config.initial_capital,
-    # )
 
     # # Run backtest
     # backtest_df = backtest_engine.run_backtest(y_pred, y_test, dates)
@@ -261,13 +312,20 @@ def backtest_baseline_lstm(
         daily_loss_limit=bt_config.daily_loss_limit,
     )
 
+    backtest_result: BacktestResult = bt.run(
+        y_pred=y_pred,
+        opens=opens,
+        closes=closes,
+        timestamps=timestamps,
+    )
+
     logger.info("=" * 80)
 
     logger.info("=" * 80)
     logger.info("BACKTESTING COMPLETE")
     logger.info("=" * 80)
 
-    return metrics, backtest_df, y_pred, y_test
+    return metrics, y_pred, y_test, backtest_result, model
 
 
 def main():
@@ -282,7 +340,6 @@ def main():
     logger.info(f"Model Type: {args.model_type}")
     logger.info(f"Model Path: {args.model_path}")
     logger.info(f"Ticker: {args.ticker}")
-    logger.info(f"Split: {args.split}")
     logger.info("=" * 80)
 
     # Load configuration
@@ -308,101 +365,91 @@ def main():
     logger.info(f"RUN ID: {run_id}")
     logger.info(f"EXPERIMENT: {experiment_dir}")
 
+    processed_data_path = Path(args.processed_dir)
+
     if args.model_type == "lstm_baseline":
-        backtest_baseline_lstm(
+        metrics, y_pred, y_test, backtest_result, model = backtest_baseline_lstm(
             ticker=args.ticker,
             model_dir=args.model_path,
-            data_path=args.data_path,
+            feature_data_path=args.data_path,
+            processed_data_path=processed_data_path,
             config=config,
             output_dir=dirs["backtest"],
+            timeframe=args.timeframe,
+        )
+        logger.info("=" * 80)
+        logger.info("BACKTEST RESULT (FULL DUMP)")
+        logger.info("=" * 80)
+
+        logger.info(f"Sharpe: {backtest_result.sharpe}")
+        logger.info(f"Sortino: {backtest_result.sortino}")
+        logger.info(f"MDD: {backtest_result.mdd}")
+        logger.info(f"CAGR: {backtest_result.cagr_}")
+        logger.info(f"Calmar: {backtest_result.calmar}")
+        logger.info(f"Profit Factor: {backtest_result.profit_factor_}")
+        logger.info(f"Win Rate: {backtest_result.win_rate_}")
+        logger.info(f"Trades: {backtest_result.n_trades}")
+        logger.info(f"Turnover: {backtest_result.turnover}")
+
+        logger.info(f"Equity Curve Shape: {backtest_result.equity_curve.shape}")
+        logger.info(f"Bar Returns Shape: {backtest_result.bar_returns.shape}")
+        logger.info(f"Trade Log Shape: {backtest_result.trade_log.shape}")
+
+        # Optional: head previews
+        logger.info("Equity Curve (head): %s", backtest_result.equity_curve[:5])
+        logger.info("Bar Returns (head): %s", backtest_result.bar_returns[:5])
+
+        logger.info("Trade Log (head):")
+        logger.info("\n%s", backtest_result.trade_log.head(10).to_string(index=False))
+
+        logger.info("=" * 80)
+        logger.info("STEP 4: Computing metrics...")
+        # FIXED: adapt function to BacktestResult
+        statistical_metrics, trading_metrics = compute_all_metrics(
+            backtest_result, y_pred, y_test, config
         )
 
-    # Load model
-    logger.info("STEP 1: Loading model...")
-    model_adapter = load_model(args.model_type, args.model_path, config)
-    logger.info(f" Model loaded: {model_adapter.get_metadata()}")
+        results = BacktestResults.from_engine(
+            model_type=args.model_type,
+            ticker=args.ticker,
+            predictions=y_pred,
+            actual_returns=y_test,
+            dates=None,  # replace if you have timestamps
+            backtest_result=backtest_result,
+            signals=backtest_result.trade_log.get("direction", np.zeros_like(y_pred)),
+            strategy_returns=backtest_result.bar_returns,
+            trade_costs=np.zeros_like(y_pred),  # replace if tracked separately
+            model_metadata=model.get_metadata(),
+            statistical_metrics=statistical_metrics,
+            trading_metrics=trading_metrics,
+            backtest_config={
+                "transaction_cost": config.backtesting.transaction_cost,
+                "initial_capital": config.backtesting.initial_capital,
+                "position_fraction": config.backtesting.position_fraction,
+                "slippage": config.backtesting.slippage,
+                "stop_loss": config.backtesting.stop_loss,
+                "daily_loss_limit": config.backtesting.daily_loss_limit,
+            },
+        )
 
-    # Load test data
-    logger.info("STEP 2: Loading test data...")
-    test_data = load_test_data(args.data_path)
+        save_backtest_results(results=results, output_dir=dirs["backtest"])
 
-    # Validate compatibility
-    validate_model_compatibility(model_adapter, test_data)
+        logger.info("STEP 6: Generating visualizations...")
 
-    # Run backtest
-    logger.info("STEP 3: Running backtest...")
-    backtest_df, predictions, actual_returns = run_unified_backtest(
-        model_adapter, test_data, config
-    )
+        create_all_plots(
+            backtest_result,
+            y_pred,
+            y_test,
+            args.model_type,
+            dirs["backtest_plots"],
+        )
 
-    # Compute metrics
-    logger.info("STEP 4: Computing metrics...")
-    statistical_metrics, trading_metrics = compute_all_metrics(
-        backtest_df, predictions, actual_returns, config
-    )
-
-    # Save results
-    logger.info("STEP 5: Saving results...")
-
-    # Extract signals for results
-    signals = backtest_df["signal"].values
-    strategy_returns = backtest_df["strategy_return"].values
-    equity_curve = backtest_df["capital"].values
-    trade_costs = backtest_df["trade_cost"].values
-
-    # Align dates with backtest results (in case of length mismatch)
-    backtest_dates = (
-        backtest_df["date"].values if "date" in backtest_df.columns else None
-    )
-    if backtest_dates is None and len(test_data["dates"]) >= len(predictions):
-        backtest_dates = test_data["dates"][: len(predictions)]
-
-    # Log lengths for debugging
-    logger.info(
-        f"Array lengths: predictions={len(predictions)}, actual_returns={len(actual_returns)}, "
-        f"signals={len(signals)}, equity={len(equity_curve)}"
-    )
-
-    results = BacktestResults(
-        model_type=args.model_type,
-        ticker=args.ticker,
-        timestamp=datetime.now().isoformat(),
-        predictions=predictions,
-        actual_returns=actual_returns,
-        dates=backtest_dates,
-        signals=signals,
-        strategy_returns=strategy_returns,
-        equity_curve=equity_curve,
-        trade_costs=trade_costs,
-        statistical_metrics=statistical_metrics,
-        trading_metrics=trading_metrics,
-        model_metadata=model_adapter.get_metadata(),
-        backtest_config={
-            "split": args.split,
-            "transaction_cost": config.backtesting.transaction_cost,
-            "initial_capital": config.backtesting.initial_capital,
-        },
-    )
-
-    save_backtest_results(results, output_dir)
-
-    # Generate visualizations
-    logger.info("STEP 6: Generating visualizations...")
-    create_all_plots(
-        backtest_df, predictions, actual_returns, args.model_type, output_dir
-    )
-
-    # Final summary
-    logger.info("=" * 80)
-    logger.info("BACKTEST COMPLETE")
-    logger.info("=" * 80)
-    logger.info(f"Total Return: {trading_metrics['cagr']:.2%}")
-    logger.info(f"Sharpe Ratio: {trading_metrics['sharpe']:.2f}")
-    logger.info(f"Max Drawdown: {trading_metrics['max_drawdown']:.2%}")
-    logger.info(f"Win Rate: {trading_metrics['win_rate']:.2%}")
-    logger.info("=" * 80)
-    logger.info(f"Results saved to: {output_dir}")
-    logger.info("=" * 80)
+        logger.info("=" * 80)
+        logger.info("BACKTEST COMPLETE")
+        logger.info("=" * 80)
+        logger.info(f"Sharpe Ratio: {backtest_result.sharpe:.2f}")
+        logger.info(f"Max Drawdown: {backtest_result.mdd:.2%}")
+        logger.info(f"Win Rate: {backtest_result.win_rate_:.2%}")
 
     logger.info(" PIPELINE COMPLETE")
 
