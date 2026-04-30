@@ -240,9 +240,9 @@ def create_lag_features(
     return X_lagged, y_lagged
 
 
-X_raw = _load_parquet(
-    FEATURE_CACHE_DIR / "splits" / "raw" / f"{ticker}_X_train_raw.parquet"
-)
+# X_raw = _load_parquet(
+#     FEATURE_CACHE_DIR / "splits" / "raw" / f"{ticker}_X_train_raw.parquet"
+# )
 
 # X_train_scaled = _load_parquet(
 #     FEATURE_CACHE_DIR / "splits" / "scaled" / f"{ticker}_X_train_scaled.parquet"
