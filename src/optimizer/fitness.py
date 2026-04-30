@@ -49,15 +49,14 @@ def compute_msw(model: torch.nn.Module) -> float:
     """
     total_sq_weight = 0.0
     n_params = 0
-    
+
     for param in model.parameters():
-        if param.requires_grad:
-            total_sq_weight += torch.sum(param ** 2).item()
-            n_params += param.numel()
-    
+        total_sq_weight += torch.sum(param ** 2).item()
+        n_params += param.numel()
+
     if n_params == 0:
         return 0.0
-    
+
     msw = total_sq_weight / n_params
     return float(msw)
 

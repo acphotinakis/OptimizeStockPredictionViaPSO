@@ -78,6 +78,9 @@ def load_feature_data(data_path: Path) -> dict:
         data[f"X_{split}"] = X
         data[f"y_{split}"] = y
 
+        total_samples += len(X)
+        feature_dim = X.shape[1]
+
     # ----------------------------
     # Global dataset summary
     # ----------------------------
@@ -246,6 +249,7 @@ def train_xgboost(
         "tree_method": xgb_config.tree_method,
         "max_bin": xgb_config.max_bin,
         "n_jobs": xgb_config.n_jobs,
+        "importance_type": xgb_config.importance_type,
         "verbosity": xgb_config.verbosity,
         "random_state": xgb_config.random_state,
     }

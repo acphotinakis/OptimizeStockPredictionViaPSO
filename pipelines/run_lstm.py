@@ -285,9 +285,12 @@ def train_baseline_lstm(
     logger.info(f"  X_train: {X_train_win.shape}, y_train: {y_train_win.shape}")
     logger.info(f"  X_val:   {X_val_win.shape}, y_val:   {y_val_win.shape}")
 
-    # Model configuration dict (for metadata persistence)
+    # Model configuration dict (for metadata persistence). Includes lookback so
+    # the sidecar fully describes the windowing contract; downstream loaders
+    # validate it against the runtime config.
     model_config = {
         "input_size": X_train_win.shape[2],
+        "lookback": lookback,
         "lstm_units_1": lstm_config.lstm_units_1,
         "lstm_units_2": lstm_config.lstm_units_2,
         "dropout_rate": lstm_config.dropout_rate,

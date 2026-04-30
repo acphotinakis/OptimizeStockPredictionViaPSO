@@ -123,23 +123,14 @@ class XGBoostTrainer:
         n_estimators = self.config["n_estimators"]
         tqdm_callback = TQDMCallback(n_estimators)
 
-        xgb_model = xgb.XGBModel(
-            self.config,
+        regressor = xgb.XGBRegressor(
+            **self.config,
             callbacks=[
                 tqdm_callback,
                 EarlyStopping(rounds=self.early_stopping_rounds, save_best=True),
             ],
         )
-        # Create and fit regressor
-        regressor = xgb.XGBRegressor(**self.config)
         eval_set = [(X_train, y_train), (X_val, y_val)]
-
-        regressor.callbacks = [
-            tqdm_callback,
-            EarlyStopping(rounds=self.early_stopping_rounds, save_best=True),
-        ]
-
-        regressor.early_stopping_rounds = self.early_stopping_rounds
 
         logger.info("Training...")
         regressor.fit(
@@ -151,7 +142,7 @@ class XGBoostTrainer:
 
         # Extract history
         evals_result = (
-            regressor.evals_result_ if hasattr(regressor, "evals_result") else {}
+            regressor.evals_result_ if hasattr(regressor, "evals_result_") else {}
         )
         best_iteration = (
             regressor.best_iteration if hasattr(regressor, "best_iteration") else 0

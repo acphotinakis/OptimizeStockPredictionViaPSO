@@ -57,9 +57,13 @@ class IPSO(StandardPSO):
         mu_mf = 0.7 + 0.3 * (t / max(self.T, 1))  # ∈ (0.7, 1]
         xi = self._rng.uniform()
         if xi > mu_mf:
-            # Mutate: reinitialise position and velocity randomly
+            # Mutate: reinitialise position and velocity randomly. The personal
+            # best is also reset so the cognitive force does not drag the
+            # freshly-mutated particle back toward an irrelevant region.
             particle.position = random_position(self._rng)
             particle.velocity = random_velocity(self._rng)
+            particle.pbest_position = particle.position.copy()
+            particle.pbest_fitness = float("inf")
             logger.info("Particle %d mutated at iteration %d", particle.idx, t)
             return True  # Signal: skip standard velocity/position update
         return False
@@ -78,7 +82,11 @@ class IPSO(StandardPSO):
         social = self.c2 * r2 * (self._gbest_position - particle.position)
         particle.velocity = w * particle.velocity + cognitive + social
         particle.velocity = np.clip(particle.velocity, -self.v_clamp, self.v_clamp)
-        particle.position = np.clip(particle.position + particle.velocity, LB, UB)
+
+        proposed = particle.position + particle.velocity
+        clipped = np.clip(proposed, LB, UB)
+        particle.velocity = np.where(proposed != clipped, 0.0, particle.velocity)
+        particle.position = clipped
 
     # ---- Full run loop (overrides parent to pass t to hook) ---------------
 

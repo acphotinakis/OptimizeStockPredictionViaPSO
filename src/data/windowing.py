@@ -31,8 +31,12 @@ def build_lstm_windows(
         X_windowed: (N-lookback, lookback, F) 3D sequences
         y_windowed: (N-lookback,) aligned targets
 
-    Each window contains the past `lookback` timesteps of features,
-    with the target aligned to the end of the window.
+    Each window contains the past `lookback` timesteps of features. The target
+    is the 1-bar-ahead forward return at the most-recent feature bar: for
+    window ``i`` covering rows ``[i, i+lookback-1]``, the target is
+    ``y[i+lookback-1] = log(close[i+lookback] / close[i+lookback-1])``. This
+    matches `build_xgboost_lag_features` so both models predict the same
+    quantity.
 
     Args:
         X: Feature matrix, shape (N, F)
@@ -75,8 +79,11 @@ def build_lstm_windows(
     for i in range(n_windows):
         X_windowed[i] = X[i : i + lookback]
 
-    # Target aligned with end of window
-    y_windowed = y[lookback:].astype(np.float32)
+    # 1-bar-ahead alignment: window i covers rows [i, i+lookback-1] (most recent
+    # feature at index i+lookback-1) and the target is the forward return at the
+    # most-recent feature bar, y[i+lookback-1] = log(close[i+lookback]/close[i+lookback-1]).
+    # The final row is dropped because y[N-1] is NaN under the canonical target.
+    y_windowed = y[lookback - 1 : -1].astype(np.float32)
 
     logger.info(
         f"Built {n_windows} windows: "

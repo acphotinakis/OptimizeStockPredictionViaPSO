@@ -58,7 +58,12 @@ class LSTMNetwork(nn.Module):
         PyTorch LSTM network for financial time-series regression.
 
         Architecture:
-            Input(T, F) --> LSTM_1 --> Act --> Dropout --> LSTM_2 --> Act --> Dropout --> Dense(H)
+            Input(T, F) --> LSTM_1 --> Dropout --> LSTM_2 --> Dropout --> Dense(H) --> OutputAct
+
+        The configurable activation is applied only on the dense head's output
+        (when ``output_activation`` is non-linear). It is not inserted between
+        the stacked LSTM layers, since that would zero half of the recurrent
+        hidden-state range and damage the gating dynamics of LSTM_2.
 
         Notes:
         - Supports configurable activation + output activation
@@ -140,12 +145,10 @@ class LSTMNetwork(nn.Module):
         """
         # LSTM 1
         out, _ = self.lstm_1(x)
-        out = self.activation(out)
         out = self.dropout_1(out)
 
         # LSTM 2
         out, _ = self.lstm_2(out)
-        out = self.activation(out)
         out = self.dropout_2(out)
 
         # Last timestep
@@ -386,7 +389,9 @@ class LSTMModel:
         """Load model weights from disk."""
         if self.model is None:
             raise RuntimeError("Model not built. Call build_model() first.")
-        self.model.load_state_dict(torch.load(filepath, map_location=self.device))
+        self.model.load_state_dict(
+            torch.load(filepath, map_location=self.device, weights_only=True)
+        )
         self.model.eval()
         logger.info(f"Model weights loaded from {filepath}")
 

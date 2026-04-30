@@ -255,22 +255,23 @@ class LSTMTrainer:
                 train_preds_all.append(outputs.detach().cpu().numpy())
                 train_true_all.append(batch_y.detach().cpu().numpy())
 
-                # grad norm
-                total_norm = 0.0
-                for p in model.parameters():
-                    if p.grad is not None:
-                        total_norm += p.grad.data.norm(2).item() ** 2
-                epoch_grad_norms.append(total_norm**0.5)
-
-                # optimizer step
+                # optimizer step (with accumulation). Grad norm is measured
+                # AFTER AMP unscale + clipping so it reflects the gradient the
+                # optimizer actually sees, not the loss-scale-inflated version.
                 if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(
                     train_loader
                 ):
+                    if use_amp:
+                        scaler.unscale_(optimizer)
 
                     if grad_clip > 0:
-                        if use_amp:
-                            scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
+                    total_norm = 0.0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            total_norm += p.grad.data.norm(2).item() ** 2
+                    epoch_grad_norms.append(total_norm**0.5)
 
                     if use_amp:
                         scaler.step(optimizer)
@@ -371,18 +372,20 @@ class LSTMTrainer:
             history["val_loss_slope"].append(val_loss_slope)
 
             # -------------------------------------------------
-            # EARLY STOPPING
+            # BEST-WEIGHTS BOOKKEEPING + EARLY STOPPING
             # -------------------------------------------------
-            if es_cfg["enabled"]:
-                if avg_val_loss < best_val_loss:
-                    best_val_loss = avg_val_loss
-                    best_epoch = epoch
-                    best_weights = {
-                        k: v.cpu().clone() for k, v in model.state_dict().items()
-                    }
-                    epochs_no_improve = 0
-                else:
-                    epochs_no_improve += 1
+            # Always track the best checkpoint so ``restore_best_weights`` works
+            # regardless of whether early stopping is enabled. Only the
+            # patience-based ``break`` is guarded by ``es_cfg["enabled"]``.
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                best_epoch = epoch
+                best_weights = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
             if es_cfg["enabled"] and epochs_no_improve >= patience:
                 break
@@ -394,8 +397,6 @@ class LSTMTrainer:
             model.load_state_dict(best_weights)
 
         model.eval()
-        for p in model.parameters():
-            p.requires_grad = False
 
         # -------------------------------------------------
         # FINAL RETURN STRUCTURE

@@ -93,3 +93,5 @@ plans/
 
 .gemini/
 .gemini/
+CLAUDE.md
+.claude/*

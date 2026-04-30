@@ -45,13 +45,20 @@ class AlpacaIngestor:
         api_secret: Optional[str] = None,
         base_url: str = "https://paper-api.alpaca.markets",
     ) -> None:
-        # Load credentials from environment (use consistent naming)
+        # Load credentials from environment. Accept either ``ALPACA_SECRET_KEY``
+        # (README convention) or ``ALPACA_API_SECRET`` (.env.example convention)
+        # so users templated from either source work without renaming.
         api_key = api_key or os.getenv("ALPACA_API_KEY")
-        secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY")
+        secret_key = (
+            api_secret
+            or os.getenv("ALPACA_SECRET_KEY")
+            or os.getenv("ALPACA_API_SECRET")
+        )
 
         if not api_key or not secret_key:
             logger.error(
-                "Alpaca API credentials missing. Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are in .env."
+                "Alpaca API credentials missing. Ensure ALPACA_API_KEY and "
+                "ALPACA_SECRET_KEY (or ALPACA_API_SECRET) are set in .env."
             )
             raise EnvironmentError("Missing Alpaca API credentials.")
 

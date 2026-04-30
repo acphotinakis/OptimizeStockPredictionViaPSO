@@ -296,11 +296,11 @@ class Backtester:
             is_open = et_index[t].hour == 9 and et_index[t].minute == 30
             is_close = et_index[t].hour == 16 and et_index[t].minute == 0
 
-        # if is_open:
-        #     return SessionEvent.OPEN
-        # elif is_close:
-        #     return SessionEvent.CLOSE
-        return SessionEvent.OPEN
+        if is_open:
+            return SessionEvent.OPEN
+        elif is_close:
+            return SessionEvent.CLOSE
+        return SessionEvent.NONE
 
     def _update_position(
         self,

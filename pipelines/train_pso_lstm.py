@@ -14,11 +14,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.models import (
-    PSOLSTMModel,
-    PSOLSTMTrainer,
-    build_lstm_windows,
-)
+from src.data.windowing import build_lstm_windows
+from src.models import LSTMModel, LSTMTrainer
 from src.optimizer import IPSO, SpecCompliantFitness
 from src.utils.config_loader import Config, load_config
 from src.utils.logger import LogFileMode, setup_logger
@@ -248,47 +245,59 @@ def phase1_pso_search(
 
     # Define model builder function that PSO core will call
     def model_builder(params, X_train, y_train, X_val, y_val):
-        """
-        Build and train LSTM model for one PSO particle.
+        """Build and train an LSTM for one PSO particle.
 
-        This function is called by PSO core for each particle evaluation.
-        Returns (y_pred, model) tuple so fitness function can compute MSW.
+        Returns ``(y_pred, model)`` where ``model`` is the underlying
+        ``nn.Module`` so the fitness function can compute MSW directly from
+        ``model.parameters()``.
 
         Args:
-            params: Hyperparameters decoded from particle position
-            X_train: Training sequences (already windowed)
-            y_train: Training targets
-            X_val: Validation sequences (already windowed)
-            y_val: Validation targets
+            params: Hyperparameters decoded from a particle position.
+            X_train: Training sequences (already windowed).
+            y_train: Training targets.
+            X_val: Validation sequences (already windowed).
+            y_val: Validation targets.
 
         Returns:
-            y_pred: Predictions on validation set (for MSE computation)
+            Tuple ``(y_pred, nn.Module)``.
         """
-        # Build model configuration from PSO parameters
-        model_config = {
+        architecture_config = {
+            "input_size": X_train.shape[2],
             "lstm_units_1": params["units_1"],
             "lstm_units_2": params["units_2"],
             "dropout_rate": params["dropout"],
-            "learning_rate": params["learning_rate"],
-            "batch_size": params["batch_size"],
-            "epochs": params["epochs"],
+            "output_units": 1,
+            "activation": "relu",
+            "output_activation": "linear",
         }
 
-        # Create and train model
-        model_wrapper = PSOLSTMModel(seed=seed)
-        trainer = PSOLSTMTrainer(model_config, seed=seed)
+        trainer_config = {
+            "learning_rate": params["learning_rate"],
+            "epochs": params["epochs"],
+            "batch_size": params["batch_size"],
+            "optimizer": "adam",
+            "loss": "mse",
+            "shuffle": False,
+            "grad_clip": 1.0,
+            "use_amp": False,
+            "accumulation_steps": 1,
+            "early_stopping": {
+                "enabled": True,
+                "monitor": "val_loss",
+                "patience": 10,
+                "restore_best_weights": True,
+            },
+        }
 
-        # Train on PSO internal split
-        trained_model, _, _ = model_wrapper.train(
-            X_train,
-            y_train,
-            X_val,
-            y_val,
-            model_config,
+        model_wrapper = LSTMModel(seed=seed)
+        model_wrapper.build_model(architecture_config)
+
+        trainer = LSTMTrainer(
+            lstm_model=model_wrapper, config=trainer_config, seed=seed
         )
+        trained_wrapper, _ = trainer.train(X_train, y_train, X_val, y_val)
 
-        # Get validation predictions
-        y_pred = model_wrapper.predict(X_val)
+        y_pred = trained_wrapper.predict(X_val)
 
         # TRD1 §8.1 L-6: Verify test set never accessed
         current_hash = hashlib.sha256(X_test.tobytes()).hexdigest()
@@ -296,9 +305,7 @@ def phase1_pso_search(
             current_hash == _test_data_hash
         ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
 
-        # Return (predictions, model) tuple for MSW computation
-        # PSO core expects this format and will pass both to fitness function
-        return y_pred, trained_model
+        return y_pred, trained_wrapper.model
 
     # Initialize spec-compliant fitness function (MSE + MSW)
     # PSO core will call this with (y_true, y_pred, model)
@@ -380,7 +387,7 @@ def phase2_final_training(
     config: Config,
     output_dir: Path,
     feature_metadata: Dict,
-) -> PSOLSTMModel:
+) -> LSTMModel:
     """
     Phase 2: Final training on combined 80% (train+val) with PSO params.
 
@@ -431,48 +438,63 @@ def phase2_final_training(
     seed = config.lstm_baseline.random_seed
     set_all_seeds(seed)
 
-    # TRD1 §5.1: LSTM Architecture Constraints
-    model_config = {
+    architecture_config = {
+        "input_size": X_combined_win.shape[2],
         "lstm_units_1": best_params["units_1"],
         "lstm_units_2": best_params["units_2"],
         "dropout_rate": best_params["dropout"],
+        "output_units": 1,
+        "activation": "relu",
+        "output_activation": "linear",
+    }
+
+    # TRD2 §7.4: Phase 2 trains for the exact PSO epoch count with no early
+    # stopping; the val arrays are passed only to satisfy LSTMTrainer's input
+    # validation and never trigger termination.
+    trainer_config = {
         "learning_rate": best_params["learning_rate"],
-        "batch_size": best_params["batch_size"],
         "epochs": best_params["epochs"],
+        "batch_size": best_params["batch_size"],
+        "optimizer": "adam",
+        "loss": "mse",
+        "shuffle": False,
+        "grad_clip": 1.0,
+        "use_amp": False,
+        "accumulation_steps": 1,
+        "early_stopping": {"enabled": False},
     }
 
     logger.info("PSO-optimized model configuration:")
-    for key, value in model_config.items():
+    for key, value in {**architecture_config, **trainer_config}.items():
         logger.info(f"  {key}: {value}")
 
-    # Create model (FIXED: Use correct classes)
-    model_wrapper = PSOLSTMModel(seed=seed)
-    trainer = PSOLSTMTrainer(model_config, seed=seed)
+    model_wrapper = LSTMModel(seed=seed)
+    model_wrapper.build_model(architecture_config)
+    trainer = LSTMTrainer(
+        lstm_model=model_wrapper, config=trainer_config, seed=seed
+    )
 
-    # TRD2 §7.4: Train with exact PSO epochs, NO early stopping
     logger.info("=" * 80)
     logger.info("TRAINING (SINGLE FINAL FIT - NO EARLY STOPPING)")
     logger.info("=" * 80)
 
-    # Train on combined 80% data with NO validation split
-    trained_model, history, _ = model_wrapper.train(
+    trained_wrapper, training_artifacts = trainer.train(
         X_combined_win,
         y_combined_win,
-        X_combined_win,  # Use train data as "val" (no early stopping)
+        X_combined_win,
         y_combined_win,
-        model_config,
     )
+    history = training_artifacts.get("history", {})
 
     logger.info("=" * 80)
-    logger.info("PHASE 2 COMPLETE - MODEL NOW FROZEN")
+    logger.info("PHASE 2 COMPLETE")
     logger.info("=" * 80)
-    logger.info("⚠️  This model will NEVER be retrained (TRD compliance)")
-    logger.info("⚠️  Walk-forward evaluation will use THIS frozen model")
+    logger.info("This model will not be retrained (TRD compliance).")
+    logger.info("Walk-forward evaluation will use this trained model.")
     logger.info("=" * 80)
 
-    # Save model
     model_path = output_dir / "pso_lstm_model.pt"
-    model_wrapper.save_weights(str(model_path))
+    trained_wrapper.save(str(model_path))
     logger.info(f"Model saved to {model_path}")
 
     # Save training history
@@ -484,7 +506,11 @@ def phase2_final_training(
     # Save final model configuration
     config_path = output_dir / "model_config.yaml"
     with open(config_path, "w") as f:
-        yaml.dump(model_config, f, default_flow_style=False)
+        yaml.dump(
+            {**architecture_config, **trainer_config},
+            f,
+            default_flow_style=False,
+        )
     logger.info(f"Model config saved to {config_path}")
 
     # TRD1 §9.2: Save complete metadata (MANDATORY)
@@ -538,7 +564,7 @@ def phase2_final_training(
             json.dump(feature_metadata["scaler_params"], f, indent=2)
         logger.info(f"Scaler parameters saved to {scaler_path}")
 
-    return model_wrapper
+    return trained_wrapper
 
 
 def main():
@@ -634,7 +660,6 @@ def main():
             y_val=data["y_val"],
             best_params=best_params,
             config=config,
-            lookback=lookback,
             output_dir=args.output_dir,
             feature_metadata=feature_metadata,
         )

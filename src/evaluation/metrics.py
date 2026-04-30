@@ -53,20 +53,20 @@ def r_squared(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 #     return float(correct.mean())
 
 
-def directional_accuracy(y_true, y_pred, threshold=0.0, exclude_zeros=True):
-    """
-    Directional accuracy with correct zero handling.
-    
-    CRITICAL FIX (2026-04-28): Treats near-zero returns correctly.
-    
+def directional_accuracy(y_true, y_pred, threshold=1e-8, exclude_zeros=True):
+    """Directional accuracy with correct zero handling.
+
     Args:
-        y_true: Actual returns
-        y_pred: Predicted returns  
-        threshold: Minimum absolute value to classify as directional
-        exclude_zeros: If True, exclude near-zero actuals (RECOMMENDED)
-    
+        y_true: Actual returns.
+        y_pred: Predicted returns.
+        threshold: Minimum absolute value to classify as directional. The
+            default 1e-8 filters subnormal floating-point noise while keeping
+            any meaningful log-return magnitude.
+        exclude_zeros: If True, drop samples where ``|y_true|`` falls at or
+            below ``threshold`` before scoring (recommended).
+
     Returns:
-        Fraction of correct direction predictions
+        Fraction of correct direction predictions.
     """
     if exclude_zeros:
         # Only evaluate where actual has clear direction
@@ -192,10 +192,16 @@ def cagr(equity_curve: np.ndarray, n_bars_per_year: int = 252 * 390) -> float:
     Args:
         equity_curve: Absolute portfolio value over time.
         n_bars_per_year: Number of 1-minute bars in a trading year.
+
+    Returns:
+        Annualised growth rate. Returns 0.0 if the curve is empty or starts at
+        non-positive equity, and -1.0 if final equity is non-positive (full loss).
     """
     n_bars = len(equity_curve)
     if n_bars == 0 or equity_curve[0] <= 0:
         return 0.0
+    if equity_curve[-1] <= 0:
+        return -1.0
     n_years = n_bars / n_bars_per_year
     return float((equity_curve[-1] / equity_curve[0]) ** (1.0 / n_years) - 1.0)
 

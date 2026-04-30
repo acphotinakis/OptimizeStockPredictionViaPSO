@@ -166,8 +166,13 @@ class StandardPSO:
         # Velocity clamping
         particle.velocity = np.clip(particle.velocity, -self.v_clamp, self.v_clamp)
 
-        # Position update + boundary enforcement
-        particle.position = np.clip(particle.position + particle.velocity, LB, UB)
+        # Position update + boundary enforcement. Per-dim velocity components
+        # that drove the particle past the wall are zeroed so that subsequent
+        # iterations do not stagnate against the boundary.
+        proposed = particle.position + particle.velocity
+        clipped = np.clip(proposed, LB, UB)
+        particle.velocity = np.where(proposed != clipped, 0.0, particle.velocity)
+        particle.position = clipped
 
     def _evaluate_all(
         self,
@@ -198,41 +203,57 @@ class StandardPSO:
         X_val: np.ndarray,
         y_val: np.ndarray,
     ) -> float:
-        """Build model, train, predict on val, return composite fitness."""
-        # Phase 3: Clear GPU cache before each particle evaluation
+        """Build model, train, predict on val, return composite fitness.
+
+        Failed evaluations (OOM, NaN loss, divergent training) are logged and
+        return ``+inf`` so the swarm can continue without losing the entire run.
+        """
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        params = particle.decode()
-        lookback = params["lookback"]  # Always 20 (fixed)
+        try:
+            params = particle.decode()
+            lookback = params["lookback"]
 
-        # Validate lookback matches data
-        if X_train.shape[1] < lookback:
-            raise ValueError(f"X_train lookback {X_train.shape[1]} < required {lookback}")
+            if X_train.shape[1] < lookback:
+                raise ValueError(
+                    f"X_train lookback {X_train.shape[1]} < required {lookback}"
+                )
 
-        # Slice windows to the required lookback length (should be 20)
-        X_tr = X_train[:, :lookback, :]
-        X_vl = X_val[:, :lookback, :]
+            X_tr = X_train[:, :lookback, :]
+            X_vl = X_val[:, :lookback, :]
 
-        if self.model_builder is None:
-            raise RuntimeError("model_builder must be set before calling run().")
+            if self.model_builder is None:
+                raise RuntimeError("model_builder must be set before calling run().")
 
-        # model_builder must now return (y_pred, model) tuple for MSW computation
-        result = self.model_builder(params, X_tr, y_train, X_vl, y_val)
-        
-        if isinstance(result, tuple):
-            y_pred, model = result
-            fitness = self.fitness_fn(y_val, y_pred, model)
-        else:
-            # Backward compatibility: if only predictions returned
-            y_pred = result
-            fitness = self.fitness_fn(y_val, y_pred, None)
+            result = self.model_builder(params, X_tr, y_train, X_vl, y_val)
 
-        # Phase 3: Clear GPU cache after evaluation
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            if isinstance(result, tuple):
+                y_pred, model = result
+                fitness = self.fitness_fn(y_val, y_pred, model)
+            else:
+                y_pred = result
+                fitness = self.fitness_fn(y_val, y_pred, None)
 
-        return fitness
+            if not np.isfinite(fitness):
+                logger.warning(
+                    "Particle %d returned non-finite fitness (%s); using +inf",
+                    particle.idx,
+                    fitness,
+                )
+                return float("inf")
+
+            return fitness
+        except Exception as exc:
+            logger.warning(
+                "Particle %d evaluation failed: %s",
+                particle.idx,
+                exc,
+            )
+            return float("inf")
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def _evaluate_parallel(self, X_train, y_train, X_val, y_val) -> None:
         """Evaluate particles in parallel using ProcessPoolExecutor."""
