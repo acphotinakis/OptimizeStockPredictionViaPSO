@@ -11,15 +11,17 @@ from typing import Dict
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
 from tqdm import tqdm
-from _met import *
+from _metrics import *
 from src.data.windowing import build_lstm_windows
 from src.models.financial_dataset import FinancialDataset
 from src.utils.data_storage import _load_parquet
 from src.utils.logger import LogFileMode, setup_logger
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
+# FIX THIS LATER
 setup_logger(
     log_file="build_features_v3.log",
     level="INFO",
@@ -34,7 +36,7 @@ CONFIG = {
     "framework": "pytorch",
     "lstm_units_1": 128,
     "lstm_units_2": 64,
-    "dropout_rate": 0.2,
+    "dropout_rate": 0.1,
     "activation": "tanh",
     "output_units": 1,
     "output_activation": "linear",
@@ -42,12 +44,13 @@ CONFIG = {
     "learning_rate": 0.001,
     "loss": "mse",
     "epochs": 100,
-    "batch_size": 128,
+    # "batch_size": 32,
     # "batch_size": 4096,
-    # "batch_size": 512,
+    "batch_size": 512,
     "shuffle": False,
     "lookback": 20,
-    "prediction_horizon": 1,
+    # "prediction_horizon": 1,
+    "prediction_horizon": 6,
     "random_seed": 42,
     "deterministic": True,
     "validation_split": 0.10,
@@ -79,20 +82,23 @@ logger.info(f"Device: {DEVICE}")
 logger.info(f"Config: {json.dumps(CONFIG, indent=2)}\n")
 
 
-# =============================================================================
-# 1. LOAD CLEANED FINANCIAL TIME-SERIES DATA
-# =============================================================================
-
-
-ticker = "AAPL"
+# ARGUMENTS
+ticker = "SPY"
 timeframe = "1Day"
 
-target_method = "next_close"
+# target_method = "next_close"
+target_method = "log_return"
+
+feature_data_dir = "data/features_v4"
+
+
+# output_model_dir =
 
 # =============================================================================
 # CACHE PATHS (FEATURE PIPELINE)
 # =============================================================================
-FEATURE_CACHE_DIR = Path(f"data/features_v4/{ticker}/{timeframe}/{target_method}")
+FEATURE_CACHE_DIR = Path(f"{feature_data_dir}/{ticker}/{timeframe}/{target_method}")
+# FEATURE_CACHE_DIR = Path(f"data/fake_selection/{ticker}/{timeframe}/{target_method}")
 FEATURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 SELECTED_FEATURES_PATH = FEATURE_CACHE_DIR / "selected_features.json"
@@ -100,14 +106,18 @@ SELECTOR_PATH = FEATURE_CACHE_DIR / "feature_selector.joblib"
 FEATURE_SCALER_PATH = FEATURE_CACHE_DIR / "feature_scaler.joblib"
 TARGET_SCALER_PATH = FEATURE_CACHE_DIR / "target_scaler.joblib"
 PIPELINE_META_PATH = FEATURE_CACHE_DIR / "pipeline_meta.json"
-print(SELECTOR_PATH)
-print(SELECTOR_PATH.exists())
-MODEL_DIR = FEATURE_CACHE_DIR / "model"
 
-PREDICTIONS_DIR = FEATURE_CACHE_DIR / "predictions"
+
+# create output directory
+OUTPUT_DIR = FEATURE_CACHE_DIR / "experiments" / f"lstm_baseline_{uuid.uuid4()}"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+MODEL_DIR = OUTPUT_DIR / "lstm_baseline" / "model"
+
+PREDICTIONS_DIR = OUTPUT_DIR / "predictions"
 PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-PLOTS_DIR = FEATURE_CACHE_DIR / "plots"
+PLOTS_DIR = OUTPUT_DIR / "plots"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -144,7 +154,7 @@ for name, path in REQUIRED_FILES.items():
         missing.append((name, str(path)))
 
 if missing:
-    logger.error("❌ Feature cache validation FAILED")
+    logger.error(" Feature cache validation FAILED")
     logger.error(f"Cache directory: {FEATURE_CACHE_DIR}")
 
     logger.error("Missing files:")
@@ -159,7 +169,7 @@ if missing:
         f"{len(missing)} required cache files missing. See logs for details."
     )
 
-logger.info("📦 All required cache artifacts found. Loading pipeline...")
+logger.info("All required cache artifacts found. Loading pipeline...")
 
 cache_exists = (
     SELECTED_FEATURES_PATH.exists()
@@ -169,7 +179,7 @@ cache_exists = (
 )
 
 if cache_exists:
-    logger.info("📦 Loading cached feature pipeline...")
+    logger.info("Loading cached feature pipeline...")
 
     with open(SELECTED_FEATURES_PATH, "r") as f:
         selected_names = json.load(f)

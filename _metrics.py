@@ -85,6 +85,17 @@ def directional_accuracy(y_true, y_pred, threshold=0.0, exclude_zeros=True):
         return float((yt == yp).mean())
 
 
+# def directional_accuracy(y_true, y_pred, threshold=0.0, exclude_zeros=True):
+#     if exclude_zeros:
+#         mask = np.abs(y_true) > threshold
+#         if mask.sum() == 0:
+#             return float("nan")
+#         return float((np.sign(y_true[mask]) == np.sign(y_pred[mask])).mean())
+#     else:
+#         yt = np.where(np.abs(y_true) < threshold, 0, np.sign(y_true))
+#         yp = np.where(np.abs(y_pred) < threshold, 0, np.sign(y_pred))
+#         return float((yt == yp).mean())
+
 def f1_ternary(
     y_true: np.ndarray,
     y_pred: np.ndarray,
