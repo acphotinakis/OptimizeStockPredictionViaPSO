@@ -103,59 +103,64 @@ class LSTMNetwork(nn.Module):
         self.lstm_1 = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size_1,
-            num_layers=1,
             batch_first=True,
-            dropout=0.0,
         )
 
-        self.dropout_1 = (
-            nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
-        )
+        self.dropout_1 = nn.Dropout(p=dropout_rate)
 
         self.lstm_2 = nn.LSTM(
             input_size=hidden_size_1,
             hidden_size=hidden_size_2,
-            num_layers=1,
             batch_first=True,
-            dropout=0.0,
         )
 
-        self.dropout_2 = (
-            nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
-        )
-        # -------------------------
-        # Output layer
-        # -------------------------
-        # If prediction_horizon > 1 --> multi-step forecast
-        final_output_dim = output_units
-        self.fc = nn.Linear(hidden_size_2, final_output_dim)
+        self.dropout_2 = nn.Dropout(p=dropout_rate)
+
+        self.fc = nn.Linear(hidden_size_2, output_units)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (batch, T, F)
+        # LSTM layer 1
+        out, _ = self.lstm1(x)
+        out = self.dropout1(out)
 
-        Returns:
-            (batch, H) where H = prediction_horizon or output_units
-        """
-        # LSTM 1
-        out, _ = self.lstm_1(x)
-        out = self.activation(out)
-        out = self.dropout_1(out)
+        # LSTM layer 2 (use final timestep output)
+        out, _ = self.lstm2(out)
+        out = self.dropout2(out)
 
-        # LSTM 2
-        out, _ = self.lstm_2(out)
-        out = self.activation(out)
-        out = self.dropout_2(out)
-
-        # Last timestep
+        # Take last timestep
         out = out[:, -1, :]
 
-        # Dense + output activation
+        # Final output (linear activation by default)
         out = self.fc(out)
-        out = self.output_activation(out)
 
         return out
+
+    # def forward(self, x: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Args:
+    #         x: (batch, T, F)
+
+    #     Returns:
+    #         (batch, H) where H = prediction_horizon or output_units
+    #     """
+    #     # LSTM 1
+    #     out, _ = self.lstm_1(x)
+    #     out = self.activation(out)
+    #     out = self.dropout_1(out)
+
+    #     # LSTM 2
+    #     out, _ = self.lstm_2(out)
+    #     out = self.activation(out)
+    #     out = self.dropout_2(out)
+
+    #     # Last timestep
+    #     out = out[:, -1, :]
+
+    #     # Dense + output activation
+    #     out = self.fc(out)
+    #     out = self.output_activation(out)
+
+    #     return out
 
     def __str__(self) -> str:
         total_params = sum(p.numel() for p in self.parameters())

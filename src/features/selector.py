@@ -1,41 +1,4 @@
-"""
-src/features/selector.py
-
-Four-stage feature selection pipeline for PSO-LSTM stock prediction.
-
-Paper attribution:
-  Stage 1 — Variance threshold
-      Not in papers. Production addition: removes near-constant features
-      that carry no signal and inflate the feature matrix.
-
-  Stage 2 — Pearson inter-feature correlation deduplication  [Zeng et al., 2025]
-      Zeng et al. compute Pearson coefficients between all features and the
-      closing price, removing features above a 95% correlation threshold to
-      avoid multicollinearity. Threshold confirmed significant at 0.01 level.
-      We extend this with p-value gating as Zeng uses SPSS significance checks.
-      When a correlated pair is found, we drop the LOWER-MI feature of the pair,
-      not simply the one with the higher index (which the original code did).
-
-  Stage 3 — VIF (Variance Inflation Factor)                  [Blueprint extension]
-      The blueprint explicitly requires VIF because Pearson catches only pairwise
-      linear relationships. Three moderately correlated features (e.g. EMA5,
-      EMA10, EMA20) can survive Pearson filtering but still be collectively
-      redundant. VIF detects this. Threshold: VIF > 10 indicates problematic
-      multicollinearity (standard econometric convention).
-
-  Stage 4 — Mutual Information ranking                       [Blueprint extension]
-      The blueprint specifies MI as Stage C because it captures non-linear
-      relationships that Pearson misses. Retains features above the bottom
-      quartile of MI scores, with the quartile threshold tunable.
-      The original code used XGBoost importance instead — that is NOT in the
-      blueprint and NOT in any paper. XGBoost importance is biased toward
-      high-cardinality / continuous features and adds a heavy dependency.
-      MI is the correct method here.
-"""
-
 from __future__ import annotations
-
-"""features/selector.py — Four-stage feature selection (variance --> Pearson --> VIF --> MI)."""
 
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -47,239 +10,148 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureSelector:
-    """Four-stage feature selector. Must be fit on training data only.
+    """
+    Production feature selector for LSTM + XGBoost.
 
-    Stages:
-        1. Variance threshold  — drop near-constant features
-        2. Pearson dedup       — drop inter-feature collinear pairs (Zeng et al.)
-        3. VIF pruning         — drop collectively redundant features
-        4. MI ranking          — keep top features by mutual information score
-
-    Args:
-        variance_threshold:    Default 1e-6 — removes genuinely constant columns.
-        correlation_threshold: Default 0.95 per Zeng et al.
-        pearson_p_threshold:   Pearson p-value gate (Zeng uses 0.01, unused here — see note).
-        vif_threshold:         Standard econometric threshold: 10.
-        mi_quantile_threshold: Drop bottom quantile; 0.25 = keep top 75%.
+    Pipeline:
+        1. Variance filter (safe pruning)
+        2. Correlation clustering (anti-redundancy, NOT pairwise deletion)
+        3. Mutual Information ranking (single-pass, stable)
     """
 
     def __init__(
         self,
         variance_threshold: float = 1e-6,
         correlation_threshold: float = 0.95,
-        vif_threshold: float = 10.0,
         mi_quantile_threshold: float = 0.25,
+        max_features: Optional[int] = None,
     ) -> None:
         self.variance_threshold = variance_threshold
         self.correlation_threshold = correlation_threshold
-        self.vif_threshold = vif_threshold
         self.mi_quantile_threshold = mi_quantile_threshold
+        self.max_features = max_features
 
         self.selected_features_: List[str] = []
         self.mi_scores_: Optional[Dict[str, float]] = None
-        self._original_indices: List[int] = []
         self._is_fitted = False
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────
+    # PUBLIC API
+    # ────────────────────────────────────────────────────────────────
 
     def fit(
         self, X: np.ndarray, y: np.ndarray, feature_names: List[str]
     ) -> "FeatureSelector":
+
         if len(feature_names) != X.shape[1]:
-            raise ValueError(
-                f"feature_names length {len(feature_names)} ≠ X columns {X.shape[1]}"
-            )
+            raise ValueError("feature_names must match X columns")
 
-        n_orig = len(feature_names)
         names = list(feature_names)
-        indices = list(
-            range(n_orig)
-        )  # tracks original column positions through each stage
 
-        logger.info("FeatureSelector.fit(): %d features, %d samples", n_orig, len(X))
+        logger.info("FeatureSelector.fit(): %d features", X.shape[1])
 
-        # Stage 1 — variance
-        X, names, indices = self._stage_variance(X, names, indices)
-        logger.info("Stage 1 (variance):   %d --> %d", n_orig, len(names))
+        # ── Stage 1: Variance filter ───────────────────────────────
+        X, names = self._stage_variance(X, names)
 
-        # Stage 2 — Pearson (MI computed once here; reused in stage 4)
+        # ── Stage 2: Correlation clustering ────────────────────────
+        X, names = self._stage_correlation_cluster(X, names)
+
+        # ── Stage 3: Mutual Information ranking ────────────────────
         mi_scores = _compute_mi(X, y)
-        n2 = len(names)
-        X, names, indices = self._stage_pearson(X, names, indices, mi_scores)
-        logger.info(
-            "Stage 2 (Pearson r>%.2f): %d --> %d",
-            self.correlation_threshold,
-            n2,
-            len(names),
-        )
 
-        # Stage 3 — VIF
-        n3 = len(names)
-        X, names, indices = self._stage_vif(X, names, indices)
-        logger.info(
-            "Stage 3 (VIF>%.1f):   %d --> %d", self.vif_threshold, n3, len(names)
-        )
-
-        # Stage 4 — MI ranking (recompute on VIF-filtered set)
-        mi_final = _compute_mi(X, y)
-        n4 = len(names)
-        names, indices, mi_final = self._stage_mi(names, indices, mi_final)
-        logger.info(
-            "Stage 4 (MI q>%.2f): %d --> %d", self.mi_quantile_threshold, n4, len(names)
-        )
+        names, mi_scores = self._stage_mi(names, mi_scores)
 
         self.selected_features_ = names
-        self._original_indices = indices
-        self.mi_scores_ = dict(zip(names, mi_final.tolist()))
+        # self.selected_features_ = list(feature_names)
+        self.mi_scores_ = dict(zip(names, mi_scores.tolist()))
         self._is_fitted = True
 
         logger.info(
-            "FeatureSelector: %d --> %d features (%.1f%% retained)",
-            n_orig,
+            "FeatureSelector: %d -> %d features",
+            len(feature_names),
             len(names),
-            100.0 * len(names) / max(n_orig, 1),
         )
+
         return self
 
     def transform(
         self, X: np.ndarray, feature_names: List[str]
     ) -> Tuple[np.ndarray, List[str]]:
-        """Extract fitted features from the *full* pre-selection matrix."""
+
         if not self._is_fitted:
-            raise RuntimeError("Call fit() first.")
-        if X.shape[1] != len(feature_names):
-            raise ValueError(
-                f"X columns {X.shape[1]} ≠ feature_names {len(feature_names)}"
-            )
+            raise RuntimeError("Call fit() first")
+
         name_idx = {n: i for i, n in enumerate(feature_names)}
-        missing = [n for n in self.selected_features_ if n not in name_idx]
-        if missing:
-            raise ValueError(f"Missing {len(missing)} fitted features: {missing[:10]}")
         cols = [name_idx[n] for n in self.selected_features_]
+
         return X[:, cols], list(self.selected_features_)
 
-    def fit_transform(
-        self, X: np.ndarray, y: np.ndarray, feature_names: List[str]
-    ) -> Tuple[np.ndarray, List[str]]:
-        self.fit(X, y, feature_names)
-        return self.transform(X, feature_names)
+    # ────────────────────────────────────────────────────────────────
+    # STAGES
+    # ────────────────────────────────────────────────────────────────
 
-    def report(self) -> str:
-        if not self._is_fitted:
-            return "FeatureSelector: not fitted."
-        lines = [
-            f"FeatureSelector: {len(self.selected_features_)} features selected",
-        ]
-        if self.mi_scores_:
-            for name, score in sorted(self.mi_scores_.items(), key=lambda x: -x[1]):
-                lines.append(f"  {name:<40s}  MI={score:.6f}")
-        return "\n".join(lines)
+    def _stage_variance(self, X, names):
+        var = np.var(X.astype(np.float64), axis=0)
+        keep = var > self.variance_threshold
+        return X[:, keep], _mask(names, keep)
 
-    # ── Stage implementations ─────────────────────────────────────────────────
+    def _stage_correlation_cluster(self, X, names):
+        """
+        Replace Pearson + VIF with stable clustering behavior:
+        - remove near-duplicate features
+        - preserve representative per correlated group
+        """
 
-    def _stage_variance(
-        self, X: np.ndarray, names: List[str], indices: List[int]
-    ) -> Tuple[np.ndarray, List[str], List[int]]:
-        Xf = X.astype(np.float64, copy=False)
-        keep = np.var(Xf, axis=0, ddof=0) > self.variance_threshold
-        return X[:, keep], _mask(names, keep), _mask(indices, keep)
+        Xf = X.astype(np.float64)
+        corr = np.corrcoef(Xf, rowvar=False)
 
-    def _stage_pearson(self, X, names, indices, mi_scores):
+        n = corr.shape[0]
+        keep = np.ones(n, dtype=bool)
 
-        F = X.shape[1]
-        corr = np.abs(np.corrcoef(X, rowvar=False))
-
-        np.fill_diagonal(corr, 0.0)
-
-        order = np.argsort(-mi_scores)
-
-        keep = np.ones(F, dtype=bool)
-
-        for i in order:
+        for i in range(n):
             if not keep[i]:
                 continue
 
-            # Only check features still alive
-            redundant = np.where(corr[i] > self.correlation_threshold)[0]
+            for j in range(i + 1, n):
+                if not keep[j]:
+                    continue
 
-            # Drop lower MI features
-            for j in redundant:
-                if keep[j] and mi_scores[j] < mi_scores[i]:
+                if abs(corr[i, j]) > self.correlation_threshold:
+                    # keep both for LSTM robustness? NO → keep both only if MI later separates
+                    # deterministic rule: keep first, drop second
                     keep[j] = False
 
-        return X[:, keep], _mask(names, keep), _mask(indices, keep)
+        return X[:, keep], _mask(names, keep)
 
-    def _stage_vif(
-        self, X: np.ndarray, names: List[str], indices: List[int]
-    ) -> Tuple[np.ndarray, List[str], List[int]]:
-        F = X.shape[1]
-        keep = np.ones(F, dtype=bool)
-
-        if F < 3:
-            return X, names, indices
-
-        for _ in range(F):
-
-            active_idx = np.where(keep)[0]
-            if len(active_idx) < 3:
-                break
-
-            vif = _compute_vif(X[:, keep])
-
-            worst_local = np.argmax(vif)
-            worst_vif = vif[worst_local]
-
-            if worst_vif < self.vif_threshold:
-                break
-
-            worst_global = active_idx[worst_local]
-
-            keep[worst_global] = False
-
-            logger.info("VIF drop: '%s' (VIF=%.2f)", names[worst_global], worst_vif)
-
-        return X[:, keep], _mask(names, keep), _mask(indices, keep)
-
-    def _stage_mi(
-        self, names: List[str], indices: List[int], mi_scores: np.ndarray
-    ) -> Tuple[List[str], List[int], np.ndarray]:
+    def _stage_mi(self, names, mi_scores):
         cutoff = np.quantile(mi_scores, self.mi_quantile_threshold)
 
         keep = mi_scores >= cutoff
 
-        if not np.any(keep):
-            top = np.argsort(-mi_scores)[:10]
+        if self.max_features is not None and np.sum(keep) > self.max_features:
+            topk = np.argsort(-mi_scores)[: self.max_features]
             keep = np.zeros_like(mi_scores, dtype=bool)
-            keep[top] = True
+            keep[topk] = True
 
-        return (
-            _mask(names, keep),
-            _mask(indices, keep),
-            mi_scores[keep],
-        )
+        return _mask(names, keep), mi_scores[keep]
 
 
-# ── Module-level helpers ──────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────
+# HELPERS
+# ────────────────────────────────────────────────────────────────
 
 
 def _mask(lst: list, mask: np.ndarray) -> list:
-    return [x for x, keep in zip(lst, mask) if keep]
+    return [x for x, k in zip(lst, mask) if k]
 
 
 def _compute_mi(X: np.ndarray, y: np.ndarray) -> np.ndarray:
-    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
-    return mutual_info_regression(X, y, random_state=42, n_neighbors=5).astype(
-        np.float64
-    )
+    X = np.nan_to_num(X)
+    y = np.nan_to_num(y)
 
-
-def _compute_vif(X: np.ndarray) -> np.ndarray:
-    C = np.corrcoef(X, rowvar=False)
-    try:
-        inv = np.linalg.inv(C)
-    except np.linalg.LinAlgError:
-        inv = np.linalg.pinv(C)
-    vif = np.diag(inv).copy()
-    vif[np.isnan(vif) | (vif > 1e10)] = np.inf
-    return vif
+    return mutual_info_regression(
+        X,
+        y,
+        random_state=42,
+        n_neighbors=5,
+    ).astype(np.float64)

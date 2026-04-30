@@ -18,14 +18,14 @@ from .feature_creators_funcs import (
     compute_volume_features,
     compute_trd_technical_features,
     compute_price_features,
-    compute_target,
+    # compute_target,
 )
 from .wavelet import apply_wavelet_denoising, denoise_pipeline
 from .selector import FeatureSelector
 
 __all__ = [
     # Feature computation
-    "compute_target",
+    # "compute_target",
     "compute_trd_technical_features",
     "compute_price_features",
     "compute_statistical_features",

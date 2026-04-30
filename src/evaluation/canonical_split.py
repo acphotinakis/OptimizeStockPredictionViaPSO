@@ -15,6 +15,7 @@ Author: System Architect
 Version: CANONICAL 1.0
 """
 
+import json
 import logging
 from typing import Dict, Tuple
 
@@ -26,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 def compute_canonical_split(
     data: pd.DataFrame,
-    train_pct: float = 0.60,
-    val_pct: float = 0.20,
+    train_pct: float = 0.70,
+    val_pct: float = 0.10,
     test_pct: float = 0.20,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Compute canonical 60/20/20 temporal split.
 
@@ -74,9 +75,12 @@ def compute_canonical_split(
     val_end_idx = int((train_pct + val_pct) * n)
 
     # Split data
-    train_data = data.iloc[:train_end_idx].copy()
-    val_data = data.iloc[train_end_idx:val_end_idx].copy()
-    test_data = data.iloc[val_end_idx:].copy()
+    # train_data = data.iloc[:train_end_idx].copy()
+    # val_data = data.iloc[train_end_idx:val_end_idx].copy()
+    # test_data = data.iloc[val_end_idx:].copy()
+    train_data = data.iloc[:train_end_idx]
+    val_data = data.iloc[train_end_idx:val_end_idx]
+    test_data = data.iloc[val_end_idx:]
 
     # Verify no overlap
     assert len(set(train_data.index) & set(val_data.index)) == 0, "Train/val overlap"
@@ -88,8 +92,6 @@ def compute_canonical_split(
 
     # Create metadata
     split_metadata = {
-        "protocol_version": "CANONICAL_1.0",
-        "source_document": "FINAL_PLAN.md",
         "total_samples": n,
         "train_samples": len(train_data),
         "val_samples": len(val_data),
@@ -108,7 +110,7 @@ def compute_canonical_split(
 
     # Log split information
     logger.info("=" * 80)
-    logger.info("CANONICAL TEMPORAL SPLIT (FINAL_PLAN.md)")
+    logger.info("CANONICAL TEMPORAL SPLIT")
     logger.info("=" * 80)
     logger.info(f"Total samples: {n}")
     logger.info(f"Train: {len(train_data)} samples ({100*len(train_data)/n:.1f}%)")
@@ -118,8 +120,11 @@ def compute_canonical_split(
     logger.info(f"Test:  {len(test_data)} samples ({100*len(test_data)/n:.1f}%)")
     logger.info(f"  Period: {test_data.index[0]} to {test_data.index[-1]}")
     logger.info("=" * 80)
+    logger.info(
+        "SPLIT_METADATA_JSON: %s", json.dumps(split_metadata, indent=2, default=str)
+    )
 
-    return train_data, val_data, test_data, split_metadata
+    return train_data, val_data, test_data
 
 
 def verify_split_integrity(
@@ -129,12 +134,6 @@ def verify_split_integrity(
 ) -> bool:
     """
     Verify that splits satisfy canonical requirements.
-
-    Checks (FINAL_PLAN.md Section 2.3):
-    - Chronological ordering
-    - No shuffling
-    - No overlap
-    - Fixed boundaries
 
     Args:
         train_data: Training split

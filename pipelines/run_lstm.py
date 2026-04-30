@@ -7,7 +7,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
+import joblib
 import numpy as np
+import torch
 import yaml
 import uuid
 
@@ -115,8 +117,24 @@ def load_trained_model(
     model_dir: Path, config: Config, device: Optional[str] = None
 ) -> LSTMModel:
     """Reconstruct LSTM architecture and load frozen weights."""
-    model_path = model_dir / "baseline_lstm_model.pt"
+    # model_path = model_dir / "baseline_lstm_model.pt"
+    model_path = model_dir / "lstm_baseline.pt"
     config_path = model_dir / "model_config.json"
+
+    checkpoint = torch.load(model_path, map_location="cpu")
+
+    CONFIG = checkpoint["config"]
+
+    # ---- Rebuild model ----
+    lstm_model = LSTMModel(config=CONFIG["input_dim"], config=CONFIG)
+
+    lstm_network, lstm_model = lstm_model.build_model(config=CONFIG)
+    lstm_network.load_state_dict(checkpoint["model_state_dict"])
+    lstm_network.eval()
+
+    # ---- Load scalers ----
+    feature_scaler = joblib.load(checkpoint["feature_scaler_path"])
+    target_scaler = joblib.load(checkpoint["target_scaler_path"])
 
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")

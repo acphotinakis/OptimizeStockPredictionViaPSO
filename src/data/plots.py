@@ -9,6 +9,7 @@ Usage:
     python scripts/ingest_data.py --mode clean
     python scripts/ingest_data.py --mode align
 """
+
 import sys
 import logging
 import sys
@@ -17,7 +18,6 @@ from typing import List
 
 
 from pathlib import Path
-
 
 # Resolve project root (adjust depth if needed)
 CURRENT_FILE = Path(__file__).resolve()

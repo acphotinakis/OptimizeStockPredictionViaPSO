@@ -5,6 +5,7 @@ import json
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.amp.autocast_mode import autocast
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import sys
@@ -188,7 +189,9 @@ class LSTMTrainer:
         optimizer = self._resolve_optimizer(model, learning_rate)
         criterion = self._resolve_loss()
 
-        scaler = torch.amp.grad_scaler.GradScaler(device="cuda") if use_amp else None
+        scaler = (
+            torch.amp.grad_scaler.GradScaler(device=self.device) if use_amp else None
+        )
 
         # -------------------------------------------------
         # HISTORY (CLEAN STRUCTURE)
@@ -238,7 +241,7 @@ class LSTMTrainer:
                 batch_y = batch_y.to(self.device)
 
                 if use_amp:
-                    with torch.cuda.amp.autocast():
+                    with autocast(self.device):
                         outputs = model(batch_X)
                         loss = criterion(outputs, batch_y) / accumulation_steps
                 else:

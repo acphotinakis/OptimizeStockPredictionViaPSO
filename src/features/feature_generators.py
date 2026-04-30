@@ -1,39 +1,15 @@
-"""
-Raw Feature Generation Module (TRD-Compliant)
-
-This module generates raw features from OHLCV data WITHOUT any fitting operations.
-All features are strictly causal (backward-looking).
-
-CRITICAL: This module does NOT:
-- Fit scalers
-- Fit selectors
-- Compute thresholds
-- Mix data across splits
-
-Features Generated:
-- Price features (OHLCV)
-- Technical indicators (TRD-compliant)
-- Statistical features
-- Volume features
-- Cross-ticker features
-
-Author: System Architect
-Version: 2.0.0 - AUDIT REMEDIATION
-"""
-
 import logging
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-
+import time
 from .feature_creators_funcs import (
     compute_price_features,
     compute_trd_technical_features,
     compute_statistical_features,
     compute_volume_features,
 )
-from .target import compute_canonical_target
 
 logger = logging.getLogger(__name__)
 
@@ -44,143 +20,109 @@ def generate_raw_features(
     split_name: str,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], pd.DatetimeIndex]:
     """
-    Generate raw features for a single split (train, val, or test).
-
-    CRITICAL INVARIANTS:
-    - No fitting operations (all features are deterministic transforms)
-    - All features are strictly causal (use only historical data)
-    - Target is computed correctly (next-period log return, shifted)
-    - No data mixing across splits
+    Generate raw features for a ALL DATA
 
     Args:
         target_ticker: Ticker to predict
         dfs: Dictionary of ticker -> DataFrame for THIS SPLIT ONLY
-        split_name: "TRAIN", "VAL", or "TEST" (for logging)
 
     Returns:
         Tuple of (X, y, feature_names, datetime_index)
         - X: (N, F) raw feature matrix
-        - y: (N,) target (next-period log_return)
         - feature_names: List of F feature names
         - datetime_index: DatetimeIndex of length N
     """
+    start_time = time.perf_counter()
 
     logger.info(f"[{target_ticker}] {split_name}: Generating raw features")
+
+    n_rows = len(df_target)
 
     # ========================================================================
     # STEP 1: GENERATE FEATURE BLOCKS
     # ========================================================================
-    blocks = []
+    blocks = [
+        compute_price_features(df_target),
+        compute_trd_technical_features(df_target),
+        compute_statistical_features(df_target),
+        compute_volume_features(df_target),
+    ]
 
-    # Price features
-    block_price = compute_price_features(df_target)
-    blocks.append(block_price)
-    logger.info(
-        f"[{target_ticker}] {split_name}: Price features: {block_price.shape[1]}"
-    )
+    feature_names: List[str] = []
+    seen = set()
 
-    # Technical indicators (TRD-compliant)
-    block_technical = compute_trd_technical_features(df_target)
-    blocks.append(block_technical)
-    logger.info(
-        f"[{target_ticker}] {split_name}: Technical features: {block_technical.shape[1]}"
-    )
-
-    # Statistical features
-    block_statistical = compute_statistical_features(df_target)
-    blocks.append(block_statistical)
-    logger.info(
-        f"[{target_ticker}] {split_name}: Statistical features: {block_statistical.shape[1]}"
-    )
-
-    # Volume features
-    block_volume = compute_volume_features(df_target)
-    blocks.append(block_volume)
-    logger.info(
-        f"[{target_ticker}] {split_name}: Volume features: {block_volume.shape[1]}"
-    )
-
-    # ========================================================================
-    # STEP 2: CONCATENATE BLOCKS WITH DEDUPLICATION
-    # ========================================================================
-    arrays = []
-    feature_names = []
-    seen_names = set()
+    processed_blocks = []
+    total_features = 0
 
     for block in blocks:
-        # Remove duplicate columns within block
-        block = block.loc[:, ~block.columns.duplicated()]
+        # drop duplicates inside block
+        if block.columns.has_duplicates:
+            block = block.loc[:, ~block.columns.duplicated()]
 
-        # Track unique names across blocks
-        block_names = []
-        keep_indices = []
+        cols = block.columns.tolist()
+        keep_cols = [c for c in cols if c not in seen]
 
-        for i, col in enumerate(block.columns):
-            if col not in seen_names:
-                seen_names.add(col)
-                block_names.append(col)
-                keep_indices.append(i)
+        seen.update(keep_cols)
 
-        # Slice to keep only unique columns
-        if len(keep_indices) < len(block.columns):
-            block = block.iloc[:, keep_indices]
+        block = block[keep_cols]
 
-        arrays.append(block.values.astype(np.float32))
-        feature_names.extend(block_names)
+        arr = block.to_numpy(dtype=np.float32, copy=False)
 
-    X = np.concatenate(arrays, axis=1)
+        processed_blocks.append(arr)
+        feature_names.extend(keep_cols)
+        total_features += arr.shape[1]
 
-    logger.info(
-        f"[{target_ticker}] {split_name}: Concatenated {len(feature_names)} features "
-        f"from {len(blocks)} blocks"
-    )
+        logger.info(f"[{target_ticker}] {split_name}: Block features={arr.shape[1]}")
 
-    # ========================================================================
-    # STEP 3: COMPUTE CANONICAL TARGET (NEXT-PERIOD LOG RETURN)
-    # ========================================================================
-    # CRITICAL: This computes y[t] = log(close[t+1] / close[t])
-    # The last sample will be NaN and dropped in Step 4.
-    y_series = compute_canonical_target(df_target["close"], horizon=1)
-    y = y_series.values.astype(np.float32)
+    # ============================================================
+    # STEP 2: PREALLOCATE FEATURE MATRIX (NO CONCAT COPY)
+    # ============================================================
+    X = np.empty((n_rows, total_features), dtype=np.float32)
 
-    # ========================================================================
-    # STEP 4: CLEAN NON-FINITE VALUES
-    # ========================================================================
-    # Replace Inf with 0.0 in features (from division by zero)
-    inf_count = np.isinf(X).sum()
-    if inf_count > 0:
+    start = 0
+    for arr in processed_blocks:
+        end = start + arr.shape[1]
+        X[:, start:end] = arr
+        start = end
+
+    logger.info(f"[{target_ticker}] {split_name}: Final feature count={total_features}")
+
+    # ============================================================
+    # STEP 3: TARGET
+    # ============================================================
+    y = df_target["target"].to_numpy(dtype=np.float32, copy=False)
+
+    # ============================================================
+    # STEP 4: CLEANING (single pass mask)
+    # ============================================================
+    nan_mask = np.isnan(y) | np.isnan(X).any(axis=1)
+
+    if np.any(nan_mask):
+        drop_count = int(nan_mask.sum())
+
         logger.warning(
-            f"[{target_ticker}] {split_name}: Replacing {inf_count} Inf values with 0.0"
-        )
-        X = np.nan_to_num(X, copy=False, nan=np.nan, posinf=0.0, neginf=0.0)
-
-    # Check for NaN
-    nan_mask_X = np.isnan(X).any(axis=1)
-    nan_mask_y = np.isnan(y)
-    nan_mask = nan_mask_X | nan_mask_y
-
-    if nan_mask.sum() > 0:
-        n_dropped = int(nan_mask.sum())
-        logger.warning(
-            f"[{target_ticker}] {split_name}: Dropping {n_dropped}/{len(y)} rows "
-            f"({100*n_dropped/len(y):.2f}%) with NaN"
+            f"[{target_ticker}] {split_name}: Dropping {drop_count}/{len(y)} "
+            f"({100 * drop_count / len(y):.2f}%) NaN rows"
         )
 
-        X = X[~nan_mask]
-        y = y[~nan_mask]
-        idx = df_target.index[~nan_mask]
+        keep = ~nan_mask
+        X = X[keep]
+        y = y[keep]
+        idx = df_target.index.to_numpy()[keep]
     else:
-        idx = df_target.index
+        idx = df_target.index.to_numpy()
 
-    # Final validation
-    if np.isnan(X).any():
-        raise ValueError(f"{split_name}: NaN still present in X after cleaning!")
-    if np.isnan(y).any():
-        raise ValueError(f"{split_name}: NaN still present in y after cleaning!")
+    # ============================================================
+    # FINAL VALIDATION (debug only)
+    # ============================================================
+    # if __debug__:
+    assert not np.isnan(X).any()
+    assert not np.isnan(y).any()
 
-    logger.info(
-        f"[{target_ticker}] {split_name}: Final shape X={X.shape}, y={y.shape}, "
-        f"features={len(feature_names)}"
-    )
+    logger.info(f"[{target_ticker}] {split_name}: Final X={X.shape}, y={y.shape}")
+    end_time = time.perf_counter()
 
+    elapsed_seconds = end_time - start_time
+
+    logger.info(f"Execution time: {elapsed_seconds:.6f} seconds")
     return X, y, feature_names, pd.DatetimeIndex(idx)

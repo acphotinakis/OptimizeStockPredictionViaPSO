@@ -258,7 +258,7 @@ def log_cleaning_report(reports: Dict[str, Any]) -> None:
         t = PrettyTable()
         t.field_names = ["OHLCV Metric", "Value"]
 
-        t.add_row(["Initial Rows", r.get("initial_rows")])
+        t.add_row(["Initial Rows", r.get("initial_rows", -1)])
         t.add_row(["Final Rows", r.get("final_rows")])
         t.add_row(["Dropped Rows", r.get("dropped_count")])
         t.add_row(["Valid Rows", r.get("valid_count")])

@@ -1,33 +1,12 @@
-# 6-ticker universe for PSO-LSTM stock prediction
-# 5 equities + SPY benchmark
-# Organized by sector
 
-# Technology (5)
 AAPL
 MSFT
 GOOGL
-#META
-#INTC
-
 NVDA
-#ADBE
-#CRM
 
 TSLA
 AMD
 
 
-# Market internals
-#UVXY
-#GLD
-#TLT
-
-# ETF
-#XLK
-#SOXX
-
-# Benchmark ETF
 SPY
 QQQ
-#IWM
-#DIA

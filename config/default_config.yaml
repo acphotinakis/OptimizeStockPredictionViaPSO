@@ -132,16 +132,17 @@ lstm_baseline:
   lstm_units_1: 128
   lstm_units_2: 64
   dropout_rate: 0.2
-  activation: "relu"
+  # activation: "relu"
+  activation: "tanh"
   output_units: 1
   output_activation: "linear"
   optimizer: "adam"
-
   
   learning_rate: 0.001
   loss: "mse"
   epochs: 100
-  batch_size: 32
+  # batch_size: 32
+  batch_size: 1024
   shuffle: false
   lookback: 20
   prediction_horizon: 1
@@ -162,6 +163,7 @@ lstm_baseline:
   grad_clip: 1.0
   use_amp: true
   accumulation_steps: 1
+
 
 
 
