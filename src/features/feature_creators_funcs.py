@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
 from numba import njit
 import logging
 from typing import Optional
@@ -14,8 +12,34 @@ _TRADING_MINUTES = 390  # 09:30–16:00
 _TRADING_DAYS = 5
 
 
+def _parse_timeframe(timeframe: str) -> pd.Timedelta:
+    mapping = {
+        "1Min": pd.Timedelta(minutes=1),
+        "5Min": pd.Timedelta(minutes=5),
+        "15Min": pd.Timedelta(minutes=15),
+        "1Hour": pd.Timedelta(hours=1),
+        "1Day": pd.Timedelta(days=1),
+    }
+
+    if timeframe not in mapping:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    return mapping[timeframe]
+
+
+mapping = {
+    "1Min": "1min",
+    "5Min": "5min",
+    "15Min": "15min",
+    "1Hour": "1h",
+    "1Day": "1D",
+}
+
+USE_DYNAMIC_SESSION_NORMALIZATION = True
+
+
 def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
-    r = df["log_return"]
+    r = df["target"]
     C = df["close"]
     out = pd.DataFrame(index=df.index)
 
@@ -58,7 +82,8 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
         f"(columns: {list(out.columns.tolist())}...)"
     )
 
-    return out.fillna(0.0)
+    # return out.fillna(0.0)
+    return out.astype(np.float32)
 
 
 def _fast_autocorr(x: np.ndarray) -> float:
@@ -149,7 +174,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["low"] = L
     out["close"] = C
     out["volume"] = V
-    # out["log_return"] = np.log(C / C.shift(1))  # Causal: uses only prior close
+    out["log_return"] = np.log(C / C.shift(1))
 
     # ========================================================================
     # CATEGORY B: TREND-FOLLOWING INDICATORS (TRD1 §3.2)
@@ -283,17 +308,17 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     # ========================================================================
     # Forward-fill NaNs from indicator warm-up (causal operation)
     # Replace remaining NaNs with 0.0 (neutral value after scaling)
-    out = out.ffill().fillna(0.0)
+    # out = out.ffill().fillna(0.0)
 
     # Convert to float32 for memory efficiency
-    out = out.astype(np.float32)
+    # out = out.astype(np.float32)
 
     logger.info(
         f"Computed {len(out.columns)} technical indicators for {len(out)} samples "
         f"(columns: {list(out.columns.tolist())}...)"
     )
 
-    return out
+    return out.astype(np.float32)
 
 
 def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -323,30 +348,20 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
             "intrabar_vol": (H - L) / (O + 1e-10),  # Intrabar volatility
         },
         index=df.index,
-    ).astype(np.float32)
+    )
 
     logger.info(
         f"Computed {len(out.columns)} price features for {len(out)} samples "
         f"(columns: {list(out.columns.tolist())}...)"
     )
-    out = out.ffill(limit=5)
-    # return out.ffill().fillna(0.0)
-    return out
-
-
-def compute_target(df: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
-    C = df["close"]
-    target = np.log(C.shift(-horizon) / C + 1e-10).astype(np.float32)
-
-    out = pd.DataFrame(index=df.index)
-    out["log_return"] = target
-
-    return out
+    # out = out.ffill(limit=5)
+    # # return out.ffill().fillna(0.0)
+    return out.astype(np.float32)
 
 
 def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
     C, H, L, V = df["close"], df["high"], df["low"], df["volume"]
-    r = df["log_return"]
+    r = df["target"]
     sm = df.get("session_minute", pd.Series(0, index=df.index))
     out = pd.DataFrame(index=df.index)
 
@@ -426,7 +441,7 @@ def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
         f"(columns: {list(out.columns.tolist())}...)"
     )
 
-    return out.fillna(0.0)
+    return out.astype(np.float32)
 
 
 # Alias for backward compatibility and explicit naming

@@ -1,31 +1,9 @@
-import argparse
 import logging
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-
-from pathlib import Path
-import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-
-# Resolve project root (adjust depth if needed)
-CURRENT_FILE = Path(__file__).resolve()
-PROJECT_ROOT = CURRENT_FILE.parents[1]  # adjust if structure changes
-
-# Ensure only the project root (not file paths) is added
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-# Debug prints (optional)
-print("Current file:", CURRENT_FILE)
-print("Project root:", PROJECT_ROOT)
-print("sys.path updated:")
-print(sys.path)
 
 from src.data.alpaca_ingestor import AlpacaIngestor
 from src.utils.logger import setup_logger
@@ -258,7 +236,7 @@ def log_cleaning_report(reports: Dict[str, Any]) -> None:
         t = PrettyTable()
         t.field_names = ["OHLCV Metric", "Value"]
 
-        t.add_row(["Initial Rows", r.get("initial_rows")])
+        t.add_row(["Initial Rows", r.get("initial_rows", -1)])
         t.add_row(["Final Rows", r.get("final_rows")])
         t.add_row(["Dropped Rows", r.get("dropped_count")])
         t.add_row(["Valid Rows", r.get("valid_count")])

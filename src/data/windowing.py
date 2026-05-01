@@ -19,79 +19,135 @@ logger = logging.getLogger(__name__)
 
 
 def build_lstm_windows(
-    X: np.ndarray, y: np.ndarray, lookback: int = 20
+    X: np.ndarray, y: np.ndarray, lookback: int = 20, horizon: int = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Build temporal windows for LSTM input from tabular features.
+    """Build temporal windows for LSTM input from tabular features.
 
-    Converts:
-        X: (N, F) tabular features
-        y: (N,) target vector
-    Into:
-        X_windowed: (N-lookback, lookback, F) 3D sequences
-        y_windowed: (N-lookback,) aligned targets
-
-    Each window contains the past `lookback` timesteps of features. The target
-    is the 1-bar-ahead forward return at the most-recent feature bar: for
-    window ``i`` covering rows ``[i, i+lookback-1]``, the target is
-    ``y[i+lookback-1] = log(close[i+lookback] / close[i+lookback-1])``. This
-    matches `build_xgboost_lag_features` so both models predict the same
-    quantity.
+    Converts ``X`` of shape ``(N, F)`` and ``y`` of shape ``(N,)`` into
+    sequences ``X_seq`` of shape ``(M, lookback, F)`` and aligned targets
+    ``y_seq`` of shape ``(M,)``, where ``M = N - lookback - horizon + 1``.
 
     Args:
-        X: Feature matrix, shape (N, F)
-        y: Target vector, shape (N,)
-        lookback: Number of timesteps per window (default: 20 per TRD)
+        X: Feature matrix, shape ``(N, F)``.
+        y: Target vector, shape ``(N,)``. Assumes the canonical target
+            ``y[t] = log(close[t+1]/close[t])`` (forward return at bar ``t``).
+        lookback: Number of timesteps per window (default 20).
+        horizon: Steps further ahead than the most-recent feature bar.
+            ``horizon=0`` (default) yields 1-bar-ahead alignment matching
+            ``build_xgboost_lag_features``: window ``i`` covers rows
+            ``[i, i+lookback-1]`` and the target is ``y[i+lookback-1]``,
+            i.e., the forward return realised at the most-recent feature bar.
 
     Returns:
-        Tuple of (X_windowed, y_windowed)
+        Tuple ``(X_seq, y_seq)``.
 
     Raises:
-        ValueError: If insufficient samples or shape mismatch
-
-    Example:
-        >>> X = np.random.randn(1000, 15)  # 1000 samples, 15 features
-        >>> y = np.random.randn(1000)
-        >>> X_seq, y_seq = build_lstm_windows(X, y, lookback=20)
-        >>> print(X_seq.shape)  # (980, 20, 15)
-        >>> print(y_seq.shape)  # (980,)
+        ValueError: If shapes are inconsistent or there is too little data.
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D (N, F), got shape {X.shape}")
-
     if y.ndim != 1:
         raise ValueError(f"y must be 1D (N,), got shape {y.shape}")
-
     if len(X) != len(y):
         raise ValueError(f"X and y length mismatch: {len(X)} vs {len(y)}")
 
-    N, F = X.shape
-
-    if N <= lookback:
+    N = len(X)
+    n_windows = N - lookback - horizon + 1
+    if n_windows <= 0:
         raise ValueError(
-            f"Not enough samples ({N}) for lookback window ({lookback}). "
-            f"Need at least {lookback + 1} samples."
+            f"Not enough samples ({N}) for lookback={lookback} + horizon={horizon}"
         )
 
-    n_windows = N - lookback
-    X_windowed = np.zeros((n_windows, lookback, F), dtype=np.float32)
-
-    for i in range(n_windows):
-        X_windowed[i] = X[i : i + lookback]
-
-    # 1-bar-ahead alignment: window i covers rows [i, i+lookback-1] (most recent
-    # feature at index i+lookback-1) and the target is the forward return at the
-    # most-recent feature bar, y[i+lookback-1] = log(close[i+lookback]/close[i+lookback-1]).
-    # The final row is dropped because y[N-1] is NaN under the canonical target.
-    y_windowed = y[lookback - 1 : -1].astype(np.float32)
-
-    logger.info(
-        f"Built {n_windows} windows: "
-        f"X {X.shape} --> {X_windowed.shape}, "
-        f"y {y.shape} --> {y_windowed.shape}"
+    X_seq = np.array(
+        [X[i : i + lookback] for i in range(n_windows)],
+        dtype=np.float32,
+    )
+    y_seq = np.array(
+        [y[i + lookback + horizon - 1] for i in range(n_windows)],
+        dtype=np.float32,
     )
 
-    return X_windowed, y_windowed
+    logger.info(
+        "Built %d windows: X %s --> %s, y %s --> %s (lookback=%d, horizon=%d)",
+        n_windows,
+        X.shape,
+        X_seq.shape,
+        y.shape,
+        y_seq.shape,
+        lookback,
+        horizon,
+    )
+
+    return X_seq, y_seq
+
+
+# def build_lstm_windows(
+#     X: np.ndarray, y: np.ndarray, lookback: int = 20
+# ) -> Tuple[np.ndarray, np.ndarray]:
+#     """
+#     Build temporal windows for LSTM input from tabular features.
+
+#     Converts:
+#         X: (N, F) tabular features
+#         y: (N,) target vector
+#     Into:
+#         X_windowed: (N-lookback, lookback, F) 3D sequences
+#         y_windowed: (N-lookback,) aligned targets
+
+#     Each window contains the past `lookback` timesteps of features,
+#     with the target aligned to the end of the window.
+
+#     Args:
+#         X: Feature matrix, shape (N, F)
+#         y: Target vector, shape (N,)
+#         lookback: Number of timesteps per window (default: 20 per TRD)
+
+#     Returns:
+#         Tuple of (X_windowed, y_windowed)
+
+#     Raises:
+#         ValueError: If insufficient samples or shape mismatch
+
+#     Example:
+#         >>> X = np.random.randn(1000, 15)  # 1000 samples, 15 features
+#         >>> y = np.random.randn(1000)
+#         >>> X_seq, y_seq = build_lstm_windows(X, y, lookback=20)
+#         >>> print(X_seq.shape)  # (980, 20, 15)
+#         >>> print(y_seq.shape)  # (980,)
+#     """
+#     if X.ndim != 2:
+#         raise ValueError(f"X must be 2D (N, F), got shape {X.shape}")
+
+#     if y.ndim != 1:
+#         raise ValueError(f"y must be 1D (N,), got shape {y.shape}")
+
+#     if len(X) != len(y):
+#         raise ValueError(f"X and y length mismatch: {len(X)} vs {len(y)}")
+
+#     N, F = X.shape
+
+#     if N <= lookback:
+#         raise ValueError(
+#             f"Not enough samples ({N}) for lookback window ({lookback}). "
+#             f"Need at least {lookback + 1} samples."
+#         )
+
+#     n_windows = N - lookback
+#     X_windowed = np.zeros((n_windows, lookback, F), dtype=np.float32)
+
+#     for i in range(n_windows):
+#         X_windowed[i] = X[i : i + lookback]
+
+#     # Target aligned with end of window
+#     y_windowed = y[lookback:].astype(np.float32)
+
+#     logger.info(
+#         f"Built {n_windows} windows: "
+#         f"X {X.shape} --> {X_windowed.shape}, "
+#         f"y {y.shape} --> {y_windowed.shape}"
+#     )
+
+#     return X_windowed, y_windowed
 
 
 def build_xgboost_lag_features(

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from pandas import Timedelta
 
+from src.data.utils import _parse_timeframe
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -44,38 +45,6 @@ class DataCleaner:
         self.validation_errors: Dict[str, Dict[str, Any]] = {}
         self.ticker = ticker
         self.timeframe = timeframe
-
-    def _parse_timeframe(self, timeframe: str) -> pd.Timedelta:
-        mapping = {
-            "1Min": Timedelta(minutes=1),
-            "5Min": Timedelta(minutes=5),
-            "15Min": Timedelta(minutes=15),
-            "1Hour": Timedelta(hours=1),
-            "1Day": Timedelta(days=1),
-        }
-
-        if timeframe not in mapping:
-            raise ValueError(f"Unsupported timeframe: {timeframe}")
-
-        return mapping[timeframe]
-
-    def _reindex_to_full_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        freq = self._parse_timeframe(self.timeframe)
-        logger.info(f"First 10 rows BEFORE reindex")
-        logger.info(df[:10])
-        full_index = pd.date_range(
-            start=df.index.min(),
-            end=df.index.max(),
-            freq=freq,
-            # tz=df.index.tz,
-            tz="America/New_York",
-        )
-
-        df = df.reindex(full_index)
-
-        logger.info(f"First 10 rows AFTER reindex")
-        logger.info(df[:10])
-        return df
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -117,12 +86,10 @@ class DataCleaner:
         # -----------------------------
         df, ohlcv_report = self._validate_ohlcv(df)
         self.validation_errors["ohlcv_report"] = ohlcv_report
-
+        _log_ohlcv_validation_report(ohlcv_report, ticker=self.ticker)
         # -----------------------------
         # 4. Gap classification (OBSERVATION-BASED)
         # -----------------------------
-        # df = self._reindex_to_full_grid(df)
-
         gap_info = self._compute_observation_gaps(df)
         self.validation_errors["gap_info"] = gap_info
 
@@ -135,9 +102,6 @@ class DataCleaner:
         )
         logger.info(f"First 10 rows FORWARD FILL")
         logger.info(f"\n{df[:10]}")
-        # sys.exit(0)
-        # df, _remove_long_gaps_report = self._remove_long_gaps(df, gap_info)
-        # self.validation_errors["_remove_long_gaps_report"] = _remove_long_gaps_report
 
         # -----------------------------
         # 6. Remove long gaps (> 5)
@@ -292,6 +256,127 @@ class DataCleaner:
         )
 
         return df, report
+
+    # def _validate_ohlcv(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+    #     logger.info(
+    #         "OHLCV validation started | rows=%d | cols=%d",
+    #         len(df),
+    #         len(df.columns),
+    #     )
+
+    #     required = ["open", "high", "low", "close", "volume"]
+
+    #     report: Dict = {
+    #         "initial_rows": len(df),
+    #         "missing_columns": [],
+    #         "invalid_count": 0,
+    #         "valid_count": 0,
+    #         "dropped_count": 0,
+    #         "nan_rows": 0,
+    #     }
+
+    #     # ------------------------------------------------------------------
+    #     # Column validation
+    #     # ------------------------------------------------------------------
+    #     missing = list(set(required) - set(df.columns))
+    #     report["missing_columns"] = missing
+
+    #     if missing:
+    #         logger.error("OHLCV validation failed | missing_columns=%s", missing)
+    #         raise ValueError(f"Missing required columns: {missing}")
+
+    #     logger.info("OHLCV validation | required columns present=%s", required)
+
+    #     # ------------------------------------------------------------------
+    #     # CRITICAL FIX: Separate NaN rows from invalid data rows
+    #     # ------------------------------------------------------------------
+
+    #     # Check which rows have any NaN values (these are gap/missing rows, not invalid)
+    #     has_nan = df[required].isna().any(axis=1)
+    #     nan_count = int(has_nan.sum())
+    #     report["nan_rows"] = nan_count
+
+    #     if nan_count > 0:
+    #         logger.info("Found %d rows with NaN values (gap/missing rows)", nan_count)
+
+    #     # Only validate rows that have complete data (no NaN)
+    #     df_valid = df[~has_nan].copy()
+
+    #     if len(df_valid) == 0:
+    #         logger.warning("No complete rows found for OHLCV validation")
+    #         report["final_rows"] = len(df)
+    #         return df, report
+
+    #     # ------------------------------------------------------------------
+    #     # Row validation mask (only on non-NaN rows)
+    #     # ------------------------------------------------------------------
+    #     mask = (
+    #         (df_valid["high"] >= df_valid["low"])
+    #         & (df_valid["open"] > 0)
+    #         & (df_valid["high"] > 0)
+    #         & (df_valid["low"] > 0)
+    #         & (df_valid["close"] > 0)
+    #         & (df_valid["volume"] >= 0)
+    #         & (df_valid["close"] >= df_valid["low"])
+    #         & (df_valid["close"] <= df_valid["high"])
+    #     )
+
+    #     invalid_mask = ~mask
+    #     invalid_count = int(invalid_mask.sum())
+    #     valid_count = int(mask.sum())
+
+    #     report["invalid_count"] = invalid_count
+    #     report["valid_count"] = valid_count
+    #     report["drop_rate"] = (
+    #         invalid_count / len(df_valid) if len(df_valid) > 0 else 0.0
+    #     )
+
+    #     # ------------------------------------------------------------------
+    #     # Breakdown stats (only for actually invalid rows)
+    #     # ------------------------------------------------------------------
+    #     if invalid_count > 0:
+    #         report["breakdown"] = {
+    #             "high_lt_low": int((df_valid["high"] < df_valid["low"]).sum()),
+    #             "open_le_0": int((df_valid["open"] <= 0).sum()),
+    #             "high_le_0": int((df_valid["high"] <= 0).sum()),
+    #             "low_le_0": int((df_valid["low"] <= 0).sum()),
+    #             "close_le_0": int((df_valid["close"] <= 0).sum()),
+    #             "volume_lt_0": int((df_valid["volume"] < 0).sum()),
+    #             "close_out_of_bounds": int(
+    #                 (
+    #                     (df_valid["close"] < df_valid["low"])
+    #                     | (df_valid["close"] > df_valid["high"])
+    #                 ).sum()
+    #             ),
+    #         }
+
+    #         logger.info(
+    #             "Dropping invalid OHLCV rows | dropped=%d | remaining=%d",
+    #             invalid_count,
+    #             valid_count,
+    #         )
+
+    #     # ------------------------------------------------------------------
+    #     # Apply filter: keep valid rows + NaN rows (for gap handling later)
+    #     # ------------------------------------------------------------------
+    #     df_valid_filtered = df_valid[mask].copy()
+
+    #     # Recombine: valid data rows + NaN rows (for gap processing)
+    #     df_nan = df[has_nan].copy()
+    #     df = pd.concat([df_valid_filtered, df_nan]).sort_index()
+
+    #     report["dropped_count"] = invalid_count
+    #     report["final_rows"] = len(df)
+
+    #     logger.info(
+    #         "OHLCV validation complete | rows_before=%d | rows_after=%d | dropped=%d | nan_rows=%d",
+    #         report["initial_rows"],
+    #         report["final_rows"],
+    #         report["dropped_count"],
+    #         report["nan_rows"],
+    #     )
+
+    #     return df, report
 
     # =========================================================
     # STEP 4: GAP CLASSIFICATION (OBSERVATION-BASED)

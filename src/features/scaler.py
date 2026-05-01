@@ -1,18 +1,3 @@
-"""
-Frozen MinMax Scaler Module (Audit-Compliant)
-
-This module implements immutable scaling with:
-- Separate feature and target scalers (Issue #15)
-- Inverse transform support (Issue #16)
-- Fit verification and logging (Issue #14)
-- Full state persistence
-
-TRD Compliance: TRD1 §4.2, FINAL_PLAN.md §3.5
-
-Author: System Architect
-Version: 2.0.0 - AUDIT REMEDIATION
-"""
-
 import logging
 from typing import Dict, List, Optional, Tuple
 

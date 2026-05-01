@@ -168,21 +168,18 @@ class AlpacaIngestor:
                     df = df.xs(ticker, level="symbol")
 
             # REQUIREMENT: Must be DatetimeIndex
+            # Ensure UTC normalization (hard invariant)
             if not isinstance(df.index, pd.DatetimeIndex):
                 raise TypeError("Index must be DatetimeIndex from provider")
 
-            assert isinstance(df.index, pd.DatetimeIndex), "Expected DatetimeIndex"
-
-            # Ensure timezone correctness for storage in UTC
             if df.index.tz is None:
-                df.index = df.index.tz_localize(
-                    "UTC"
-                )  # Localize naive timestamps to UTC
+                df.index = df.index.tz_localize("UTC")
             else:
-                df.index = df.index.tz_convert("UTC")  # Convert any tz-aware to UTC
+                df.index = df.index.tz_convert("UTC")
 
-            # REMOVED THE BELOW LINE
-            # df.index = df.index.round("1min")  # Optional rounding
+            df.index = pd.DatetimeIndex(df.index, tz="UTC")
+            df.index = df.index.astype("datetime64[ns, UTC]")
+
             df.index.name = "timestamp"
 
             logger.info(f"Index of data (UTC): {df.index}")
@@ -328,33 +325,93 @@ class AlpacaIngestor:
 
     def _chunk_time_range(self, start: datetime, end: datetime, years: int = 2):
         """Yield (start, end) pairs in N-year chunks."""
-        current = start
+        current = start.astimezone(timezone.utc)
+        end = end.astimezone(timezone.utc)
 
         while current < end:
-            next_end = datetime(
-                year=current.year + years,
-                month=current.month,
-                day=current.day,
-                tzinfo=timezone.utc,
-            )
+            try:
+                next_end = current.replace(year=current.year + years)
+            except ValueError:
+                # handle leap year edge cases safely
+                next_end = current + pd.DateOffset(years=years)
+                next_end = next_end.to_pydatetime()
+
+            next_end = next_end.astimezone(timezone.utc)
 
             if next_end > end:
                 next_end = end
 
             yield current, next_end
             current = next_end
+        # current = start
+
+        # while current < end:
+        #     next_end = datetime(
+        #         year=current.year + years,
+        #         month=current.month,
+        #         day=current.day,
+        #         tzinfo=timezone.utc,
+        #     )
+
+        #     if next_end > end:
+        #         next_end = end
+
+        #     yield current, next_end
+        #     current = next_end
 
     def _append_parquet(self, df: pd.DataFrame, path: Path) -> None:
         """Append or create parquet safely (via concat + rewrite)."""
 
+        # enforce UTC invariance BEFORE any disk write
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        else:
+            df.index = df.index.tz_convert("UTC")
+
+        df.index = pd.DatetimeIndex(df.index, tz="UTC")
+        df.index = df.index.astype("datetime64[ns, UTC]")
+
         if path.exists():
             existing = pd.read_parquet(path)
+
+            # enforce UTC on existing too (critical for consistency)
+            if not isinstance(existing.index, pd.DatetimeIndex):
+                existing.index = pd.to_datetime(existing.index)
+
+            if existing.index.tz is None:
+                existing.index = existing.index.tz_localize("UTC")
+            else:
+                existing.index = existing.index.tz_convert("UTC")
+
             df = pd.concat([existing, df])
 
-            # remove duplicates (critical for overlapping ranges)
+            # remove duplicates safely
             df = df[~df.index.duplicated(keep="last")]
-
             df = df.sort_index()
 
         logger.info(f"appending to parquet: {path}")
-        df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)
+
+        df.to_parquet(
+            path,
+            engine="pyarrow",
+            compression="zstd",
+            index=True,
+        )
+
+    # def _append_parquet(self, df: pd.DataFrame, path: Path) -> None:
+    #     """Append or create parquet safely (via concat + rewrite)."""
+
+    #     if path.exists():
+    #         existing = pd.read_parquet(path)
+    #         df = pd.concat([existing, df])
+
+    #         # remove duplicates (critical for overlapping ranges)
+    #         df = df[~df.index.duplicated(keep="last")]
+
+    #         df = df.sort_index()
+
+    #     logger.info(f"appending to parquet: {path}")
+    #     df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)

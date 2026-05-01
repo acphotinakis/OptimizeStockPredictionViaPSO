@@ -29,17 +29,72 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# def compute_canonical_target(
+#     close_series: pd.Series, horizon: int = 1, method: str = "log_return"
+# ) -> pd.Series:
+#     """
+#     Compute canonical target variable (next-period log return).
+
+#     FORMULA:
+#         y[t] = log(Close[t+1] / Close[t])
+#     """
+#     target = np.log(close_series.shift(-horizon) / close_series)
+
+#     logger.info(
+#         f"Computed target (method={method}, horizon={horizon}): "
+#         f"{len(target)} samples, {target.isna().sum()} NaN"
+#     )
+#     return target
+
+
+# def compute_canonical_target(
+#     close_series: pd.Series, horizon: int = 1, method: str = "next_close"
+# ) -> pd.Series:
+#     """
+#     Compute canonical target variable (future closing price).
+
+#     FORMULA:
+#         y[t] = Close[t + horizon]
+
+#     This is a direct price prediction target (not returns).
+#     """
+
+#     target = close_series.shift(-horizon)
+
+#     logger.info(
+#         f"Computed target (method={method}, horizon={horizon}): "
+#         f"{len(target)} samples, {target.isna().sum()} NaN"
+#     )
+
+#     return target
+
 
 def compute_canonical_target(
-    close_series: pd.Series, horizon: int = 1, method: str = "log_return"
+    close_series: pd.Series,
+    horizon: int = 1,
+    method: str = "log_return",
 ) -> pd.Series:
     """
-    Compute canonical target variable (next-period log return).
+    Compute canonical target variable.
 
-    FORMULA (TRD1 §1.3):
-        y[t] = log(Close[t+1] / Close[t])
+    Supported methods:
+    - "log_return": y[t] = log(Close[t + h] / Close[t])
+    - "next_close": y[t] = Close[t + h]
     """
-    target = np.log(close_series.shift(-horizon) / close_series)
+
+    if horizon <= 0:
+        raise ValueError("horizon must be a positive integer")
+
+    if method == "log_return":
+        target = np.log(close_series.shift(-horizon) / close_series)
+
+    elif method == "next_close":
+        target = close_series.shift(-horizon)
+
+    else:
+        raise ValueError(
+            f"Unsupported method '{method}'. Use 'log_return' or 'next_close'."
+        )
 
     logger.info(
         f"Computed target (method={method}, horizon={horizon}): "

@@ -10,6 +10,8 @@ xgboost>=2.0.0
 
 # Data acquisition
 alpaca-trade-api>=3.0.0
+alpaca-py>=0.30.0
+pandas-market-calendars>=4.3.0
 
 # Technical indicators
 pandas-ta>=0.3.14b
@@ -28,6 +30,7 @@ python-dotenv>=1.0.0
 
 # Logging & monitoring
 tqdm>=4.66.0
+prettytable>=3.10.0
 
 # Testing
 pytest>=8.0.0

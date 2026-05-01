@@ -95,3 +95,5 @@ plans/
 .gemini/
 CLAUDE.md
 .claude/*
+
+backup/

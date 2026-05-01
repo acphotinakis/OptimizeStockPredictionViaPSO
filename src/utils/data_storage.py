@@ -114,6 +114,9 @@ def _load_parquet(path: Path) -> pd.DataFrame:
     df = df.sort_index()
     logger.info(f"Loaded {path} | Rows: {len(df)}")
     logger.info(f"Columns: {df.columns.tolist()}")
+    if not df.index.is_monotonic_increasing:
+        logger.warning(f"Non-monotonic index, sorting")
+        df = df.sort_index()
 
     return df
 

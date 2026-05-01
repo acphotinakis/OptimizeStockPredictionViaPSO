@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
+from itertools import combinations
 import sys
 import argparse
 import logging
 import sys
 from pathlib import Path
+import pandas_market_calendars as mcal
 
+import numpy as np
 import pandas as pd
 
 from pathlib import Path
+from typing import cast
 
+from prettytable import PrettyTable
 
 # Resolve project root (adjust depth if needed)
 CURRENT_FILE = Path(__file__).resolve()
@@ -24,6 +29,12 @@ print("Project root:", PROJECT_ROOT)
 print("sys.path updated:")
 print(sys.path)
 
+from src.data.debug_logs import (
+    flatten_cleaning_report,
+    log_all_cleaning_reports,
+    log_cleaning_report,
+)
+from src.data.utils import _load_tickers, _parse_timeframe, _save_parquet
 from src.utils.data_storage import _load_parquet
 from src.data.cleaner import DataCleaner
 from src.data.alpaca_ingestor import AlpacaIngestor
@@ -42,44 +53,64 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")  # important for multiprocessing safety
+import matplotlib.pyplot as plt
 
 
-def load_all_timeframes(raw_output_dir: Path, ticker: str, timeframes: list[str]):
-    data = {}
+def _plot_ohlc(ax, df, title):
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
+    ax.grid(True, alpha=0.3, linewidth=0.7)
+    for spine in ax.spines.values():
+        spine.set_alpha(0.2)
 
-    for tf in timeframes:
-        path = raw_output_dir / tf / f"{ticker}.parquet"
-        if not path.exists():
-            logger.warning("Missing %s", path)
-            continue
+    x = np.arange(len(df))
+    width = 0.35
 
-        df = _load_parquet(path)
-        cols = ["open", "high", "low", "close", "volume"]
-        df = df[cols]
-
-        # ------------------------------------------------------------
-        # 1. Ensure datetime index
-        # ------------------------------------------------------------
-        df.index = pd.to_datetime(df.index, utc=True)
-
-        # ------------------------------------------------------------
-        # 2. Convert UTC --> America/New_York (DST-aware)
-        # ------------------------------------------------------------
-        # df.index = df.index.tz_convert("America/New_York")
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("America/New_York")
-        else:
-            df.index = df.index.tz_convert("America/New_York")
-
-        data[tf] = df
-
-    return data
+    # vertical line: low to high
+    ax.vlines(x, df["low"], df["high"], color="black", linewidth=0.8, alpha=0.7)
+    # open tick (left)
+    ax.hlines(df["open"], x - width, x, color="green", linewidth=1.2, alpha=0.8)
+    # close tick (right)
+    ax.hlines(df["close"], x, x + width, color="red", linewidth=1.2, alpha=0.8)
 
 
-def _save_parquet(df: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, engine="pyarrow", compression="zstd", index=True)
-    logger.info("Saved %s (%d rows)", path.relative_to, len(df))
+def plot_pipeline_stage(raw_df, aligned_df, cleaned_df, output_dir, ticker, tf):
+    plt.style.use("seaborn-v0_8-darkgrid")
+
+    fig, axes = plt.subplots(
+        3, 2, figsize=(18, 12), sharex=True, gridspec_kw={"width_ratios": [4, 1]}
+    )
+
+    datasets = [
+        (raw_df, "RAW"),
+        (aligned_df, "ALIGNED"),
+        (cleaned_df, "CLEANED"),
+    ]
+
+    for i, (df, name) in enumerate(datasets):
+        price_ax = axes[i, 0]
+        vol_ax = axes[i, 1]
+
+        _plot_ohlc(price_ax, df, name)
+
+        # Volume
+        vol_ax.bar(range(len(df)), df["volume"], color="#888888", alpha=0.6)
+        vol_ax.set_title("Volume", fontsize=10)
+        vol_ax.grid(True, alpha=0.2)
+        for spine in vol_ax.spines.values():
+            spine.set_alpha(0.2)
+
+        vol_ax.set_yticks([])
+
+    fig.suptitle(f"{ticker} · {tf}", fontsize=16, fontweight="bold", y=0.98)
+
+    for ax in axes[-1, :]:
+        ax.set_xlabel("Time Index", fontsize=11)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+
+    out_path = output_dir / f"{ticker}_{tf}_pipeline.png"
+    plt.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close()
 
 
 def ingest_all(
@@ -103,35 +134,30 @@ def ingest_all(
     )
 
 
-def _parse_timeframe(timeframe: str) -> pd.Timedelta:
-    mapping = {
-        "1Min": pd.Timedelta(minutes=1),
-        "5Min": pd.Timedelta(minutes=5),
-        "15Min": pd.Timedelta(minutes=15),
-        "1Hour": pd.Timedelta(hours=1),
-        "1Day": pd.Timedelta(days=1),
-    }
+UTC = "UTC"
 
-    if timeframe not in mapping:
-        raise ValueError(f"Unsupported timeframe: {timeframe}")
-
-    return mapping[timeframe]
-
-
-mapping = {
+FREQ_MAP = {
     "1Min": "1min",
     "5Min": "5min",
     "15Min": "15min",
     "1Hour": "1h",
+    "1H": "1h",
     "1Day": "1D",
+    "1D": "1D",
 }
 
 
-def _load_tickers(path: str) -> list[str]:
-    with open(path) as f:
-        return [
-            l.split()[0] for l in f if l.split() and not l.split()[0].startswith("#")
-        ]
+def normalize_freq(tf: str) -> str:
+    try:
+        return FREQ_MAP[tf]
+    except KeyError:
+        raise ValueError(f"Unsupported timeframe: {tf}")
+
+
+def to_utc_index(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    if idx.tz is None:
+        return idx.tz_localize("UTC")
+    return idx.tz_convert("UTC")
 
 
 def main() -> None:
@@ -156,6 +182,7 @@ def main() -> None:
     # start_date = "2026-01-01"
     end_date = "2026-01-28"
     timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
+    # timeframes = ["1Day"]
     # timeframes = ["1Min"]
 
     ingestor = AlpacaIngestor()
@@ -180,47 +207,9 @@ def main() -> None:
             end_date=end_date,
         )
 
-    # import sys
-
-    # sys.exit(0)
     # ------------------------------------------------------------
     # STAGE 2: ALIGN + CLEAN PIPELINE
     # ------------------------------------------------------------
-
-    def build_full_grid(
-        start: pd.Timestamp, end: pd.Timestamp, timeframe: str
-    ) -> pd.DatetimeIndex:
-        freq = _parse_timeframe(timeframe)
-
-        # HARD NORMALIZATION CONTRACT
-        start = pd.Timestamp(start)
-        end = pd.Timestamp(end)
-
-        # Force both to UTC first (canonical intermediate representation)
-        if start.tz is None:
-            start = start.tz_localize("UTC")
-        else:
-            start = start.tz_convert("UTC")
-
-        if end.tz is None:
-            end = end.tz_localize("UTC")
-        else:
-            end = end.tz_convert("UTC")
-
-        # Build grid in UTC first (stable, deterministic)
-        grid_utc = pd.date_range(start=start, end=end, freq=freq, tz="UTC")
-
-        # Convert once at the end
-        return grid_utc.tz_convert("America/New_York")
-
-    def align_to_grid(df: pd.DataFrame, grid: pd.DatetimeIndex) -> pd.DataFrame:
-        if df.index.tz is None:
-            df = df.tz_localize("UTC").tz_convert("America/New_York")
-        else:
-            df = df.tz_convert("America/New_York")
-
-        return df.reindex(grid)
-
     # data/raw
     raw_dir = Path(args.raw_dir)
     # data/aligned
@@ -254,7 +243,12 @@ def main() -> None:
     def get_path(base_dir: Path, timeframe: str, ticker: str) -> Path:
         return base_dir / timeframe / f"{ticker}.parquet"
 
-    # tickers = ["AAPL"]
+    plots_dir = Path("data/plots")
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    all_cleaning_rows = []
+
+    # tickers = ["AAPL", "SPY"]
     for ticker in tickers:
         logger.info("===== PIPELINE START: %s =====", ticker)
 
@@ -264,7 +258,8 @@ def main() -> None:
             # --------------------------------------------------------
             # LOAD RAW
             # --------------------------------------------------------
-
+            plot_dir_ = plots_dir / "plots"
+            plot_dir_.mkdir(parents=True, exist_ok=True)
             # raw_path = raw_output / tf / f"{ticker}.parquet"
             raw_path = get_path(raw_dir, tf, ticker)
             # raw_path = raw_output / f"{ticker}.parquet"
@@ -277,29 +272,49 @@ def main() -> None:
             # ensure OHLCV safety
             raw_df = raw_df[["open", "high", "low", "close", "volume"]]
             raw_df.index = pd.to_datetime(raw_df.index)
+
             raw_df = raw_df.sort_index()
 
             # --------------------------------------------------------
             # ALIGN
             # --------------------------------------------------------
             start, end = raw_df.index.min(), raw_df.index.max()
-            grid = build_full_grid(start, end, tf)
+            logger.info(f"Start --> {start} || End --> {end}")
 
-            aligned_df = align_to_grid(raw_df, grid)
+            aligned_df = raw_df
 
+            # sys.exit(0)
             # --------------------------------------------------------
             # CLEAN
             # --------------------------------------------------------
             cleaner = DataCleaner(max_gap_fill=5, ticker=f"{ticker}-{tf}", timeframe=tf)
 
             cleaned_df, cleaned_report = cleaner.clean(aligned_df)
-
+            log_cleaning_report(cleaned_report)
+            # store for cross-timeframe analysis
+            all_cleaning_rows.append(
+                flatten_cleaning_report(
+                    reports=cleaned_report,
+                    ticker=ticker,
+                    feed="sip",
+                    tf=tf,
+                )
+            )
             # --------------------------------------------------------
             # SAVE OUTPUTS (NO OVERWRITES)
             # --------------------------------------------------------
             _save_parquet(aligned_df, get_path(aligned_dir, tf, ticker))
             _save_parquet(cleaned_df, get_path(cleaned_dir, tf, ticker))
             _save_parquet(cleaned_df, get_path(processed_dir, tf, ticker))
+
+            # if tf != "1Min" and tf != "5Min":
+            #     plot_pipeline_stage(
+            #         raw_df, aligned_df, cleaned_df, plot_dir_, ticker, tf
+            #     )
+
+            # sys.exit(0)
+        log_all_cleaning_reports(all_cleaning_rows)
+        all_cleaning_rows.clear()
 
 
 if __name__ == "__main__":
