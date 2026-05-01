@@ -31,6 +31,7 @@ from src.features.scaler import FrozenMinMaxScaler, FrozenStandardScaler
 from src.features.selector import FeatureSelector
 from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import Config, load_config
+from src.models import set_seeds
 
 logger = logging.getLogger(__name__)
 
@@ -830,6 +831,89 @@ def plot_ohlcv_from_parquet(
     plt.close(fig)
 
 
+def _process_one_ticker(
+    ticker: str,
+    timeframe: str,
+    target_method: str,
+    processed_dir: Path,
+    output_root: Path,
+    config_path: Path,
+) -> Tuple[str, str, Optional[str]]:
+    """Run the split-first feature pipeline for a single ticker.
+
+    This function is the unit of work for parallel execution. It is defined
+    at module scope so :class:`concurrent.futures.ProcessPoolExecutor` can
+    pickle it. Each worker reloads the config from disk, configures its own
+    log file under the ticker's output directory, and seeds RNGs locally so
+    determinism is preserved across the swarm.
+
+    Args:
+        ticker: Ticker symbol to process.
+        timeframe: Timeframe string (e.g. ``"1Min"``).
+        target_method: One of ``{"next_close", "log_return"}``.
+        processed_dir: Root directory of cleaned parquet files.
+        output_root: Root directory for feature artefacts (``data/features_v2``).
+        config_path: Path to the YAML config; reloaded inside the worker.
+
+    Returns:
+        Tuple ``(ticker, status, error_message)`` where ``status`` is
+        ``"ok"``, ``"missing_input"``, or ``"failed"``.
+    """
+    output_dir = output_root / ticker
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = output_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    setup_logger(
+        log_file=log_dir / "build_features.log",
+        level="INFO",
+        mode=LogFileMode.OVERWRITE,
+    )
+    worker_logger = logging.getLogger(__name__)
+
+    try:
+        config = load_config(config_path)
+        set_seeds(config.lstm_baseline.random_seed)
+
+        processed_path = processed_dir / timeframe / f"{ticker}.parquet"
+        if not processed_path.exists():
+            worker_logger.warning("Missing processed data: %s", processed_path)
+            return (ticker, "missing_input", str(processed_path))
+
+        processed_df = _load_parquet(processed_path)
+
+        feature_cols = processed_df.select_dtypes(include=[np.number]).columns.tolist()
+        if len(feature_cols) == 0:
+            worker_logger.warning("[%s][%s] No numeric features found", ticker, timeframe)
+            return (ticker, "missing_input", "no numeric columns")
+
+        worker_logger.info("=" * 80)
+        worker_logger.info(
+            "FEATURES PIPELINE START: ticker=%s timeframe=%s target=%s",
+            ticker,
+            timeframe,
+            target_method,
+        )
+        worker_logger.info("=" * 80)
+
+        process_ticker_split_first(
+            ticker=ticker,
+            df=processed_df,
+            output_dir=output_dir,
+            config=config,
+            target_method=target_method,
+        )
+
+        worker_logger.info("=" * 80)
+        worker_logger.info("FEATURE ENGINEERING COMPLETE: %s", ticker)
+        worker_logger.info("=" * 80)
+        return (ticker, "ok", None)
+
+    except Exception as exc:
+        worker_logger.exception("Feature pipeline failed for %s", ticker)
+        return (ticker, "failed", repr(exc))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="TRD-Compliant Split-First Feature Engineering Pipeline"
@@ -848,6 +932,16 @@ def main() -> None:
             "data/features_v2/<TICKER>/, which has no timeframe component, so "
             "running multiple timeframes in a single run would silently "
             "overwrite each other. Run the script once per timeframe."
+        ),
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of parallel ticker workers. Each worker uses ~300-500 MB "
+            "of RAM at 1Min over multi-year history; size to system memory. "
+            "Default 1 (sequential)."
         ),
     )
 
@@ -876,88 +970,81 @@ def main() -> None:
     config = load_config(args.config)
 
     tickers = _load_tickers(args.tickers)
-    # Single-timeframe per invocation; the output path does not nest by
-    # timeframe so running multiple in one process would clobber artefacts.
-    timeframes = [args.timeframe]
+    timeframe = args.timeframe
+    processed_dir = Path(args.processed_dir).resolve()
+    output_root = Path(args.output).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    config_path = Path(args.config).resolve()
 
-    def get_path(base_dir: Path, timeframe: str, ticker: str) -> Path:
-        return base_dir / timeframe / f"{ticker}.parquet"
+    n_workers = max(1, int(args.workers))
+    n_workers = min(n_workers, len(tickers))
 
-    processed_dir = Path(args.processed_dir)
-    features_dir = Path(args.output)
-    features_dir.mkdir(parents=True, exist_ok=True)
-
-    for ticker in tickers:
-        logger.info("===== FEATURES PIPELINE START: %s =====", ticker)
-
-        for tf in timeframes:
-            logger.info("----- TIMEFRAME: %s -----", tf)
-            processed_path = get_path(processed_dir, tf, ticker)
-            if not processed_path.exists():
-                logger.warning("Missing processed data: %s", processed_path)
-                continue
-            processed_df = _load_parquet(processed_path)
-
-            # Canonical output path expected by trainers:
-            #   data/features_v2/<TICKER>/X_train.npy ...
-            # Timeframe and target_method are tracked in metadata but
-            # do NOT nest the output path so trainers can locate artifacts.
-            timeframe = tf
-            method = args.target_method
-            output_dir = Path(args.output) / ticker
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # ---------------------------------------------------------
-            # KEEP ONLY NUMERIC FEATURES (prevents noise + errors)
-            # ---------------------------------------------------------
-            feature_cols = processed_df.select_dtypes(
-                include=[np.number]
-            ).columns.tolist()
-
-            if len(feature_cols) == 0:
-                logger.warning("[%s][%s] No numeric features found", ticker, tf)
-                continue
-
-            # inspect_features(
-            #     ticker=ticker,
-            #     data=processed_df[feature_cols],
-            #     columns=feature_cols,
-            # )
-
-            # plot_ohlcv_from_parquet(
-            #     df=processed_df, output_dir=output_dir, title=f"{ticker} OHLCV ({tf})"
-            # )
-            # continue
-            # sys.exit(0)
-
-            logger_dir = output_dir / "logs"
-            logger_dir.mkdir(parents=True, exist_ok=True)
-
-            log_file = logger_dir / "build_features.log"
-
-            setup_logger(
-                log_file=log_file,
-                level="INFO",
-                mode=LogFileMode.OVERWRITE,
-            )
-
-            process_ticker_split_first(
-                ticker=ticker,
-                df=processed_df,
-                output_dir=output_dir,
-                config=config,
+    if n_workers == 1:
+        logger.info("Running sequentially (workers=1)")
+        results = [
+            _process_one_ticker(
+                ticker=t,
+                timeframe=timeframe,
                 target_method=args.target_method,
+                processed_dir=processed_dir,
+                output_root=output_root,
+                config_path=config_path,
             )
+            for t in tickers
+        ]
+    else:
+        logger.info(
+            "Dispatching %d tickers to %d worker processes",
+            len(tickers),
+            n_workers,
+        )
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
-            setup_logger(
-                log_file=logger_file,
-                level="INFO",
-                mode=LogFileMode.OVERWRITE,
-            )
+        results = []
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_one_ticker,
+                    ticker=t,
+                    timeframe=timeframe,
+                    target_method=args.target_method,
+                    processed_dir=processed_dir,
+                    output_root=output_root,
+                    config_path=config_path,
+                ): t
+                for t in tickers
+            }
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    logger.error("Worker raised for ticker=%s: %r", ticker, exc)
+                    result = (ticker, "failed", repr(exc))
+                results.append(result)
+                logger.info(
+                    "[%d/%d] ticker=%s status=%s",
+                    len(results),
+                    len(tickers),
+                    result[0],
+                    result[1],
+                )
 
-            logger.info("=" * 80)
-            logger.info(f"FEATURE ENGINEERING COMPLETE FOR TARGET={ticker}")
-            logger.info("=" * 80)
+    n_ok = sum(1 for _, status, _ in results if status == "ok")
+    n_missing = sum(1 for _, status, _ in results if status == "missing_input")
+    n_failed = sum(1 for _, status, _ in results if status == "failed")
+
+    logger.info("=" * 80)
+    logger.info("FEATURE BUILD SUMMARY")
+    logger.info("=" * 80)
+    logger.info("ok=%d  missing_input=%d  failed=%d", n_ok, n_missing, n_failed)
+    for ticker, status, err in results:
+        if status != "ok":
+            logger.info("  %s: %s (%s)", ticker, status, err)
+
+    if n_failed:
+        logger.error("Some tickers failed; see per-ticker logs under %s", output_root)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
