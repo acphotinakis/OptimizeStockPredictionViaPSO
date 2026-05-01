@@ -227,7 +227,9 @@ def _pso_model_builder(
     )
     trained_wrapper, _ = trainer.train(X_train, y_train, X_val, y_val)
 
-    y_pred = trained_wrapper.predict(X_val)
+    # progress=False so the inner "Predicting" tqdm bar does not clobber
+    # the parent's PSO iteration progress bar.
+    y_pred = trained_wrapper.predict(X_val, progress=False)
 
     # TRD1 §8.1 L-6: Verify test set never accessed during the swarm
     # evaluation. Hash the canonical contiguous layout so the digest

@@ -287,13 +287,18 @@ class LSTMModel:
 
         return self.model, self
 
-    def predict(self, X: np.ndarray, batch_size: int = 512) -> np.ndarray:
+    def predict(
+        self, X: np.ndarray, batch_size: int = 512, progress: bool = True
+    ) -> np.ndarray:
         """
         Memory-safe batched inference.
 
         Args:
             X: (N, T, F)
             batch_size: number of samples per batch
+            progress: When True, show a tqdm "Predicting" bar. PSO and other
+                outer loops should pass ``False`` so their parent progress
+                bar is not clobbered by the inner predict bar.
 
         Returns:
             (N,) predictions
@@ -312,14 +317,20 @@ class LSTMModel:
 
         preds = []
         N = X.shape[0]
+        n_batches = (N + batch_size - 1) // batch_size
 
-        with torch.no_grad():
-            for i in tqdm(
-                range(0, N, batch_size),
-                total=(N + batch_size - 1) // batch_size,
+        batch_iter = range(0, N, batch_size)
+        if progress:
+            batch_iter = tqdm(
+                batch_iter,
+                total=n_batches,
                 desc="Predicting",
                 unit="batch",
-            ):
+                leave=False,
+            )
+
+        with torch.no_grad():
+            for i in batch_iter:
                 X_batch = X[i : i + batch_size]
 
                 X_t = torch.from_numpy(X_batch.astype(np.float32)).to(
