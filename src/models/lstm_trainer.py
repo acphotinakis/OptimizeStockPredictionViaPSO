@@ -21,6 +21,34 @@ from src.evaluation.metrics import compute_and_log_all_statistical_metrics
 logger = logging.getLogger(__name__)
 
 
+class MSEWithDirectionalLoss(nn.Module):
+    """MSE plus a sign-disagreement penalty.
+
+    Defined as ``loss = mse(y_pred, y_true) + lambda_dir * mean(relu(-y_pred * y_true))``.
+    The relu term is positive whenever the predicted and true signs disagree
+    (and proportional to the disagreement magnitude); zero whenever they
+    agree or either operand is zero. This breaks the constant-mean
+    optimum of pure MSE on noisy financial targets, which otherwise causes
+    the model to collapse to predicting ``mean(y_train)`` and produce flat
+    validation metrics.
+
+    Args:
+        lambda_dir: Weight on the directional term. Typical range 0.01-0.5.
+            Default 0.1 is a starting point that empirically breaks
+            collapse without dominating the MSE gradient.
+    """
+
+    def __init__(self, lambda_dir: float = 0.1) -> None:
+        super().__init__()
+        self.lambda_dir = float(lambda_dir)
+        self._mse = nn.MSELoss()
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        mse_loss = self._mse(y_pred, y_true)
+        directional_penalty = torch.relu(-y_pred * y_true).mean()
+        return mse_loss + self.lambda_dir * directional_penalty
+
+
 class LSTMTrainer:
     """
     Unified training pipeline for LSTM models.
@@ -94,7 +122,13 @@ class LSTMTrainer:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
     def _resolve_loss(self) -> nn.Module:
-        """Build loss function from config string."""
+        """Build loss function from config string.
+
+        Supported names: ``mse`` / ``l2`` / ``mean_squared_error``,
+        ``mae`` / ``l1`` / ``mean_absolute_error``, ``huber``,
+        ``mse_directional`` (MSE plus a sign-disagreement penalty,
+        configurable via ``directional_loss_weight``; default 0.1).
+        """
         loss_name = str(self.config.get("loss", "mse")).lower()
         if loss_name in ("mse", "l2", "mean_squared_error"):
             return nn.MSELoss()
@@ -102,6 +136,9 @@ class LSTMTrainer:
             return nn.L1Loss()
         elif loss_name == "huber":
             return nn.SmoothL1Loss()
+        elif loss_name in ("mse_directional", "mse_dir"):
+            lambda_dir = float(self.config.get("directional_loss_weight", 0.1))
+            return MSEWithDirectionalLoss(lambda_dir=lambda_dir)
         else:
             raise ValueError(f"Unsupported loss: {loss_name}")
 

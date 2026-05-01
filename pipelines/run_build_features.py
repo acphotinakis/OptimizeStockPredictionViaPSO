@@ -27,7 +27,7 @@ from src.evaluation.canonical_split import (
 )
 from src.utils.data_storage import _load_parquet
 from src.features.feature_generators import generate_raw_features
-from src.features.scaler import FrozenMinMaxScaler
+from src.features.scaler import FrozenMinMaxScaler, FrozenStandardScaler
 from src.features.selector import FeatureSelector
 from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import Config, load_config
@@ -287,16 +287,21 @@ def _scale_data(
     np.ndarray,
     np.ndarray,
     FrozenMinMaxScaler,
-    FrozenMinMaxScaler,
+    FrozenStandardScaler,
 ]:
-    # Feature Scaler (Stage 7)
+    # Feature Scaler (Stage 7) - features mapped to [-1, 1] for LSTM stability.
     feature_scaler = FrozenMinMaxScaler(feature_range=(-1.0, 1.0))
     feature_scaler.fit(
         X_train_raw.values, feature_names=list(X_train_raw.columns)
     )
 
-    # Target Scaler (Stage 8) - ISOLATED
-    target_scaler = FrozenMinMaxScaler(feature_range=(-1.0, 1.0))
+    # Target Scaler (Stage 8) - z-score (mean=0, std=1) instead of MinMax.
+    # Returns are dominated by outliers, so MinMax-to-[-1,1] compresses the bulk
+    # of the distribution near zero, making a constant-mean predictor optimal
+    # under MSE. Standardisation gives the optimiser a flat loss landscape and
+    # makes the constant-prediction MSE exactly 1.0, which forces the model to
+    # extract real signal to beat that baseline.
+    target_scaler = FrozenStandardScaler()
     target_scaler.fit(y_train_raw.values.reshape(-1, 1), feature_names=["target"])
 
     # Transform all datasets

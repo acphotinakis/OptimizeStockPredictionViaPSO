@@ -216,6 +216,12 @@ class LSTMBaselineConfig:
     use_amp: bool
     accumulation_steps: int
 
+    # Optional: weight on the directional component of mse_directional loss.
+    # Ignored unless ``loss == "mse_directional"``. Defaults to 0.1 to match
+    # MSEWithDirectionalLoss's own default; placed last so this field can be
+    # added without disturbing existing positional construction order.
+    directional_loss_weight: float = 0.1
+
 
 # =========================
 # XGBoost

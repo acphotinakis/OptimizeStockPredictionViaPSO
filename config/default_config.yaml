@@ -131,15 +131,16 @@ lstm_baseline:
   # lstm model
   lstm_units_1: 128
   lstm_units_2: 64
-  dropout_rate: 0.2
+  dropout_rate: 0.05
   # activation: "relu"
   activation: "tanh"
   output_units: 1
   output_activation: "linear"
   optimizer: "adam"
-  
+
   learning_rate: 0.001
-  loss: "mse"
+  loss: "mse_directional"
+  directional_loss_weight: 0.1
   epochs: 100
   # batch_size: 32
   batch_size: 1024
