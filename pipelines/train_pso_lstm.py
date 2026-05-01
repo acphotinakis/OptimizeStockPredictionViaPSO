@@ -200,6 +200,22 @@ def phase1_pso_search(
     seed = config.lstm_baseline.random_seed
     set_all_seeds(seed)
 
+    # Optionally subsample the PSO train slice. Only the most-recent fraction
+    # is retained so the search sees regime-relevant data; the val slice is
+    # never subsampled.
+    subsample_fraction = float(getattr(pso_config, "subsample_train_fraction", 1.0))
+    if 0.0 < subsample_fraction < 1.0:
+        keep = max(lookback + 2, int(len(X_pso_train) * subsample_fraction))
+        if keep < len(X_pso_train):
+            logger.info(
+                "Subsampling PSO train to last %d / %d rows (%.0f%%)",
+                keep,
+                len(X_pso_train),
+                subsample_fraction * 100,
+            )
+            X_pso_train = X_pso_train[-keep:]
+            y_pso_train = y_pso_train[-keep:]
+
     # Build LSTM windows
     logger.info(f"Building LSTM windows (lookback={lookback})...")
     X_pso_train_win, y_pso_train_win = build_lstm_windows(
@@ -290,13 +306,19 @@ def phase1_pso_search(
 
         trainer_config = {
             "learning_rate": params["learning_rate"],
-            "epochs": params["epochs"],
+            # Epochs are no longer optimised by PSO. Every particle trains for
+            # a fixed 100 epochs so fitness reflects only architectural and
+            # learning-rate quality, not training-budget drift.
+            "epochs": 100,
             "batch_size": params["batch_size"],
             "optimizer": "adam",
             "loss": "mse",
             "shuffle": False,
             "grad_clip": 1.0,
-            "use_amp": False,
+            # AMP enabled: the fitness wrapper coerces NaN/+inf to +inf so a
+            # numerically unlucky particle drops out instead of poisoning the
+            # swarm. On CPU AMP is silently disabled inside the trainer.
+            "use_amp": True,
             "accumulation_steps": 1,
             "early_stopping": {
                 "enabled": True,
@@ -335,6 +357,14 @@ def phase1_pso_search(
 
     # TRD1 §7.1: Initialize IPSO optimizer
     logger.info("Initializing IPSO optimizer...")
+    n_workers = max(1, int(getattr(pso_config, "n_workers", 1)))
+    if n_workers > 1:
+        logger.info(
+            "Dispatching particles in parallel: n_workers=%d (n_particles=%d)",
+            n_workers,
+            pso_config.n_particles,
+        )
+
     optimizer = IPSO(
         n_particles=pso_config.n_particles,
         n_iterations=pso_config.n_iterations,
@@ -346,6 +376,7 @@ def phase1_pso_search(
         c2=pso_config.c2,
         v_clamp_fraction=pso_config.v_clamp_fraction,
         seed=seed,
+        n_workers=n_workers,
     )
 
     # Run PSO optimization
@@ -470,21 +501,24 @@ def phase2_final_training(
         "output_activation": "linear",
     }
 
-    # TRD2 §7.4: Phase 2 trains for the exact PSO epoch count with no early
-    # stopping; the val arrays are passed only to satisfy LSTMTrainer's input
+    # Phase 2 trains the chosen architecture/learning-rate/batch-size for a
+    # fixed 100 epochs (matching the Phase-1 budget) with no early stopping;
+    # the val arrays are passed only to satisfy LSTMTrainer's input
     # validation and never trigger termination. ``restore_best_weights`` is
     # explicitly disabled so the LAST epoch's weights are kept; otherwise
     # LSTMTrainer's default would restore min-train-loss weights (since
-    # train==val here), contradicting the "exact PSO epoch count" intent.
+    # train==val here), contradicting the fixed-epoch-count intent.
     trainer_config = {
         "learning_rate": best_params["learning_rate"],
-        "epochs": best_params["epochs"],
+        # Fixed at 100 epochs. PSO no longer optimises this dimension and the
+        # decoded ``best_params["epochs"]`` is intentionally ignored here.
+        "epochs": 100,
         "batch_size": best_params["batch_size"],
         "optimizer": "adam",
         "loss": "mse",
         "shuffle": False,
         "grad_clip": 1.0,
-        "use_amp": False,
+        "use_amp": True,
         "accumulation_steps": 1,
         "early_stopping": {
             "enabled": False,

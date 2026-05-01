@@ -333,6 +333,17 @@ class PSOConfig:
 
     checkpoint_dir: str
 
+    # Speed knobs (defaulted so older configs without these keys still load).
+    # n_workers > 1 dispatches particles via ProcessPoolExecutor. On CPU this
+    # gives ~linear speedup with cores; on a single GPU it can OOM and is
+    # typically slower than n_workers=1 due to memory contention.
+    n_workers: int = 1
+    # Fraction of the PSO train slice used for fitness training. The most
+    # recent ``subsample_train_fraction`` of the chronological PSO train slice
+    # is kept (regime-relevant for finance). 1.0 = full slice. PSO val is
+    # never subsampled.
+    subsample_train_fraction: float = 1.0
+
 
 # =========================
 # Backtesting

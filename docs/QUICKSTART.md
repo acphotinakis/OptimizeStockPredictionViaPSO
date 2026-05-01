@@ -137,9 +137,35 @@ python pipelines/train_pso_lstm.py \
     --output-dir results/pso_lstm/AAPL_1Min
 ```
 
-Phase 1: 20 particles × 50 iterations of LSTM training. Phase 2: final fit
-on combined train+val (80%) with the best hyperparameters and the exact PSO
-epoch count (no early stopping).
+Phase 1: 20 particles × 50 iterations × **fixed 100 epochs each** of LSTM
+training. Phase 2: final fit on combined train+val (80%) at 100 epochs
+with the PSO-found `lstm_units_*`, `learning_rate`, `dropout`, and
+`batch_size` (no early stopping).
+
+**Speed knobs** (in `config/default_config.yaml` `pso:` block):
+
+| Key | Default | Effect |
+|---|---|---|
+| `n_workers` | `4` | Particles dispatched in parallel via `ProcessPoolExecutor`. CPU: ~linear scaling; single GPU: usually `2` is the sweet spot, more contend for VRAM and don't help (CUDA streams serialise per process). |
+| `subsample_train_fraction` | `0.25` | Each fitness eval trains on the **most-recent fraction** of the PSO train slice. Phase 2 still trains on the full 80%. |
+
+The `epochs` dimension is in the search-space vector for spec
+compatibility but the decoded value is **ignored** — every particle
+trains for exactly 100 epochs and so does Phase 2. AMP is enabled in
+both phases (`use_amp: True`); on CPU it silently falls back to fp32.
+
+#### Single-GPU sizing (one card)
+
+| GPU | Recommended `n_workers` |
+|---|---|
+| 8 GB (e.g. RTX 3070, 4060 Ti 8 GB) | 1–2 |
+| 12 GB (RTX 3060, 4070) | 2 |
+| 16 GB (Quadro RTX 5000, RTX 4080, V100) | 2 (4 fits in VRAM but won't speed up much past 2) |
+| 24 GB+ (RTX 3090/4090, A6000) | 4 |
+| Multi-GPU | one worker per GPU |
+| CPU only | `min(n_particles, $(nproc) // 2)` |
+
+**Watch with**: `watch -n 1 'nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv'`. Healthy at `n_workers=2`: util 85–98%, memory rising as the swarm hits larger particles.
 
 To re-use a prior Phase 1 search:
 ```bash
@@ -311,3 +337,16 @@ only the missing chunks.
   directory layout (see §4a-c). LSTM baseline → the `train/` subdir;
   PSO-LSTM → the Phase-2 output dir; XGBoost → the `train/` subdir with
   its three JSON sidecars.
+- **PSO is "still running" after hours**: the canonical workload is 20
+  particles × 50 iterations × 100 epochs = 100 000 epoch-trainings, which
+  on a single GPU takes meaningful wall-time even with AMP + subsample.
+  Drop `pso.n_iterations` to 25 or `pso.n_particles` to 10 in the YAML
+  for a faster (lower-quality) search. Cutting `subsample_train_fraction`
+  from 0.25 to 0.1 is the largest extra lever and roughly linear.
+- **PSO OOMs on GPU**: drop `pso.n_workers` to 1. The `n_workers=4`
+  default is sized for 24 GB+ cards; on 8–16 GB cards 1–2 is correct.
+  The dispatcher also warns at startup so you can ctrl-C before training
+  starts.
+- **PSO `n_workers > 1` non-reproducible**: known issue (the swarm RNG
+  forks identically into each subprocess). For a paper-quality reported
+  run, set `pso.n_workers: 1` and accept the slower wall-time.

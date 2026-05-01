@@ -248,6 +248,17 @@ pso:
 
   checkpoint_dir: "results/checkpoints"
 
+  # ----- Speed knobs --------------------------------------------------------
+  # Each particle's LSTM training runs in a child process when n_workers > 1.
+  # CPU: scales ~linearly with cores, accept the small reproducibility cost.
+  # Single GPU: leave at 1 (multiple workers contend for GPU memory and slow
+  # the run down). Multi-GPU: set to the GPU count.
+  n_workers: 4
+  # Fraction of the chronological PSO train slice fed to each particle's
+  # fitness training. 1.0 = full slice. The most-recent fraction is kept so
+  # the search sees regime-relevant data. PSO val is NEVER subsampled.
+  subsample_train_fraction: 0.25
+
   # Fitness function (SPEC-COMPLIANT: γ×MSE + (1-γ)×MSW)
   fitness:
     gamma: 0.9              # Weight for MSE component (SPEC REQUIRED)
