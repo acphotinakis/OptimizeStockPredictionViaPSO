@@ -17,12 +17,11 @@ Two enhancements over standard PSO:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
 from .pso_core import StandardPSO
-from .particle import LB, UB, Particle, random_position, random_velocity
+from .particle import Particle, random_position, random_velocity
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,9 @@ logger = logging.getLogger(__name__)
 class IPSO(StandardPSO):
     """Improved PSO with tanh inertia weight and adaptive mutation.
 
-    All constructor arguments are identical to StandardPSO.
-    The optimisation loop is inherited; only _inertia and
-    _pre_update_hook are overridden.
+    All constructor arguments are identical to StandardPSO. The
+    optimisation loop is inherited from StandardPSO; only ``_inertia``
+    and ``_pre_update_hook`` are overridden.
     """
 
     # ---- Inertia (override) ---------------------------------------------
@@ -40,9 +39,14 @@ class IPSO(StandardPSO):
     def _inertia(self, t: int) -> float:
         """Non-linear tanh inertia weight (eq. 5 in pso_mathematical_spec.md).
 
-        Each particle could theoretically track its own ω; here we compute
-        the shared schedule value for iteration t.  Individual diversity
-        arises naturally from the stochastic velocity updates (r1, r2).
+        Args:
+            t: Current iteration index (1-based).
+
+        Returns:
+            The shared inertia schedule value for iteration ``t``.
+            Per-particle diversity arises from the stochastic
+            ``r1``/``r2`` velocity updates rather than per-particle
+            inertia state.
         """
         ratio = 4.0 * t / max(self.T, 1)
         return self.w_max - (self.w_max - self.w_min) * float(np.tanh(ratio))
@@ -52,7 +56,13 @@ class IPSO(StandardPSO):
     def _pre_update_hook(self, particle: Particle, t: int) -> bool:
         """Apply adaptive mutation with decreasing probability.
 
-        Returns True when the particle is mutated (caller skips normal update).
+        Args:
+            particle: The particle being considered for mutation.
+            t: Current iteration index (1-based).
+
+        Returns:
+            True when the particle is mutated; the caller then skips
+            the standard velocity/position update for this iteration.
         """
         mu_mf = 0.7 + 0.3 * (t / max(self.T, 1))  # ∈ (0.7, 1]
         xi = self._rng.uniform()
@@ -65,83 +75,5 @@ class IPSO(StandardPSO):
             particle.pbest_position = particle.position.copy()
             particle.pbest_fitness = float("inf")
             logger.info("Particle %d mutated at iteration %d", particle.idx, t)
-            return True  # Signal: skip standard velocity/position update
+            return True
         return False
-
-    # ---- Override _update_particle to thread t through -----------------
-
-    def _update_particle_with_t(self, particle: Particle, w: float, t: int) -> None:
-        """Velocity/position update with mutation check."""
-        if self._pre_update_hook(particle, t):
-            return
-
-        r1 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
-        r2 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space
-
-        cognitive = self.c1 * r1 * (particle.pbest_position - particle.position)
-        social = self.c2 * r2 * (self._gbest_position - particle.position)
-        particle.velocity = w * particle.velocity + cognitive + social
-        particle.velocity = np.clip(particle.velocity, -self.v_clamp, self.v_clamp)
-
-        proposed = particle.position + particle.velocity
-        clipped = np.clip(proposed, LB, UB)
-        particle.velocity = np.where(proposed != clipped, 0.0, particle.velocity)
-        particle.position = clipped
-
-    # ---- Full run loop (overrides parent to pass t to hook) ---------------
-
-    def run(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-    ) -> Tuple[Dict[str, Any], float]:
-        """Execute IPSO optimisation.
-
-        Args:
-            X_train: [N_train, T_max_lookback, F]
-            y_train: [N_train]
-            X_val:   [N_val, T_max_lookback, F]
-            y_val:   [N_val]
-
-        Returns:
-            (best_params_dict, best_fitness)
-        """
-        self.fitness_fn.reset()
-        self._initialise_swarm()
-        logger.info(f"Initialized Swarm")
-        self._evaluate_all(X_train, y_train, X_val, y_val, iteration=0)
-
-        for t in range(1, self.T + 1):
-            logger.info(f"Running {t} iteration")
-            w = self._inertia(t)
-            for particle in self._swarm:
-                self._update_particle_with_t(particle, w, t)
-            self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
-
-            self.fitness_history.append(self._gbest_fitness)
-            self.diversity_history.append(self._swarm_diversity())
-
-            logger.info(
-                "[IPSO] iter %3d/%d | w=%.4f | gbest=%.6f | diversity=%.4f | %s",
-                t,
-                self.T,
-                w,
-                self._gbest_fitness,
-                self.diversity_history[-1],
-                self._gbest_params(),
-            )
-
-            if self.checkpoint_dir and t % 10 == 0:
-                self._save_checkpoint(t)
-
-        from .particle import decode
-
-        best_params = decode(self._gbest_position)
-        logger.info(
-            "IPSO complete. Best params: %s  Fitness: %.6f",
-            best_params,
-            self._gbest_fitness,
-        )
-        return best_params, self._gbest_fitness

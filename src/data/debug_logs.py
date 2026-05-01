@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-import torch
 
 from src.data.alpaca_ingestor import AlpacaIngestor
 from src.utils.logger import setup_logger

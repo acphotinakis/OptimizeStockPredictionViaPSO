@@ -10,7 +10,6 @@ Version: 1.0.0 UNIFIED
 import logging
 import random
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import torch
@@ -36,77 +35,6 @@ def set_seeds(seed: int = 42) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True, warn_only=True)
-
-
-def build_lstm_windows(
-    X: np.ndarray, y: np.ndarray, lookback: int = 20
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Build temporal windows for LSTM input from tabular features.
-
-    Converts:
-        X: (N, F) tabular features
-        y: (N,) target vector
-    Into:
-        X_windowed: (N-lookback, lookback, F) 3D sequences
-        y_windowed: (N-lookback,) aligned targets
-
-    Each window contains the past `lookback` timesteps of features. The target
-    is the 1-bar-ahead forward return at the most-recent feature bar.
-
-    Args:
-        X: Feature matrix, shape (N, F)
-        y: Target vector, shape (N,)
-        lookback: Number of timesteps per window (default: 20 per TRD)
-
-    Returns:
-        Tuple of (X_windowed, y_windowed)
-
-    Raises:
-        ValueError: If insufficient samples or shape mismatch
-
-    Example:
-        >>> X = np.random.randn(1000, 15)  # 1000 samples, 15 features
-        >>> y = np.random.randn(1000)
-        >>> X_seq, y_seq = build_lstm_windows(X, y, lookback=20)
-        >>> print(X_seq.shape)  # (980, 20, 15)
-        >>> print(y_seq.shape)  # (980,)
-    """
-    if X.ndim != 2:
-        raise ValueError(f"X must be 2D (N, F), got shape {X.shape}")
-
-    if y.ndim != 1:
-        raise ValueError(f"y must be 1D (N,), got shape {y.shape}")
-
-    if len(X) != len(y):
-        raise ValueError(f"X and y length mismatch: {len(X)} vs {len(y)}")
-
-    N, F = X.shape
-
-    if N <= lookback:
-        raise ValueError(
-            f"Not enough samples ({N}) for lookback window ({lookback}). "
-            f"Need at least {lookback + 1} samples."
-        )
-
-    n_windows = N - lookback
-    X_windowed = np.zeros((n_windows, lookback, F), dtype=np.float32)
-
-    for i in range(n_windows):
-        X_windowed[i] = X[i : i + lookback]
-
-    # 1-bar-ahead alignment: target is the forward return at the most-recent
-    # feature bar, y[i+lookback-1] = log(close[i+lookback]/close[i+lookback-1]).
-    # The final row is dropped because y[N-1] is NaN under the canonical target.
-    y_windowed = y[lookback - 1 : -1].astype(np.float32)
-
-    logger.info(
-        f"Built {n_windows} windows: "
-        f"X {X.shape} --> {X_windowed.shape}, "
-        f"y {y.shape} --> {y_windowed.shape}"
-    )
-
-    return X_windowed, y_windowed
 
 
 def save_model_weights(model: torch.nn.Module, filepath: str | Path) -> None:
@@ -141,7 +69,7 @@ def load_model_weights(
     if not filepath.exists():
         raise FileNotFoundError(f"Model weights not found: {filepath}")
 
-    model.load_state_dict(torch.load(filepath, map_location=device))
+    model.load_state_dict(torch.load(filepath, map_location=device, weights_only=True))
     model.eval()
     logger.info(f"Model weights loaded from {filepath}")
 

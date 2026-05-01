@@ -50,20 +50,20 @@ class FeatureSelector:
 
         logger.info("FeatureSelector.fit(): %d features", X.shape[1])
 
-        # # ── Stage 1: Variance filter ───────────────────────────────
-        # X, names = self._stage_variance(X, names)
+        # Stage 1: Variance filter
+        X, names = self._stage_variance(X, names)
+        self.selected_features_ = list(names)
 
-        # # ── Stage 2: Correlation clustering ────────────────────────
-        # X, names = self._stage_correlation_cluster(X, names)
+        # Stage 2: Correlation clustering
+        X, names = self._stage_correlation_cluster(X, names)
+        self.selected_features_ = list(names)
 
-        # # ── Stage 3: Mutual Information ranking ────────────────────
-        # mi_scores = _compute_mi(X, y)
+        # Stage 3: Mutual Information ranking
+        mi_scores = _compute_mi(X, y)
+        names, mi_scores = self._stage_mi(names, mi_scores)
 
-        # names, mi_scores = self._stage_mi(names, mi_scores)
-
-        # self.selected_features_ = names
-        self.selected_features_ = list(feature_names)
-        # self.mi_scores_ = dict(zip(names, mi_scores.tolist()))
+        self.selected_features_ = list(names)
+        self.mi_scores_ = dict(zip(names, mi_scores.tolist()))
         self._is_fitted = True
 
         logger.info(

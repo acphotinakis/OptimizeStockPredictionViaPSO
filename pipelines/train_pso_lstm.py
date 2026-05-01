@@ -2,7 +2,6 @@ import argparse
 import hashlib
 import json
 import logging
-import random
 import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -16,7 +15,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.windowing import build_lstm_windows
 from src.models import LSTMModel, LSTMTrainer
+from src.models.utils import set_seeds
 from src.optimizer import IPSO, SpecCompliantFitness
+from src.optimizer.particle import LB, UB
 from src.utils.config_loader import Config, load_config
 from src.utils.logger import LogFileMode, setup_logger
 
@@ -25,15 +26,18 @@ logger = logging.getLogger(__name__)
 
 
 def set_all_seeds(seed: int) -> None:
-    """
-    Set all random seeds for full reproducibility (TRD1 §9.1).
+    """Set all random seeds for full reproducibility (TRD1 §9.1).
+
+    Delegates to :func:`src.models.utils.set_seeds`, which seeds
+    Python's ``random``, NumPy, and PyTorch (CPU and CUDA) so model
+    training is fully deterministic. This wrapper is preserved for
+    backward compatibility with the pipeline-level naming convention.
 
     Args:
-        seed: Random seed value
+        seed: Random seed value applied to every supported RNG.
     """
-    random.seed(seed)
-    np.random.seed(seed)
-    logger.info(f" All seeds set to {seed} (TRD1 §9.1 compliance)")
+    set_seeds(seed)
+    logger.info(f"All seeds set to {seed} (TRD1 §9.1 compliance)")
 
 
 def create_pso_split(
@@ -211,37 +215,50 @@ def phase1_pso_search(
         f"  X_pso_val:   {X_pso_val_win.shape}, y_pso_val:   {y_pso_val_win.shape}"
     )
 
-    # TRD1 §8.1 L-6: Protect test set from access
-    _test_data_hash = hashlib.sha256(X_test.tobytes()).hexdigest()
-    logger.info(f" Test set protected (hash: {_test_data_hash[:16]}...)")
+    # TRD1 §8.1 L-6: Protect test set from access. Canonicalize the
+    # array layout before hashing so non-contiguous views (e.g. slices
+    # or transposes) hash to the same digest as their contiguous form.
+    _test_data_hash = hashlib.sha256(
+        np.ascontiguousarray(X_test).tobytes()
+    ).hexdigest()
+    logger.info(f"Test set protected (hash: {_test_data_hash[:16]}...)")
 
-    # TRD1 §7.2: Define search space
-    search_space = {
-        "epochs": {
-            "min": pso_config.search_space.epochs.min,
-            "max": pso_config.search_space.epochs.max,
-        },
-        "units_1": {
-            "min": pso_config.search_space.lstm_units_1.min,
-            "max": pso_config.search_space.lstm_units_1.max,
-        },
-        "units_2": {
-            "min": pso_config.search_space.lstm_units_2.min,
-            "max": pso_config.search_space.lstm_units_2.max,
-        },
-        "learning_rate": {
-            "min": pso_config.search_space.learning_rate.min,
-            "max": pso_config.search_space.learning_rate.max,
-            "scale": pso_config.search_space.learning_rate.scale,
-        },
-        "dropout": {
-            "min": pso_config.search_space.dropout_rate.min,
-            "max": pso_config.search_space.dropout_rate.max,
-        },
-        "batch_size": {
-            "choices": pso_config.search_space.batch_size.choices,
-        },
-    }
+    # TRD1 §7.2: Validate that the YAML-declared search-space bounds
+    # match the canonical particle-encoding bounds (LB/UB). The PSO core
+    # consumes LB/UB directly via Particle, so any drift between the
+    # config and the encoding would silently change the search space.
+    expected_log_lr_min = float(np.log(pso_config.search_space.learning_rate.min))
+    expected_log_lr_max = float(np.log(pso_config.search_space.learning_rate.max))
+    expected_batch_idx_max = float(
+        len(pso_config.search_space.batch_size.choices)
+    ) - 0.01
+    bound_checks = [
+        ("units_1.min", pso_config.search_space.lstm_units_1.min, LB[0]),
+        ("units_1.max", pso_config.search_space.lstm_units_1.max, UB[0]),
+        ("units_2.min", pso_config.search_space.lstm_units_2.min, LB[1]),
+        ("units_2.max", pso_config.search_space.lstm_units_2.max, UB[1]),
+        ("dropout_rate.min", pso_config.search_space.dropout_rate.min, LB[2]),
+        ("dropout_rate.max", pso_config.search_space.dropout_rate.max, UB[2]),
+        ("learning_rate.log_min", expected_log_lr_min, LB[3]),
+        ("learning_rate.log_max", expected_log_lr_max, UB[3]),
+        ("batch_size_idx.min", 0.0, LB[4]),
+        ("batch_size_idx.max", expected_batch_idx_max, UB[4]),
+        ("epochs.min", pso_config.search_space.epochs.min, LB[5]),
+        ("epochs.max", pso_config.search_space.epochs.max, UB[5]),
+    ]
+    drift = [
+        (name, cfg, bound)
+        for name, cfg, bound in bound_checks
+        if not np.isclose(float(cfg), float(bound), rtol=1e-6, atol=1e-6)
+    ]
+    if drift:
+        details = ", ".join(
+            f"{name}: config={cfg} vs LB/UB={bound}" for name, cfg, bound in drift
+        )
+        raise ValueError(
+            "PSO search-space drift detected between YAML config and "
+            f"particle encoding LB/UB: {details}"
+        )
 
     # Define model builder function that PSO core will call
     def model_builder(params, X_train, y_train, X_val, y_val):
@@ -299,8 +316,13 @@ def phase1_pso_search(
 
         y_pred = trained_wrapper.predict(X_val)
 
-        # TRD1 §8.1 L-6: Verify test set never accessed
-        current_hash = hashlib.sha256(X_test.tobytes()).hexdigest()
+        # TRD1 §8.1 L-6: Verify test set never accessed. Hash the
+        # canonical contiguous layout so the digest matches the value
+        # captured outside the model_builder regardless of NumPy view
+        # state.
+        current_hash = hashlib.sha256(
+            np.ascontiguousarray(X_test).tobytes()
+        ).hexdigest()
         assert (
             current_hash == _test_data_hash
         ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
@@ -450,7 +472,10 @@ def phase2_final_training(
 
     # TRD2 §7.4: Phase 2 trains for the exact PSO epoch count with no early
     # stopping; the val arrays are passed only to satisfy LSTMTrainer's input
-    # validation and never trigger termination.
+    # validation and never trigger termination. ``restore_best_weights`` is
+    # explicitly disabled so the LAST epoch's weights are kept; otherwise
+    # LSTMTrainer's default would restore min-train-loss weights (since
+    # train==val here), contradicting the "exact PSO epoch count" intent.
     trainer_config = {
         "learning_rate": best_params["learning_rate"],
         "epochs": best_params["epochs"],
@@ -461,7 +486,10 @@ def phase2_final_training(
         "grad_clip": 1.0,
         "use_amp": False,
         "accumulation_steps": 1,
-        "early_stopping": {"enabled": False},
+        "early_stopping": {
+            "enabled": False,
+            "restore_best_weights": False,
+        },
     }
 
     logger.info("PSO-optimized model configuration:")

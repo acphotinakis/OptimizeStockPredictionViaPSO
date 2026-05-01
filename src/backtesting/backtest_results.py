@@ -127,17 +127,25 @@ def save_backtest_results(
 
     metrics_path = output_dir / "backtest_results.json"
     with open(metrics_path, "w") as f:
-        json.dump(metrics_data, f, indent=2)
+        json.dump(metrics_data, f, indent=2, allow_nan=False)
     logger.info(f"   Metrics saved to {metrics_path.name}")
 
-    # 2. Save time series (CSV)
-    # Find the minimum length to ensure all arrays are aligned
+    # 2. Save time series (CSV).
+    # ``equity_curve`` carries an extra V0 seed at index 0 (length N+1) for
+    # CAGR purposes, while every other per-bar array has length N. Drop the
+    # seed when serialising the per-bar CSV so all columns align cleanly; the
+    # JSON summary above retains the full curve for ratio calculations.
+    if len(results.equity_curve) == len(results.predictions) + 1:
+        bar_equity = results.equity_curve[1:]
+    else:
+        bar_equity = results.equity_curve
+
     min_len = min(
         len(results.predictions),
         len(results.actual_returns),
         len(results.signals),
         len(results.strategy_returns),
-        len(results.equity_curve),
+        len(bar_equity),
         len(results.trade_costs),
     )
 
@@ -155,7 +163,7 @@ def save_backtest_results(
             "actual_return": results.actual_returns[:min_len],
             "signal": results.signals[:min_len],
             "strategy_return": results.strategy_returns[:min_len],
-            "equity": results.equity_curve[:min_len],
+            "equity": bar_equity[:min_len],
             "trade_cost": results.trade_costs[:min_len],
         }
     )

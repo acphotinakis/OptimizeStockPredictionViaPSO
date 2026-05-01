@@ -44,6 +44,21 @@ def plot_equity_curve(
         capital = backtest_results.equity_curve
         dates = np.arange(len(capital))
 
+    # `capital` now has length N+1 (V0 prepended) and `benchmark_returns` has
+    # length N. Pad benchmark with the seed V0 so the two lines share the same
+    # x-axis.
+    initial_capital = capital[0]
+    benchmark_capital = np.concatenate(
+        [[initial_capital], initial_capital * np.cumprod(1 + benchmark_returns)]
+    )
+    if len(benchmark_capital) != len(capital):
+        # Fall back to truncating to the shorter of the two if a caller passes
+        # benchmark_returns of an unexpected length.
+        n = min(len(capital), len(benchmark_capital))
+        capital = capital[:n]
+        benchmark_capital = benchmark_capital[:n]
+        dates = dates[:n]
+
     # Plot strategy
     ax.plot(
         dates,
@@ -52,10 +67,6 @@ def plot_equity_curve(
         linewidth=1.5,
         color="blue",
     )
-
-    # Compute and plot benchmark
-    initial_capital = capital[0]
-    benchmark_capital = initial_capital * np.cumprod(1 + benchmark_returns)
     ax.plot(
         dates,
         benchmark_capital,

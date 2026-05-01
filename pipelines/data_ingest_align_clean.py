@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-from itertools import combinations
-import sys
 import argparse
 import logging
 import sys
-from pathlib import Path
-import pandas_market_calendars as mcal
-
-import numpy as np
-import pandas as pd
-
+from itertools import combinations
 from pathlib import Path
 from typing import cast
 
+import numpy as np
+import pandas as pd
+import pandas_market_calendars as mcal
 from prettytable import PrettyTable
 
 # Resolve project root (adjust depth if needed)
@@ -22,12 +18,6 @@ PROJECT_ROOT = CURRENT_FILE.parents[1]  # adjust if structure changes
 # Ensure only the project root (not file paths) is added
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-# Debug prints (optional)
-print("Current file:", CURRENT_FILE)
-print("Project root:", PROJECT_ROOT)
-print("sys.path updated:")
-print(sys.path)
 
 from src.data.debug_logs import (
     flatten_cleaning_report,
@@ -42,12 +32,6 @@ from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
-
-
-import pandas as pd
-from pathlib import Path
-from pathlib import Path
-import pandas as pd
 
 
 import matplotlib
@@ -160,6 +144,74 @@ def to_utc_index(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
     return idx.tz_convert("UTC")
 
 
+def align_to_nyse_calendar(
+    df: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    timeframe: str,
+) -> pd.DataFrame:
+    """Reindex an OHLCV DataFrame onto the canonical NYSE Regular Trading Hours
+    (RTH, 09:30-16:00 ET) calendar for the requested timeframe.
+
+    The resulting index is the union of all NYSE session bars between
+    ``start_date`` and ``end_date`` at frequency ``timeframe``. Pre-market and
+    after-hours bars are excluded by construction (NYSE schedule + RTH-only
+    ``mcal.date_range``). Missing bars in the input are introduced as NaN rows
+    so the downstream cleaner (``DataCleaner``) can apply bounded forward-fill
+    up to the configured cap.
+
+    SPY-relative alignment is achieved implicitly here: SPY trades on NYSE, so
+    the NYSE calendar IS the SPY calendar. Reindexing every ticker onto this
+    canonical NYSE RTH index produces a cross-ticker aligned panel without any
+    explicit reference to SPY's series.
+
+    Args:
+        df: Raw OHLCV DataFrame with a UTC-aware DatetimeIndex.
+        start_date: ISO date string, inclusive.
+        end_date: ISO date string, inclusive.
+        timeframe: Timeframe string accepted by ``FREQ_MAP`` (e.g. "1Min",
+            "5Min", "15Min", "1Hour", "1Day").
+
+    Returns:
+        DataFrame reindexed onto the canonical NYSE RTH index. Bars present in
+        ``df`` are preserved; missing bars are introduced as NaN rows.
+    """
+    nyse = mcal.get_calendar("NYSE")
+    schedule = nyse.schedule(start_date=start_date, end_date=end_date)
+
+    if schedule.empty:
+        logger.warning(
+            "NYSE schedule empty for %s..%s — returning input unmodified",
+            start_date,
+            end_date,
+        )
+        return df
+
+    freq = normalize_freq(timeframe)
+
+    if timeframe in ("1Day", "1D"):
+        # For daily bars use one entry per session (session close in UTC).
+        canonical_index = pd.DatetimeIndex(schedule["market_close"]).tz_convert("UTC")
+    else:
+        # ``mcal.date_range`` returns RTH-only timestamps in UTC for intraday
+        # frequencies. This naturally excludes pre-market / after-hours.
+        canonical_index = mcal.date_range(schedule, frequency=freq)
+        canonical_index = pd.DatetimeIndex(canonical_index).tz_convert("UTC")
+
+    canonical_index.name = df.index.name or "timestamp"
+
+    # Ensure the input index is UTC-aware so reindex matches correctly.
+    if df.index.tz is None:
+        df = df.copy()
+        df.index = df.index.tz_localize("UTC")
+    else:
+        df = df.copy()
+        df.index = df.index.tz_convert("UTC")
+
+    aligned = df.reindex(canonical_index)
+    return aligned
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest, clean, and align OHLCV data")
     parser.add_argument("--config", default="config/default_config.yaml")
@@ -178,9 +230,8 @@ def main() -> None:
     tickers = _load_tickers(args.tickers)
     logger.info("Loaded %d tickers", len(tickers))
 
-    start_date = "2020-01-01"
-    # start_date = "2026-01-01"
-    end_date = "2026-01-28"
+    start_date = cfg.data.start_date
+    end_date = cfg.data.end_date
     timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
     # timeframes = ["1Day"]
     # timeframes = ["1Min"]
@@ -205,6 +256,7 @@ def main() -> None:
             tf=tf,
             start_date=start_date,
             end_date=end_date,
+            skip_existing=args.skip_existing,
         )
 
     # ------------------------------------------------------------
@@ -281,9 +333,13 @@ def main() -> None:
             start, end = raw_df.index.min(), raw_df.index.max()
             logger.info(f"Start --> {start} || End --> {end}")
 
-            aligned_df = raw_df
+            aligned_df = align_to_nyse_calendar(
+                raw_df,
+                start_date=start_date,
+                end_date=end_date,
+                timeframe=tf,
+            )
 
-            # sys.exit(0)
             # --------------------------------------------------------
             # CLEAN
             # --------------------------------------------------------
@@ -300,6 +356,21 @@ def main() -> None:
                     tf=tf,
                 )
             )
+
+            # --------------------------------------------------------
+            # MAX MISSING FRACTION CHECK (warn, don't drop)
+            # --------------------------------------------------------
+            if len(cleaned_df) > 0:
+                missing_frac = cleaned_df.isna().mean().mean()
+                if missing_frac > cfg.data.max_missing_fraction:
+                    logger.warning(
+                        "Ticker %s [%s] missing fraction %.4f exceeds threshold %.4f",
+                        ticker,
+                        tf,
+                        missing_frac,
+                        cfg.data.max_missing_fraction,
+                    )
+
             # --------------------------------------------------------
             # SAVE OUTPUTS (NO OVERWRITES)
             # --------------------------------------------------------
@@ -312,9 +383,9 @@ def main() -> None:
             #         raw_df, aligned_df, cleaned_df, plot_dir_, ticker, tf
             #     )
 
-            # sys.exit(0)
-        log_all_cleaning_reports(all_cleaning_rows)
-        all_cleaning_rows.clear()
+    # Cross-ticker analysis runs ONCE after all tickers/timeframes are processed.
+    log_all_cleaning_reports(all_cleaning_rows)
+    all_cleaning_rows.clear()
 
 
 if __name__ == "__main__":

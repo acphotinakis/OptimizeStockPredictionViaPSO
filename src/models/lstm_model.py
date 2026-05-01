@@ -237,6 +237,7 @@ class LSTMModel:
                 raise KeyError(f"Required config key missing: {key}")
 
         self.input_size = int(config["input_size"])
+        self.lookback = int(config.get("lookback", 20))
         self.units_1 = int(config["lstm_units_1"])
         self.units_2 = int(config["lstm_units_2"])
         self.dropout_rate = float(config["dropout_rate"])
@@ -405,7 +406,7 @@ class LSTMModel:
         Validate input tensor shapes and dtypes.
 
         Args:
-            X: Feature tensor (N, 20, F)
+            X: Feature tensor (N, T, F)
             y: Target vector (N,) or None
             split_name: Name of split for logging
 
@@ -422,11 +423,13 @@ class LSTMModel:
 
         if X.ndim != 3:
             raise ValueError(
-                f"{split_name} X must be 3D (N, 20, F), got shape {X.shape}"
+                f"{split_name} X must be 3D (N, T, F), got shape {X.shape}"
             )
 
-        # if X.shape[1] != 20:
-        #     raise ValueError(f"{split_name} X must have timesteps=20, got {X.shape[1]}")
+        if X.shape[1] < 1:
+            raise ValueError(
+                f"{split_name} X must have at least 1 timestep, got {X.shape[1]}"
+            )
 
         if X.shape[2] < 1:
             raise ValueError(
@@ -464,7 +467,7 @@ class LSTMModel:
             "LSTMModel": {
                 "device": self.device,
                 "input_size": self.input_size,
-                "lookback": 20,
+                "lookback": self.lookback,
                 "hidden_size_1": self.units_1,
                 "hidden_size_2": self.units_2,
                 "dropout_rate": self.dropout_rate,
@@ -507,7 +510,7 @@ class LSTMModel:
             "seed": self.seed,
             # Architecture config
             "input_size": getattr(self, "input_size", None),
-            "lookback": 20,
+            "lookback": self.lookback,
             "hidden_size_1": self.units_1,
             "hidden_size_2": self.units_2,
             "dropout_rate": self.dropout_rate,

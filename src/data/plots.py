@@ -27,12 +27,6 @@ PROJECT_ROOT = CURRENT_FILE.parents[2]  # adjust if structure changes
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Debug prints (optional)
-print("Current file:", CURRENT_FILE)
-print("Project root:", PROJECT_ROOT)
-print("sys.path updated:")
-print(sys.path)
-
 
 logger = logging.getLogger(__name__)
 

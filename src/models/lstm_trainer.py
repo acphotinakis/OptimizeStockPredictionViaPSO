@@ -77,9 +77,6 @@ class LSTMTrainer:
 
         self.lstm_model = lstm_model
 
-        # AMP scaler (lazy init)
-        self._scaler: Optional[torch.cuda.amp.GradScaler] = None
-
         set_seeds(seed)
         logger.info(f"LSTMTrainer initialized on device: {self.device}")
         logger.info(f"Config: {config}")
@@ -150,6 +147,10 @@ class LSTMTrainer:
         self._validate_inputs(X_train, y_train, "train")
         self._validate_inputs(X_val, y_val, "val")
 
+        # ``self.device`` may be of the form "cuda:0"; AMP APIs only accept
+        # the bare device type ("cuda" or "cpu").
+        device_type = self.device.split(":")[0]
+
         learning_rate = float(self.config["learning_rate"])
         epochs = int(self.config["epochs"])
         batch_size = int(self.config["batch_size"])
@@ -189,9 +190,7 @@ class LSTMTrainer:
         optimizer = self._resolve_optimizer(model, learning_rate)
         criterion = self._resolve_loss()
 
-        scaler = (
-            torch.amp.grad_scaler.GradScaler(device=self.device) if use_amp else None
-        )
+        scaler = torch.amp.GradScaler(device_type) if use_amp else None
 
         # -------------------------------------------------
         # HISTORY (CLEAN STRUCTURE)
@@ -241,7 +240,7 @@ class LSTMTrainer:
                 batch_y = batch_y.to(self.device)
 
                 if use_amp:
-                    with autocast(self.device):
+                    with autocast(device_type):
                         outputs = model(batch_X)
                         loss = criterion(outputs, batch_y) / accumulation_steps
                 else:
@@ -313,7 +312,7 @@ class LSTMTrainer:
                     batch_y = batch_y.to(self.device)
 
                     if use_amp:
-                        with autocast(self.device):
+                        with autocast(device_type):
                             outputs = model(batch_X)
                             loss = criterion(outputs, batch_y)
                     else:
@@ -443,8 +442,10 @@ class LSTMTrainer:
                 f"{split_name} X must be 3D (N, 20, F), got shape {X.shape}"
             )
 
-        if X.shape[1] != 20:
-            raise ValueError(f"{split_name} X must have timesteps=20, got {X.shape[1]}")
+        if X.shape[1] < 1:
+            raise ValueError(
+                f"{split_name} X must have at least 1 timestep, got {X.shape[1]}"
+            )
 
         if X.shape[2] < 1:
             raise ValueError(

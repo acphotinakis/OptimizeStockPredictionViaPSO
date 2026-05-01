@@ -39,7 +39,8 @@ USE_DYNAMIC_SESSION_NORMALIZATION = True
 
 
 def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
-    r = df["target"]
+    # Causal log-return: target column is forward-looking (t+1) and would leak.
+    r = np.log(df["close"] / df["close"].shift(1))
     C = df["close"]
     out = pd.DataFrame(index=df.index)
 
@@ -51,19 +52,19 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
         60: ["mean", "var", "skew", "kurt"],
         120: ["mean"],
     }.items():
-        roll = r.rolling(w, min_periods=max(1, w // 2))
+        roll = r.rolling(w, min_periods=w)
         for stat in stats:
             out[f"ret_{stat}_{w}"] = getattr(roll, stat)()
 
     # ── Lag-1 autocorrelation ─────────────────────────────────────────────────
     for w in (20, 60):
-        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=max(1, w // 2)).apply(
+        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=w).apply(
             _fast_autocorr, raw=True
         )
 
     # ── Price range ratio ─────────────────────────────────────────────────────
     for w in (20, 60):
-        roll_C = C.rolling(w, min_periods=1)
+        roll_C = C.rolling(w, min_periods=w)
         out[f"range_ratio_{w}"] = (roll_C.max() - roll_C.min()) / (
             roll_C.mean() + 1e-10
         )
@@ -71,11 +72,11 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
     # ── Realized volatility ───────────────────────────────────────────────────
     r_sq = r**2
     for w in (10, 30):
-        out[f"rv_{w}"] = np.sqrt(r_sq.rolling(w, min_periods=1).sum())
+        out[f"rv_{w}"] = np.sqrt(r_sq.rolling(w, min_periods=w).sum())
 
     # ── Hurst exponent (R/S) ──────────────────────────────────────────────────
     out["hurst_exp_60"] = (
-        r.rolling(60, min_periods=30).apply(_hurst_single, raw=True).fillna(0.5)
+        r.rolling(60, min_periods=60).apply(_hurst_single, raw=True).fillna(0.5)
     )
     logger.info(
         f"Computed {len(out.columns)} statistical features for {len(out)} samples "
@@ -218,12 +219,9 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         {"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}
     ).max(axis=1)
 
-    # ATR14: Correct Wilder's smoothing implementation
-    # Formula: ATR[t] = (13*ATR[t-1] + TR[t]) / 14
-    # Initial ATR = mean(TR[1:14])
-    atr_init = tr.rolling(14, min_periods=14).mean()
-    # Apply Wilder's smoothing (RMA) using EWM
-    out["atr_14"] = atr_init.ewm(alpha=1 / 14, adjust=False).mean()
+    # ATR14: Wilder's RMA in a single pass.
+    # Formula: ATR[t] = (13*ATR[t-1] + TR[t]) / 14, equivalent to EWM with alpha=1/14.
+    out["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
 
     # ========================================================================
     # CATEGORY D: MOMENTUM/OSCILLATOR INDICATORS (TRD1 §3.4)
@@ -231,8 +229,8 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     # CCI - Commodity Channel Index (Zeng et al. 2025)
     # Typical Price: (H + L + C) / 3
     tp = (H + L + C) / 3
-    sma_tp20 = tp.rolling(20, min_periods=1).mean()
-    mean_dev = (tp - sma_tp20).abs().rolling(20, min_periods=1).mean()
+    sma_tp20 = tp.rolling(20, min_periods=20).mean()
+    mean_dev = (tp - sma_tp20).abs().rolling(20, min_periods=20).mean()
     out["cci_20"] = (tp - sma_tp20) / (0.015 * mean_dev + 1e-10)
 
     # MTM - Momentum (Zeng et al. 2025)
@@ -244,8 +242,8 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # SMI - Stochastic Momentum Index (Zeng et al. 2025)
     # Standard 10/3 period calculation
-    HH = H.rolling(10, min_periods=1).max()
-    LL = L.rolling(10, min_periods=1).min()
+    HH = H.rolling(10, min_periods=10).max()
+    LL = L.rolling(10, min_periods=10).min()
     midpoint = (HH + LL) / 2
     relative_range = C - midpoint
     range_hl = HH - LL
@@ -257,28 +255,31 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     hld_s = range_hl.ewm(span=3, adjust=False).mean().ewm(span=3, adjust=False).mean()
     out["smi"] = 200 * (d_s / (hld_s + 1e-10))
 
-    # WVAD - Williams Variable Accumulation/Distribution (Zeng et al. 2025)
-    # Cumulative sum of (Close-Open)/(High-Low) * Volume
+    # WVAD momentum (Zeng et al. 2025). Raw cumulative WVAD is split-dependent
+    # under per-split feature generation; expose only the windowed momentum.
     hl_range = H - L + 1e-10
     co_diff = C - O
     wvad_contrib = (co_diff / hl_range) * V
-    out["wvad"] = wvad_contrib.cumsum()
+    wvad = wvad_contrib.cumsum()
+    out["wvad_momentum_20"] = wvad.diff(20) / (
+        wvad.abs().rolling(20, min_periods=20).mean() + 1e-10
+    )
 
-    # RSI - Relative Strength Index (14-period standard)
+    # RSI - Relative Strength Index (14-period Wilder's RMA)
     delta = C.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+    avg_gain = gain.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    avg_loss = loss.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
     rs = avg_gain / (avg_loss + 1e-10)
     out["rsi_14"] = 100 - 100 / (1 + rs)
 
     # Stochastic %K and %D
-    low14 = L.rolling(14, min_periods=1).min()
-    high14 = H.rolling(14, min_periods=1).max()
+    low14 = L.rolling(14, min_periods=14).min()
+    high14 = H.rolling(14, min_periods=14).max()
     stoch_k = 100 * (C - low14) / (high14 - low14 + 1e-10)
     out["stoch_k"] = stoch_k
-    out["stoch_d"] = stoch_k.rolling(3, min_periods=1).mean()
+    out["stoch_d"] = stoch_k.rolling(3, min_periods=3).mean()
 
     # ========================================================================
     # CATEGORY E: STATISTICAL FEATURES (Production enhancements)
@@ -361,44 +362,60 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
     C, H, L, V = df["close"], df["high"], df["low"], df["volume"]
-    r = df["target"]
-    sm = df.get("session_minute", pd.Series(0, index=df.index))
+    # Causal log-return: target column is forward-looking (t+1) and would leak.
+    r = np.log(df["close"] / df["close"].shift(1))
+
+    # Compute session_minute from the DatetimeIndex (minutes since 09:30 ET open).
+    idx = df.index
+    if idx.tz is None:
+        idx_local = idx.tz_localize("UTC").tz_convert("America/New_York")
+    else:
+        idx_local = idx.tz_convert("America/New_York")
+    sm_raw = (idx_local.hour * 60 + idx_local.minute) - (9 * 60 + 30)
+    sm = pd.Series(np.clip(sm_raw, 0, 389), index=df.index)
     out = pd.DataFrame(index=df.index)
 
     # ── Shared intermediates ─────────────────────────────────────────────────
     tp = (H + L + C) / 3
     clv = ((C - L) - (H - C)) / (H - L + 1e-10)  # close location value
 
-    # ── VWAP (session-reset) ─────────────────────────────────────────────────
-    session_id = (sm == 0).cumsum()
-    cum_tp_vol = (tp * V).groupby(session_id).cumsum()
-    cum_vol = V.groupby(session_id).cumsum()
+    # ── Rolling-window VWAP ──────────────────────────────────────────────────
+    # Session-reset VWAP requires the split to start at session open. Under
+    # per-split feature generation that is not guaranteed, so we use a fixed
+    # rolling-window VWAP which is split-invariant.
+    vwap_window = 30
+    cum_tp_vol = (tp * V).rolling(vwap_window, min_periods=vwap_window).sum()
+    cum_vol = V.rolling(vwap_window, min_periods=vwap_window).sum()
     vwap = cum_tp_vol / (cum_vol + 1e-10)
-    out["vwap"] = vwap
-    out["price_to_vwap"] = C / (vwap + 1e-10)
-    out["vwap_dev"] = (C - vwap) / (vwap + 1e-10)
+    out["vwap_30"] = vwap
+    out["price_to_vwap_30"] = C / (vwap + 1e-10)
+    out["vwap_dev_30"] = (C - vwap) / (vwap + 1e-10)
 
     # ── Relative Volume ───────────────────────────────────────────────────────
-    out["rvol_20"] = V / (V.rolling(20, min_periods=1).mean() + 1e-10)
-    out["rvol_60"] = V / (V.rolling(60, min_periods=1).mean() + 1e-10)
+    out["rvol_20"] = V / (V.rolling(20, min_periods=20).mean() + 1e-10)
+    out["rvol_60"] = V / (V.rolling(60, min_periods=60).mean() + 1e-10)
 
-    # ── On-Balance Volume ─────────────────────────────────────────────────────
+    # ── On-Balance Volume (momentum only) ────────────────────────────────────
+    # Raw OBV is a cumulative sum starting at zero in each split, so its
+    # absolute level is split-dependent. We expose only the windowed momentum
+    # which is split-invariant.
     obv = pd.Series(
         np.cumsum(np.where(C > C.shift(1), V, np.where(C < C.shift(1), -V, 0))),
         index=df.index,
     )
-    out["obv"] = obv
-    out["obv_ema_20"] = obv.ewm(span=20, adjust=False).mean()
-    out["obv_momentum_20"] = obv.diff(20) / (obv.abs().rolling(20).mean() + 1e-10)
+    out["obv_momentum_20"] = obv.diff(20) / (
+        obv.abs().rolling(20, min_periods=20).mean() + 1e-10
+    )
 
-    # ── Accumulation/Distribution Line ───────────────────────────────────────
+    # ── Accumulation/Distribution slope (momentum only) ──────────────────────
     adl = (clv * V).cumsum()
-    out["adl"] = adl
-    out["adl_slope_10"] = adl.diff(10) / (adl.abs().rolling(10).mean() + 1e-10)
+    out["adl_slope_10"] = adl.diff(10) / (
+        adl.abs().rolling(10, min_periods=10).mean() + 1e-10
+    )
 
     # ── Chaikin Money Flow ────────────────────────────────────────────────────
-    out["cmf_20"] = (clv * V).rolling(20, min_periods=1).sum() / (
-        V.rolling(20, min_periods=1).sum() + 1e-10
+    out["cmf_20"] = (clv * V).rolling(20, min_periods=20).sum() / (
+        V.rolling(20, min_periods=20).sum() + 1e-10
     )
 
     # ── Force Index ───────────────────────────────────────────────────────────
@@ -410,15 +427,16 @@ def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
     hl_mid = (H + L) / 2
     out["eom_14"] = (
         ((hl_mid - hl_mid.shift(1)) / (V / (H - L + 1e-10) + 1e-10))
-        .rolling(14, min_periods=1)
+        .rolling(14, min_periods=14)
         .mean()
     )
 
-    # ── Volume Price Trend ────────────────────────────────────────────────────
-    out["vpt"] = (r * V).cumsum()
+    # Raw cumulative volume series (obv, adl, vpt, wvad) are intentionally
+    # not exposed: their absolute level depends on where the split starts,
+    # so they distort the train-fitted scaler when applied to val/test.
 
     # ── Intraday Turnover Velocity ────────────────────────────────────────────
-    out["itv_20"] = V / (V.rolling(20, min_periods=1).sum() + 1e-10)
+    out["itv_20"] = V / (V.rolling(20, min_periods=20).sum() + 1e-10)
 
     # ── Bar Activity Score ────────────────────────────────────────────────────
     out["bas"] = np.log1p(V) * (H - L) / (C.shift(1) + 1e-10)

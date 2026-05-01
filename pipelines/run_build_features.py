@@ -9,7 +9,6 @@ from typing import List, Optional, Sequence, Tuple, Union
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
 from prettytable import PrettyTable
 import matplotlib.pyplot as plt
 
@@ -28,6 +27,7 @@ from src.evaluation.canonical_split import (
 )
 from src.utils.data_storage import _load_parquet
 from src.features.feature_generators import generate_raw_features
+from src.features.scaler import FrozenMinMaxScaler
 from src.features.selector import FeatureSelector
 from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import Config, load_config
@@ -182,52 +182,81 @@ def inspect_targets(
     logger.info("=" * 90 + "\n")
 
 
-def _generate_raw(
-    ticker: str, df: pd.DataFrame, target_method: str
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[str], pd.DatetimeIndex]:
-    logger.info(f"[{ticker}] Stage 2: Raw Feature Generation")
-    # df = compute
+def _generate_raw_for_split(
+    ticker: str,
+    split_df: pd.DataFrame,
+    target_method: str,
+    split_name: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
+    """Compute target and raw features for a single split.
 
-    df["target"] = compute_canonical_target(
-        df["close"], horizon=1, method=target_method
+    Args:
+        ticker: Ticker symbol (for logging).
+        split_df: Raw OHLCV DataFrame for this split only.
+        target_method: Target computation method (e.g. "log_return").
+        split_name: Split identifier (TRAIN/VAL/TEST).
+
+    Returns:
+        Tuple of (X_raw, y_raw, feature_names) where X_raw and y_raw share a
+        common DatetimeIndex after NaN cleaning.
+    """
+    logger.info(f"[{ticker}] Stage 2: Raw Feature Generation ({split_name})")
+
+    split_df = split_df.copy()
+    split_df["target"] = compute_canonical_target(
+        split_df["close"], horizon=1, method=target_method
     )
 
     X_raw_np, y_raw_np, feature_names, datetime_index = generate_raw_features(
-        target_ticker=ticker, df_target=df, split_name="ALL"
+        target_ticker=ticker, df_target=split_df, split_name=split_name
     )
 
     X_raw = pd.DataFrame(X_raw_np, columns=feature_names, index=datetime_index)
     y_raw = pd.DataFrame(y_raw_np, columns=["target"], index=datetime_index)
 
-    logger.info(f"[DEBUG] NaNs in target: {y_raw['target'].isna().sum()}")
-    logger.info(f"[DEBUG] First 5 targets:\n{y_raw['target'].head()}")
-    logger.info(f"[DEBUG] Last 5 targets:\n{y_raw['target'].tail()}")
-    logger.info(f"Generated {len(X_raw)} samples with {X_raw.shape[1]} features")
-    logger.info("Feature scales (raw):")
-    logger.info(X_raw.describe().loc[["mean", "std", "min", "max"]].round(2))
-    logger.info("\n")
+    logger.info(
+        f"[{ticker}][{split_name}] X_raw={X_raw.shape}, y_raw={y_raw.shape}"
+    )
 
-    inspect_features(ticker=ticker, data=X_raw, columns=feature_names)
-    inspect_targets(ticker=ticker, data=y_raw, columns=["target"])
-
-    return X_raw, y_raw, feature_names, datetime_index
+    return X_raw, y_raw, feature_names
 
 
-def _split_data(X_raw: pd.DataFrame, y_raw: pd.DataFrame):
+def _split_data(
+    df: pd.DataFrame, ticker: str, target_method: str
+) -> Tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DatetimeIndex,
+    pd.DatetimeIndex,
+    pd.DatetimeIndex,
+    List[str],
+]:
+    """Split the raw OHLCV frame chronologically, then compute target and
+    features per split (prevents target leakage and cross-split accumulation
+    in cumulative volume features).
+    """
+    logger.info("Splitting raw OHLCV data...")
+    train_df, val_df, test_df = compute_canonical_split(df)
+    split_integrity = verify_split_integrity(train_df, val_df, test_df)
+    logger.info(f"RAW OHLCV SPLIT INTEGRITY --> [{split_integrity}]")
 
-    logger.info("Splitting feature data...")
-    X_train_raw, X_val_raw, X_test_raw = compute_canonical_split(X_raw)
-    split_integrity = verify_split_integrity(X_train_raw, X_val_raw, X_test_raw)
-    logger.info(f"FEATURE DATA SPLIT INTEGRITY --> [{split_integrity}]")
+    X_train_raw, y_train_raw, feature_names = _generate_raw_for_split(
+        ticker, train_df, target_method, "TRAIN"
+    )
+    X_val_raw, y_val_raw, _ = _generate_raw_for_split(
+        ticker, val_df, target_method, "VAL"
+    )
+    X_test_raw, y_test_raw, _ = _generate_raw_for_split(
+        ticker, test_df, target_method, "TEST"
+    )
 
     idx_train = X_train_raw.index
     idx_val = X_val_raw.index
     idx_test = X_test_raw.index
-
-    logger.info("Splitting target variable data...")
-    y_train_raw, y_val_raw, y_test_raw = compute_canonical_split(y_raw)
-    split_integrity = verify_split_integrity(y_train_raw, y_val_raw, y_test_raw)
-    logger.info(f"TARGET VARIABLE SPLIT INTEGRITY --> [{split_integrity}]")
 
     return (
         X_train_raw,
@@ -239,6 +268,7 @@ def _split_data(X_raw: pd.DataFrame, y_raw: pd.DataFrame):
         idx_train,
         idx_val,
         idx_test,
+        feature_names,
     )
 
 
@@ -256,21 +286,23 @@ def _scale_data(
     np.ndarray,
     np.ndarray,
     np.ndarray,
-    MinMaxScaler,
-    MinMaxScaler,
+    FrozenMinMaxScaler,
+    FrozenMinMaxScaler,
 ]:
     # Feature Scaler (Stage 7)
-    feature_scaler = MinMaxScaler(feature_range=(-1, 1))
-    feature_scaler.fit(X_train_raw)
+    feature_scaler = FrozenMinMaxScaler(feature_range=(-1.0, 1.0))
+    feature_scaler.fit(
+        X_train_raw.values, feature_names=list(X_train_raw.columns)
+    )
 
     # Target Scaler (Stage 8) - ISOLATED
-    target_scaler = MinMaxScaler(feature_range=(-1, 1))
-    target_scaler.fit(y_train_raw.values.reshape(-1, 1))
+    target_scaler = FrozenMinMaxScaler(feature_range=(-1.0, 1.0))
+    target_scaler.fit(y_train_raw.values.reshape(-1, 1), feature_names=["target"])
 
     # Transform all datasets
-    X_train_scaled = feature_scaler.transform(X_train_raw)
-    X_val_scaled = feature_scaler.transform(X_val_raw)
-    X_test_scaled = feature_scaler.transform(X_test_raw)
+    X_train_scaled = feature_scaler.transform(X_train_raw.values)
+    X_val_scaled = feature_scaler.transform(X_val_raw.values)
+    X_test_scaled = feature_scaler.transform(X_test_raw.values)
 
     y_train_scaled = target_scaler.transform(y_train_raw.values.reshape(-1, 1))
     y_val_scaled = target_scaler.transform(y_val_raw.values.reshape(-1, 1))
@@ -464,38 +496,10 @@ def process_ticker_split_first(
     splits_dir.mkdir(exist_ok=True, parents=True)
 
     # ============================================================================
-    # STAGE: RAW FEATURE GENERATION
+    # STAGE: SPLIT-FIRST RAW FEATURE GENERATION (target + features per split)
     # ============================================================================
 
     logger.info(f"Target Method = {target_method}")
-    X_raw, y_raw, feature_names, datetime_index = _generate_raw(
-        ticker, df, target_method
-    )
-    raw_dir = output_dir / "raw"
-    raw_dir.mkdir(exist_ok=True)
-    X_raw.to_parquet(raw_dir / f"{ticker}_X_raw.parquet")
-    y_raw.to_parquet(raw_dir / f"{ticker}_y_raw.parquet")
-
-    # plot_features_vs_target(
-    #     ticker=ticker,
-    #     features=X_raw,
-    #     target=y_raw["target"],
-    #     output_dir=raw_dir / "diagnostics",
-    # )
-
-    # save_feature_target_correlations(
-    #     ticker=ticker,
-    #     features=X_raw,
-    #     target=y_raw["target"],
-    #     output_dir=raw_dir / "diagnostics",
-    # )
-
-    # sys.exit(0)
-
-    # =============================================================================
-    # 2. TRAIN / VALIDATION / TEST SPLIT (Time-Series Aware)
-    # =============================================================================
-
     (
         X_train_raw,
         X_val_raw,
@@ -506,12 +510,23 @@ def process_ticker_split_first(
         idx_train,
         idx_val,
         idx_test,
-    ) = _split_data(X_raw=X_raw, y_raw=y_raw)
+        feature_names,
+    ) = _split_data(df=df, ticker=ticker, target_method=target_method)
+
     raw_dir = splits_dir / "raw"
     raw_dir.mkdir(exist_ok=True)
     X_train_raw.to_parquet(raw_dir / f"{ticker}_train_raw.parquet")
     X_val_raw.to_parquet(raw_dir / f"{ticker}_val_raw.parquet")
     X_test_raw.to_parquet(raw_dir / f"{ticker}_test_raw.parquet")
+
+    inspect_features(
+        ticker=ticker, data=X_train_raw, columns=feature_names
+    )
+    inspect_targets(
+        ticker=ticker,
+        data=y_train_raw,
+        columns=["target"],
+    )
 
     # =============================================================================
     # FIT SCALERS ON TRAIN ONLY, TRANSFORM ALL SETS
@@ -723,6 +738,17 @@ def process_ticker_split_first(
     with open(output_dir / f"{ticker}_frozen_state.json", "w") as f:
         json.dump(frozen_state, f, indent=2)
 
+    # Canonical single-artifact bundle expected by trainers.
+    joblib.dump(
+        {
+            "feature_scaler": feature_scaler,
+            "target_scaler": target_scaler,
+            "feature_selector": selector,
+            "metadata": frozen_state,
+        },
+        output_dir / "frozen_pipeline.pkl",
+    )
+
     logger.info(f"[{ticker}] Artifacts saved to {output_dir}")
     logger.info(f"[{ticker}] PIPELINE COMPLETE")
     logger.info(f"=" * 80)
@@ -807,7 +833,18 @@ def main() -> None:
     parser.add_argument("--tickers", default="config/tickers.txt")
     parser.add_argument("--processed-dir", default="data/processed")
 
-    parser.add_argument("--output", default="data/features_v4")
+    parser.add_argument("--output", default="data/features_v2")
+    parser.add_argument(
+        "--timeframe",
+        default="1Min",
+        choices=["1Min", "5Min", "15Min", "1Hour", "1Day"],
+        help=(
+            "Process exactly one timeframe per invocation. The output path is "
+            "data/features_v2/<TICKER>/, which has no timeframe component, so "
+            "running multiple timeframes in a single run would silently "
+            "overwrite each other. Run the script once per timeframe."
+        ),
+    )
 
     # TEMP PARAMETERS TO MANIPULATE
     parser.add_argument(
@@ -834,11 +871,9 @@ def main() -> None:
     config = load_config(args.config)
 
     tickers = _load_tickers(args.tickers)
-    timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
-    # timeframes = ["15Min", "1Hour", "1Day"]
-    # timeframes = ["1Min", "5Min"]
-    # timeframes = ["1Day"]
-    # tickers = ["SPY"]
+    # Single-timeframe per invocation; the output path does not nest by
+    # timeframe so running multiple in one process would clobber artefacts.
+    timeframes = [args.timeframe]
 
     def get_path(base_dir: Path, timeframe: str, ticker: str) -> Path:
         return base_dir / timeframe / f"{ticker}.parquet"
@@ -858,7 +893,13 @@ def main() -> None:
                 continue
             processed_df = _load_parquet(processed_path)
 
-            output_dir = Path(args.output) / ticker / tf / args.target_method
+            # Canonical output path expected by trainers:
+            #   data/features_v2/<TICKER>/X_train.npy ...
+            # Timeframe and target_method are tracked in metadata but
+            # do NOT nest the output path so trainers can locate artifacts.
+            timeframe = tf
+            method = args.target_method
+            output_dir = Path(args.output) / ticker
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # ---------------------------------------------------------

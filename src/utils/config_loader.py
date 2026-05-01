@@ -265,7 +265,7 @@ class PSOSearchSpaceParam:
 class LSTMUnitSearchSpaceParam:
     min: int
     max: int
-    step: int
+    step: Optional[int] = None
 
 
 @dataclass
@@ -307,13 +307,7 @@ class PSOSearchSpace:
 # =========================
 @dataclass
 class FitnessConfig:
-    mse_weight: float
-    msw_weight: float
-    rmse_weight: float
-    sharpe_weight: float
-    drawdown_weight: float
-    signal_threshold: float
-    transaction_cost: float
+    gamma: float = 0.9
 
 
 @dataclass
@@ -343,13 +337,13 @@ class BacktestingConfig:
     slippage: float
     position_size: float
     stop_loss: float
-    take_profit: float
     initial_capital: float
     position_fraction: float
     daily_loss_limit: float
     round_trip_cost: float
     signal_generation: str
     position_sizing: str
+    take_profit: Optional[float] = None
 
 
 # =========================

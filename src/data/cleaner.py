@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-import numpy as np
-import pandas as pd
-import logging
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 from pandas import Timedelta
 
 from src.data.utils import _parse_timeframe
@@ -94,23 +94,33 @@ class DataCleaner:
         self.validation_errors["gap_info"] = gap_info
 
         # -----------------------------
-        # 5. Apply bounded causal forward fill
-        # -----------------------------
-        df, _bounded_forward_fill_report = self._bounded_forward_fill(df, gap_info)
-        self.validation_errors["_bounded_forward_fill_report"] = (
-            _bounded_forward_fill_report
-        )
-        logger.info(f"First 10 rows FORWARD FILL")
-        logger.info(f"\n{df[:10]}")
-
-        # -----------------------------
-        # 6. Remove long gaps (> 5)
+        # 5. Remove long gaps (> max_gap_fill) BEFORE forward-fill so the
+        #    forward-fill operates only on short, fillable gaps. Removing long
+        #    gaps after fill (when they remain NaN) was the original off-by-one
+        #    bug that left g["end"] alive and caused _final_validation to fail.
         # -----------------------------
         df, _remove_long_gaps_report = self._remove_long_gaps_by_segments(
             df, gap_info["gap_segments"]
         )
         self.validation_errors["_remove_long_gaps_report"] = _remove_long_gaps_report
         logger.info(f"First 10 rows LONG GAP REMOVAL")
+        logger.info(f"\n{df[:10]}")
+
+        # Refresh gap_info against the post-removal frame so any timestamp-
+        # indexed segment data passed to downstream steps reflects current
+        # rows (the original gap_info contains stale references to rows that
+        # have just been removed).
+        gap_info = self._compute_observation_gaps(df)
+        self.validation_errors["gap_info"] = gap_info
+
+        # -----------------------------
+        # 6. Apply bounded causal forward fill on the surviving short gaps
+        # -----------------------------
+        df, _bounded_forward_fill_report = self._bounded_forward_fill(df, gap_info)
+        self.validation_errors["_bounded_forward_fill_report"] = (
+            _bounded_forward_fill_report
+        )
+        logger.info(f"First 10 rows FORWARD FILL")
         logger.info(f"\n{df[:10]}")
 
         # -----------------------------
@@ -136,9 +146,10 @@ class DataCleaner:
         long_gaps = [g for g in gaps if g["missing_observations"] > self.max_gap_fill]
         report["long_gap_count"] = len(long_gaps)
 
-        # build removal mask
+        # build removal mask (inclusive of both endpoints — both g["start"] and
+        # g["end"] are still-NaN rows belonging to the long gap segment)
         for g in long_gaps:
-            gap_mask = (df.index > g["start"]) & (df.index < g["end"])
+            gap_mask = (df.index >= g["start"]) & (df.index <= g["end"])
             mask |= gap_mask
 
         removed = int(mask.sum())
@@ -533,72 +544,6 @@ class DataCleaner:
         logger.info("STEP 5 complete | bounded forward fill finished")
 
         return result, report
-
-    # =========================================================
-    # STEP 6: LONG GAP REMOVAL (> 5 OBSERVATIONS)
-    # =========================================================
-
-    def _remove_long_gaps(
-        self,
-        df: pd.DataFrame,
-        gap_info: dict,
-    ):
-        logger.info("STEP 6 | Long gap removal started | rows=%d", len(df))
-
-        report = {
-            "rows_before": len(df),
-            "max_gap_fill": self.max_gap_fill,
-            "long_gap_count": 0,
-            "removed_indices_sample": [],
-            "removed_fraction": 0.0,
-        }
-
-        is_missing = df["close"].isna()
-
-        run_id = (is_missing != is_missing.shift()).cumsum()
-        gap_lengths = is_missing.groupby(run_id).transform("sum")
-
-        long_gap_mask = is_missing & (gap_lengths > self.max_gap_fill)
-
-        long_gap_count = int(long_gap_mask.sum())
-
-        report["long_gap_count"] = long_gap_count
-        report["removed_fraction"] = long_gap_count / len(df) if len(df) > 0 else 0.0
-
-        logger.info(
-            "Long gap detection | long_gap_rows=%d | threshold=%d",
-            long_gap_count,
-            self.max_gap_fill,
-        )
-
-        # ------------------------------------------------------------
-        # Sample indices for debugging
-        # ------------------------------------------------------------
-        if long_gap_count > 0:
-            sample_idx = list(df.index[long_gap_mask][:10])
-
-            report["removed_indices_sample"] = sample_idx
-
-            logger.info(
-                "Long gap indices sample=%s",
-                sample_idx,
-            )
-
-        # ------------------------------------------------------------
-        # Apply removal
-        # ------------------------------------------------------------
-        df = df[~long_gap_mask].copy()
-
-        report["rows_after"] = len(df)
-        report["rows_removed"] = long_gap_count
-
-        logger.info(
-            "STEP 6 complete | rows_after_removal=%d | removed=%d",
-            report["rows_after"],
-            long_gap_count,
-        )
-
-        return df, report
 
     # =========================================================
     # STEP 7: FINAL INVARIANT ENFORCEMENT

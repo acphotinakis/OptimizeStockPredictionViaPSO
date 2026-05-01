@@ -129,9 +129,16 @@ class AlpacaIngestor:
         start_dt = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
         end_dt = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
 
+        tf = self.timeframe_map.get(timeframe)
+        if tf is None:
+            raise ValueError(
+                f"Unsupported timeframe: {timeframe!r}. "
+                f"Choose from {list(self.timeframe_map)}"
+            )
+
         request_params = StockBarsRequest(
             symbol_or_symbols=ticker,
-            timeframe=self.timeframe_map.get(timeframe, -1),
+            timeframe=tf,
             start=start_dt,
             end=end_dt,
             adjustment=Adjustment(adjustment),
@@ -394,12 +401,15 @@ class AlpacaIngestor:
 
         logger.info(f"appending to parquet: {path}")
 
+        # Atomic write: write to a temp path first, then os.replace.
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
         df.to_parquet(
-            path,
+            tmp_path,
             engine="pyarrow",
             compression="zstd",
             index=True,
         )
+        os.replace(tmp_path, path)
 
     # def _append_parquet(self, df: pd.DataFrame, path: Path) -> None:
     #     """Append or create parquet safely (via concat + rewrite)."""

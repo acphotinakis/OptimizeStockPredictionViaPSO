@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
@@ -45,66 +45,33 @@ class SessionEvent(Enum):
 
 
 @dataclass
-class BacktestState:
-    """Immutable state container for backtest iteration."""
-
-    equity: List[float]
-    position: int  # -1, 0, +1
-    entry_price: float
-    entry_equity: float
-    entry_time: Optional[pd.Timestamp]
-    n_shares_held: float
-    session_open_equity: float
-    daily_halt: bool
-    trades: List[Dict]
-    bar_returns: List[float]
-    current_step: int
-
-    def __init__(self, initial_capital: float):
-        self.equity = [initial_capital]
-        self.position = 0
-        self.entry_price = 0.0
-        self.entry_equity = 0.0
-        self.entry_time = None
-        self.n_shares_held = 0.0
-        self.session_open_equity = initial_capital
-        self.daily_halt = False
-        self.trades = []
-        self.bar_returns = []
-        self.current_step = 0
-
-        logger.info("=" * 80)
-        logger.info("CANONICAL BACKTEST ENGINE")
-        logger.info("=" * 80)
-
-        # FULL CONFIG LOG
-        logger.info("CONFIG DUMP:")
-        logger.info(asdict(self))
-
-        logger.info("=" * 80)
-
-    def copy(self) -> Dict[str, Any]:
-        """Return mutable copy for iteration."""
-        return {
-            "equity": self.equity,
-            "position": self.position,
-            "entry_price": self.entry_price,
-            "entry_equity": self.entry_equity,
-            "entry_time": self.entry_time,
-            "n_shares_held": self.n_shares_held,
-            "session_open_equity": self.session_open_equity,
-            "daily_halt": self.daily_halt,
-            "trades": self.trades,
-            "bar_returns": self.bar_returns,
-            "current_step": self.current_step,
-        }
-
-
-@dataclass
 class BacktestResult:
+    """Container for backtest engine outputs.
+
+    Attributes:
+        equity_curve: Per-bar portfolio value, prepended with the initial
+            capital seed so ``equity_curve[0] == V0``.
+        bar_returns: Per-bar strategy returns (after costs).
+        trade_log: One row per closed trade.
+        signals: Per-bar ternary signals fed to the engine, length N.
+        bar_costs: Per-bar transaction costs incurred (one entry per bar,
+            zero on bars without trade events), length N.
+        sharpe: Annualised Sharpe ratio.
+        sortino: Annualised Sortino ratio.
+        mdd: Maximum drawdown.
+        cagr_: Compound annual growth rate.
+        calmar: Calmar ratio.
+        profit_factor_: Gross profit / gross loss.
+        win_rate_: Fraction of winning bars.
+        n_trades: Number of closed trades.
+        turnover: Mean absolute change in signal per bar.
+    """
+
     equity_curve: np.ndarray
     bar_returns: np.ndarray
     trade_log: pd.DataFrame
+    signals: np.ndarray
+    bar_costs: np.ndarray
 
     # metrics computed by engine ONLY
     sharpe: float
@@ -231,6 +198,9 @@ class Backtester:
         et_index = timestamps.tz_convert("America/New_York")
 
         for t in range(N):
+            # Reset per-bar cost accumulator before any trade events fire.
+            state["bar_cost_accumulator"] = 0.0
+
             # 1. Check session boundaries
             session_event = self._check_session_boundary(
                 t, timestamps, session_starts, et_index
@@ -253,11 +223,12 @@ class Backtester:
             state = self._mark_to_market(t, closes[t], state)
             state = self._apply_risk_controls(t, state, signals)
 
-            # 6. Record bar return
+            # 6. Record bar return and per-bar cost
             bar_ret = (state["equity"][-1] - state["equity"][-2]) / (
                 state["equity"][-2] + 1e-10
             )
             state["bar_returns"].append(bar_ret)
+            state["bar_costs"].append(float(state["bar_cost_accumulator"]))
             state["current_step"] = t
 
         return self._build_result(state, signals)
@@ -275,6 +246,8 @@ class Backtester:
             "daily_halt": False,
             "trades": [],
             "bar_returns": [],
+            "bar_costs": [],
+            "bar_cost_accumulator": 0.0,
             "current_step": 0,
         }
 
@@ -285,8 +258,11 @@ class Backtester:
         session_starts: np.ndarray | None,
         et_index: pd.DatetimeIndex,
     ) -> SessionEvent:
-        """
-        Detect if current bar is session open, close, or mid-session.
+        """Detect if current bar is session open, close, or mid-session.
+
+        Close takes priority over open at the final bar so end-of-data forces a
+        flat position even when the same bar would otherwise be flagged as a
+        new session open.
         """
         if session_starts is not None:
             is_open = bool(session_starts[t])
@@ -294,12 +270,14 @@ class Backtester:
         else:
             # Time-based detection (9:30 open, 16:00 close ET)
             is_open = et_index[t].hour == 9 and et_index[t].minute == 30
-            is_close = et_index[t].hour == 16 and et_index[t].minute == 0
+            is_close = (et_index[t].hour == 16 and et_index[t].minute == 0) or (
+                t == len(timestamps) - 1
+            )
 
-        if is_open:
-            return SessionEvent.OPEN
-        elif is_close:
+        if is_close:
             return SessionEvent.CLOSE
+        elif is_open:
+            return SessionEvent.OPEN
         return SessionEvent.NONE
 
     def _update_position(
@@ -353,6 +331,7 @@ class Backtester:
         current_equity = state["equity"][-1]
         new_equity = current_equity + pnl - cost
         state["equity"][-1] = new_equity
+        state["bar_cost_accumulator"] += cost
 
         # Record trade
         state["trades"].append(
@@ -394,6 +373,7 @@ class Backtester:
         current_equity = state["equity"][-1]
         cost = self.tc * self.f * current_equity
         state["equity"][-1] = current_equity - cost
+        state["bar_cost_accumulator"] += cost
 
         # Set entry state
         state["position"] = target
@@ -435,7 +415,11 @@ class Backtester:
         state: Dict[str, Any],
         signals: np.ndarray,
     ) -> Dict[str, Any]:
-        """Apply stop-loss and daily loss limits."""
+        """Apply stop-loss and daily loss limits.
+
+        Note: stop-losses are simulated as next-bar open exits (the next bar's
+        signal is forced to zero). They are not modeled as intra-bar fills.
+        """
         if state["position"] == 0:
             return state
 
@@ -462,9 +446,17 @@ class Backtester:
         state: Dict[str, Any],
         signals: np.ndarray,
     ) -> BacktestResult:
-        """Compute final metrics and return result object."""
-        equity_curve = np.array(state["equity"][1:])  # Remove initial seed
+        """Compute final metrics and return result object.
+
+        The equity curve is prepended with the initial capital seed ``V0`` so
+        downstream metrics like CAGR use the true starting capital as the
+        denominator instead of the post-cost mark-to-market of bar 0.
+        """
+        equity_curve = np.concatenate(
+            [np.array([self.V0], dtype=float), np.array(state["equity"][1:])]
+        )
         bar_returns = np.array(state["bar_returns"])
+        bar_costs = np.array(state["bar_costs"])
         trade_df = pd.DataFrame(state["trades"])
 
         # Calculate metrics
@@ -481,6 +473,8 @@ class Backtester:
             equity_curve=equity_curve,
             bar_returns=bar_returns,
             trade_log=trade_df,
+            signals=np.asarray(signals),
+            bar_costs=bar_costs,
             sharpe=sr,
             sortino=sor,
             mdd=mdd,

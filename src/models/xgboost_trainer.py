@@ -177,12 +177,15 @@ class XGBoostTrainer:
             val_key = "validation_1"
             if train_key in evals_result:
                 metric = list(evals_result[train_key].keys())[0]
-                train_rmse = evals_result[train_key][metric][-1]
-                logger.info(f"Final train {metric}: {train_rmse:.6f}")
+                train_rmse = evals_result[train_key][metric][best_iteration]
+                logger.info(f"Best-iteration train {metric}: {train_rmse:.6f}")
             if val_key in evals_result:
                 metric = list(evals_result[val_key].keys())[0]
-                val_rmse = evals_result[val_key][metric][-1]
-                logger.info(f"Final val {metric}: {val_rmse:.6f}")
+                val_rmse = evals_result[val_key][metric][best_iteration]
+                logger.info(f"Best-iteration val {metric}: {val_rmse:.6f}")
+                # Persist best-iteration val metric (not last) into history.
+                evals_result["best_iteration"] = best_iteration
+                evals_result["best_val_metric"] = {metric: float(val_rmse)}
 
         return (
             XGBoostModel(

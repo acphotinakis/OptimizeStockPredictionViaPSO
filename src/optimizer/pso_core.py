@@ -106,7 +106,7 @@ class StandardPSO:
         for t in range(1, self.T + 1):
             w = self._inertia(t)
             for particle in self._swarm:
-                self._update_particle(particle, w)
+                self._update_particle(particle, w, t)
             self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
 
             self.fitness_history.append(self._gbest_fitness)
@@ -150,10 +150,18 @@ class StandardPSO:
         self._gbest_position = self._swarm[0].position.copy()
         self._gbest_fitness = float("inf")
 
-    def _update_particle(self, particle: Particle, w: float) -> None:
-        """Apply velocity and position update equations (eqs. 1–2)."""
+    def _update_particle(self, particle: Particle, w: float, t: int) -> None:
+        """Apply velocity and position update equations (eqs. 1-2).
+
+        Args:
+            particle: The particle to update.
+            w: Inertia weight for this iteration.
+            t: Current iteration index (1-based), threaded into the
+                pre-update hook so mutating subclasses can schedule
+                operators against the iteration count.
+        """
         # Allow subclass to mutate instead
-        if self._pre_update_hook(particle, 0):
+        if self._pre_update_hook(particle, t):
             return
 
         r1 = self._rng.uniform(0.0, 1.0, size=6)  # 6D search space

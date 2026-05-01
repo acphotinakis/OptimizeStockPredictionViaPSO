@@ -280,6 +280,29 @@ TRADING_METRIC_ORDER = [
 # ----------------------------------------------------------------------
 
 
+def _nan_to_none(d):
+    """Replace NaN floats with None for JSON-safe serialisation.
+
+    RFC 8259 disallows ``NaN`` in JSON, so callers that ``json.dump`` the
+    metrics dict require finite floats or ``None``. Recurses into nested
+    dicts and lists so summary blocks built by downstream callers are also
+    sanitised. Non-float values pass through untouched.
+
+    Args:
+        d: Metrics dictionary, list, or scalar with possibly NaN float values.
+
+    Returns:
+        Same shape as the input with NaN floats replaced by ``None``.
+    """
+    if isinstance(d, dict):
+        return {k: _nan_to_none(v) for k, v in d.items()}
+    if isinstance(d, list):
+        return [_nan_to_none(v) for v in d]
+    if isinstance(d, float) and np.isnan(d):
+        return None
+    return d
+
+
 def compute_and_log_all_statistical_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -301,7 +324,7 @@ def compute_and_log_all_statistical_metrics(
 
     _log_metrics(label, result, STATS_METRIC_ORDER, metric_type="stats")
 
-    return result
+    return _nan_to_none(result)
 
 
 def compute_and_log_all_trading_metrics(
@@ -327,7 +350,7 @@ def compute_and_log_all_trading_metrics(
 
     _log_metrics(label, result, TRADING_METRIC_ORDER, metric_type="trading")
 
-    return result
+    return _nan_to_none(result)
 
 
 # ----------------------------------------------------------------------

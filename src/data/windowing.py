@@ -25,7 +25,14 @@ def build_lstm_windows(
 
     Converts ``X`` of shape ``(N, F)`` and ``y`` of shape ``(N,)`` into
     sequences ``X_seq`` of shape ``(M, lookback, F)`` and aligned targets
-    ``y_seq`` of shape ``(M,)``, where ``M = N - lookback - horizon + 1``.
+    ``y_seq`` of shape ``(M,)``, where ``M = N - lookback - horizon - 1``.
+
+    The final row is dropped so that ``y[N-1]`` (which is NaN under the
+    canonical target ``y[t] = log(close[t+1]/close[t])`` because the next
+    close is unknown) is never selected as a target. This also makes the
+    output sample count match ``build_xgboost_lag_features`` so the two
+    representations cover the same number of samples and can be compared
+    directly.
 
     Args:
         X: Feature matrix, shape ``(N, F)``.
@@ -33,13 +40,15 @@ def build_lstm_windows(
             ``y[t] = log(close[t+1]/close[t])`` (forward return at bar ``t``).
         lookback: Number of timesteps per window (default 20).
         horizon: Steps further ahead than the most-recent feature bar.
-            ``horizon=0`` (default) yields 1-bar-ahead alignment matching
-            ``build_xgboost_lag_features``: window ``i`` covers rows
-            ``[i, i+lookback-1]`` and the target is ``y[i+lookback-1]``,
-            i.e., the forward return realised at the most-recent feature bar.
+            ``horizon=0`` (default) yields 1-bar-ahead alignment: window ``i``
+            covers rows ``[i, i+lookback-1]`` and the target is
+            ``y[i+lookback-1]``, the forward return realised at the
+            most-recent feature bar.
 
     Returns:
-        Tuple ``(X_seq, y_seq)``.
+        Tuple ``(X_seq, y_seq)`` where ``X_seq`` has shape
+        ``(N - lookback - horizon - 1, lookback, F)`` and ``y_seq`` has
+        shape ``(N - lookback - horizon - 1,)``.
 
     Raises:
         ValueError: If shapes are inconsistent or there is too little data.
@@ -52,7 +61,7 @@ def build_lstm_windows(
         raise ValueError(f"X and y length mismatch: {len(X)} vs {len(y)}")
 
     N = len(X)
-    n_windows = N - lookback - horizon + 1
+    n_windows = N - lookback - horizon - 1
     if n_windows <= 0:
         raise ValueError(
             f"Not enough samples ({N}) for lookback={lookback} + horizon={horizon}"
@@ -168,12 +177,18 @@ def build_xgboost_lag_features(
         X: (N, F) tabular features
         y: (N,) target vector
     Into:
-        X_lagged: (N-lookback, F * (lookback+1)) with lag features
-        y_aligned: (N-lookback,) aligned targets
+        X_lagged: (N-lookback-1, F * (lookback+1)) with lag features
+        y_aligned: (N-lookback-1,) aligned targets
 
     For each sample i at time t:
         X_lagged[i] = [X[t], X[t-1], X[t-2], ..., X[t-lookback]]
         y_aligned[i] = y[t]
+
+    The final row is dropped so that ``y[N-1]`` (which is NaN under the
+    canonical target ``y[t] = log(close[t+1]/close[t])`` because the next
+    close is unknown) is never selected as a target. The resulting sample
+    count matches ``build_lstm_windows`` (with the same ``lookback`` and
+    ``horizon=0``), so the two representations can be compared directly.
 
     Args:
         X: Feature matrix (N, F)
@@ -182,8 +197,8 @@ def build_xgboost_lag_features(
 
     Returns:
         Tuple of (X_lagged, y_aligned)
-        - X_lagged: (N-lookback, F*(lookback+1))
-        - y_aligned: (N-lookback,)
+        - X_lagged: (N-lookback-1, F*(lookback+1))
+        - y_aligned: (N-lookback-1,)
 
     Raises:
         ValueError: If insufficient samples or shape mismatch
@@ -192,8 +207,8 @@ def build_xgboost_lag_features(
         >>> X = np.random.randn(1000, 10)  # 1000 samples, 10 features
         >>> y = np.random.randn(1000)
         >>> X_lag, y_lag = build_xgboost_lag_features(X, y, lookback=20)
-        >>> print(X_lag.shape)  # (980, 210) = 980 samples, 10*21 features
-        >>> print(y_lag.shape)  # (980,)
+        >>> print(X_lag.shape)  # (979, 210) = 979 samples, 10*21 features
+        >>> print(y_lag.shape)  # (979,)
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D (N, F), got shape {X.shape}")
@@ -206,27 +221,29 @@ def build_xgboost_lag_features(
 
     N, F = X.shape
 
-    if N <= lookback:
+    if N <= lookback + 1:
         raise ValueError(
             f"Not enough samples ({N}) for lookback ({lookback}). "
-            f"Need at least {lookback + 1} samples."
+            f"Need at least {lookback + 2} samples."
         )
 
-    # Create lag features
+    # Create lag features. Each base array has length ``N - lookback``.
+    # We trim the trailing element from each so the final row (whose target
+    # would be y[N-1]) is dropped, leaving ``N - lookback - 1`` rows.
     lag_arrays = []
 
     for lag in range(lookback + 1):
         # lag=0 is current, lag=1 is previous, etc.
         if lag == 0:
-            lag_arrays.append(X[lookback:])
+            lag_arrays.append(X[lookback:-1])
         else:
-            lag_arrays.append(X[lookback - lag : -lag])
+            lag_arrays.append(X[lookback - lag : -lag - 1])
 
     # Concatenate all lags horizontally
     X_lagged = np.concatenate(lag_arrays, axis=1).astype(np.float32)
 
-    # Align targets
-    y_aligned = y[lookback:].astype(np.float32)
+    # Align targets, dropping the final NaN target y[N-1].
+    y_aligned = y[lookback:-1].astype(np.float32)
 
     logger.info(
         f"Built {len(y_aligned)} lagged samples: "
