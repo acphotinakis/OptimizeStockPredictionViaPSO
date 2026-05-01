@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -147,6 +148,100 @@ def load_preprocessed_data(data_path: Path) -> Dict:
 # to properly integrate with src/optimizer/ infrastructure
 
 
+def _pso_model_builder(
+    params: Dict[str, Any],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    seed: int,
+    test_hash: str,
+    X_test: np.ndarray,
+) -> Tuple[np.ndarray, Any]:
+    """Train one LSTM particle and return ``(y_pred, nn.Module)``.
+
+    Defined at module scope (rather than as a closure inside
+    ``phase1_pso_search``) so :func:`functools.partial` of this function is
+    picklable by ``ProcessPoolExecutor``. Closures cannot be pickled by the
+    standard library, which previously caused ``n_workers > 1`` to silently
+    fall back to sequential evaluation.
+
+    Args:
+        params: Particle-decoded hyperparameters.
+        X_train: PSO-train sequences (windowed).
+        y_train: PSO-train targets.
+        X_val: PSO-val sequences (windowed).
+        y_val: PSO-val targets.
+        seed: Reproducibility seed.
+        test_hash: SHA-256 of the canonical contiguous test array, captured
+            in the parent before PSO begins; checked here to enforce
+            test-set isolation (TRD1 §8.1 L-6).
+        X_test: Test array referenced for the hash check; never used to
+            train.
+
+    Returns:
+        Tuple of validation predictions and the underlying ``nn.Module``
+        (the latter so the fitness function can compute MSW directly from
+        ``model.parameters()``).
+    """
+    architecture_config = {
+        "input_size": X_train.shape[2],
+        "lstm_units_1": params["units_1"],
+        "lstm_units_2": params["units_2"],
+        "dropout_rate": params["dropout"],
+        "output_units": 1,
+        "activation": "relu",
+        "output_activation": "linear",
+    }
+
+    trainer_config = {
+        "learning_rate": params["learning_rate"],
+        # Epochs are no longer optimised by PSO. Every particle trains for
+        # a fixed 100 epochs so fitness reflects only architectural and
+        # learning-rate quality, not training-budget drift.
+        "epochs": 100,
+        "batch_size": params["batch_size"],
+        "optimizer": "adam",
+        "loss": "mse",
+        "shuffle": False,
+        "grad_clip": 1.0,
+        # AMP enabled; trainer silently falls back to fp32 on CPU.
+        "use_amp": True,
+        "accumulation_steps": 1,
+        # Quiet inside the swarm: parent's tqdm is the only console UI.
+        "quiet": True,
+        "early_stopping": {
+            "enabled": True,
+            "monitor": "val_loss",
+            "patience": 10,
+            "restore_best_weights": True,
+        },
+    }
+
+    model_wrapper = LSTMModel(seed=seed)
+    model_wrapper.build_model(architecture_config)
+
+    trainer = LSTMTrainer(
+        lstm_model=model_wrapper, config=trainer_config, seed=seed
+    )
+    trained_wrapper, _ = trainer.train(X_train, y_train, X_val, y_val)
+
+    y_pred = trained_wrapper.predict(X_val)
+
+    # TRD1 §8.1 L-6: Verify test set never accessed during the swarm
+    # evaluation. Hash the canonical contiguous layout so the digest
+    # matches the value captured before PSO began regardless of view state.
+    current_hash = hashlib.sha256(
+        np.ascontiguousarray(X_test).tobytes()
+    ).hexdigest()
+    assert (
+        current_hash == test_hash
+    ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
+
+    return y_pred, trained_wrapper.model
+
+
 def phase1_pso_search(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -276,80 +371,17 @@ def phase1_pso_search(
             f"particle encoding LB/UB: {details}"
         )
 
-    # Define model builder function that PSO core will call
-    def model_builder(params, X_train, y_train, X_val, y_val):
-        """Build and train an LSTM for one PSO particle.
-
-        Returns ``(y_pred, model)`` where ``model`` is the underlying
-        ``nn.Module`` so the fitness function can compute MSW directly from
-        ``model.parameters()``.
-
-        Args:
-            params: Hyperparameters decoded from a particle position.
-            X_train: Training sequences (already windowed).
-            y_train: Training targets.
-            X_val: Validation sequences (already windowed).
-            y_val: Validation targets.
-
-        Returns:
-            Tuple ``(y_pred, nn.Module)``.
-        """
-        architecture_config = {
-            "input_size": X_train.shape[2],
-            "lstm_units_1": params["units_1"],
-            "lstm_units_2": params["units_2"],
-            "dropout_rate": params["dropout"],
-            "output_units": 1,
-            "activation": "relu",
-            "output_activation": "linear",
-        }
-
-        trainer_config = {
-            "learning_rate": params["learning_rate"],
-            # Epochs are no longer optimised by PSO. Every particle trains for
-            # a fixed 100 epochs so fitness reflects only architectural and
-            # learning-rate quality, not training-budget drift.
-            "epochs": 100,
-            "batch_size": params["batch_size"],
-            "optimizer": "adam",
-            "loss": "mse",
-            "shuffle": False,
-            "grad_clip": 1.0,
-            # AMP enabled: the fitness wrapper coerces NaN/+inf to +inf so a
-            # numerically unlucky particle drops out instead of poisoning the
-            # swarm. On CPU AMP is silently disabled inside the trainer.
-            "use_amp": True,
-            "accumulation_steps": 1,
-            "early_stopping": {
-                "enabled": True,
-                "monitor": "val_loss",
-                "patience": 10,
-                "restore_best_weights": True,
-            },
-        }
-
-        model_wrapper = LSTMModel(seed=seed)
-        model_wrapper.build_model(architecture_config)
-
-        trainer = LSTMTrainer(
-            lstm_model=model_wrapper, config=trainer_config, seed=seed
-        )
-        trained_wrapper, _ = trainer.train(X_train, y_train, X_val, y_val)
-
-        y_pred = trained_wrapper.predict(X_val)
-
-        # TRD1 §8.1 L-6: Verify test set never accessed. Hash the
-        # canonical contiguous layout so the digest matches the value
-        # captured outside the model_builder regardless of NumPy view
-        # state.
-        current_hash = hashlib.sha256(
-            np.ascontiguousarray(X_test).tobytes()
-        ).hexdigest()
-        assert (
-            current_hash == _test_data_hash
-        ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
-
-        return y_pred, trained_wrapper.model
+    # Build a picklable model_builder by binding the parent-scope state
+    # (seed, test hash, X_test) onto the module-level _pso_model_builder.
+    # functools.partial of a top-level function IS picklable, whereas a
+    # nested closure is NOT — using a closure here silently demoted PSO
+    # to sequential evaluation regardless of pso.n_workers.
+    model_builder = partial(
+        _pso_model_builder,
+        seed=seed,
+        test_hash=_test_data_hash,
+        X_test=X_test,
+    )
 
     # Initialize spec-compliant fitness function (MSE + MSW)
     # PSO core will call this with (y_true, y_pred, model)

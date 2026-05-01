@@ -13,11 +13,38 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
 import numpy as np
+from tqdm.auto import tqdm
 
 from .particle import LB, UB, Particle
 from .fitness import CompositeFitness
 
 logger = logging.getLogger(__name__)
+
+
+def _format_postfix(
+    gbest_fitness: float, best_params: Dict[str, Any], diversity: float
+) -> Dict[str, str]:
+    """Compact tqdm postfix dict showing the swarm's current best.
+
+    Keeps the bar narrow enough to fit in a typical terminal while
+    surfacing the architecturally important hyperparameters.
+    """
+    if not np.isfinite(gbest_fitness):
+        gbest_str = "+inf"
+    elif abs(gbest_fitness) < 1e-2:
+        gbest_str = f"{gbest_fitness:.4e}"
+    else:
+        gbest_str = f"{gbest_fitness:.4f}"
+
+    return {
+        "gbest": gbest_str,
+        "u1": f"{int(best_params.get('units_1', 0))}",
+        "u2": f"{int(best_params.get('units_2', 0))}",
+        "drop": f"{float(best_params.get('dropout', 0.0)):.2f}",
+        "lr": f"{float(best_params.get('learning_rate', 0.0)):.1e}",
+        "bs": f"{int(best_params.get('batch_size', 0))}",
+        "div": f"{diversity:.2f}",
+    }
 
 
 class StandardPSO:
@@ -103,27 +130,55 @@ class StandardPSO:
         self._initialise_swarm()
         self._evaluate_all(X_train, y_train, X_val, y_val, iteration=0)
 
-        for t in range(1, self.T + 1):
-            w = self._inertia(t)
-            for particle in self._swarm:
-                self._update_particle(particle, w, t)
-            self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
+        # Iteration progress bar (parent process only). Per-particle LSTM
+        # training inside fitness is silenced via the trainer's ``quiet``
+        # flag, so the only console output here is this bar plus warnings.
+        pbar = tqdm(
+            range(1, self.T + 1),
+            desc=f"{self.__class__.__name__}",
+            total=self.T,
+            unit="iter",
+            dynamic_ncols=True,
+            leave=True,
+        )
 
-            self.fitness_history.append(self._gbest_fitness)
-            self.diversity_history.append(self._swarm_diversity())
+        # Show initial gbest from iteration-0 evaluation
+        pbar.set_postfix(_format_postfix(
+            self._gbest_fitness, self._gbest_params(), self._swarm_diversity()
+        ))
 
-            logger.info(
-                "[%s] iter %3d/%d | gbest=%.6f | diversity=%.4f | params=%s",
-                self.__class__.__name__,
-                t,
-                self.T,
-                self._gbest_fitness,
-                self.diversity_history[-1],
-                self._gbest_params(),
-            )
+        try:
+            for t in pbar:
+                w = self._inertia(t)
+                for particle in self._swarm:
+                    self._update_particle(particle, w, t)
+                self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
 
-            if self.checkpoint_dir and t % 10 == 0:
-                self._save_checkpoint(t)
+                self.fitness_history.append(self._gbest_fitness)
+                self.diversity_history.append(self._swarm_diversity())
+
+                # File log retains the full audit trail.
+                logger.info(
+                    "[%s] iter %3d/%d | gbest=%.6f | diversity=%.4f | params=%s",
+                    self.__class__.__name__,
+                    t,
+                    self.T,
+                    self._gbest_fitness,
+                    self.diversity_history[-1],
+                    self._gbest_params(),
+                )
+
+                # Console UI: live best-result readout.
+                pbar.set_postfix(_format_postfix(
+                    self._gbest_fitness,
+                    self._gbest_params(),
+                    self.diversity_history[-1],
+                ))
+
+                if self.checkpoint_dir and t % 10 == 0:
+                    self._save_checkpoint(t)
+        finally:
+            pbar.close()
 
         from .particle import decode
 
@@ -264,11 +319,15 @@ class StandardPSO:
                 torch.cuda.empty_cache()
 
     def _evaluate_parallel(self, X_train, y_train, X_val, y_val) -> None:
-        """Evaluate particles in parallel using ProcessPoolExecutor."""
+        """Evaluate particles in parallel using ProcessPoolExecutor.
+
+        ``model_builder`` and ``fitness_fn`` must be picklable. A common
+        regression is a nested-closure ``model_builder`` which fails
+        ``pickle`` — historically this fell back to sequential silently;
+        the fallback now surfaces at WARNING level so users can spot it.
+        """
         from concurrent.futures import ProcessPoolExecutor
 
-        # Note: model_builder must be picklable for multiprocessing.
-        # Fall back to sequential if it is not.
         try:
             with ProcessPoolExecutor(max_workers=self.n_workers) as ex:
                 futures = [
@@ -281,8 +340,13 @@ class StandardPSO:
                     fitness = future.result()
                     self._update_bests(particle, fitness)
         except Exception as e:
-            logger.info(
-                "Parallel evaluation failed (%s); falling back to sequential.", e
+            logger.warning(
+                "Parallel evaluation failed (%s: %s); falling back to "
+                "sequential. Common cause: model_builder is a nested closure "
+                "and is not picklable. Use functools.partial of a "
+                "module-level function instead.",
+                type(e).__name__,
+                e,
             )
             for particle in self._swarm:
                 fitness = self._evaluate_particle(

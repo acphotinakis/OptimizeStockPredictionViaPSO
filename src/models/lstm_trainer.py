@@ -106,8 +106,11 @@ class LSTMTrainer:
         self.lstm_model = lstm_model
 
         set_seeds(seed)
-        logger.info(f"LSTMTrainer initialized on device: {self.device}")
-        logger.info(f"Config: {config}")
+        # Quiet mode demotes init-time chatter to debug so PSO's 1000+
+        # trainer instantiations don't flood the log.
+        log_level = logging.DEBUG if config.get("quiet", False) else logging.INFO
+        logger.log(log_level, f"LSTMTrainer initialized on device: {self.device}")
+        logger.log(log_level, f"Config: {config}")
 
     def _resolve_optimizer(self, model: nn.Module, lr: float) -> torch.optim.Optimizer:
         """Build optimizer from config string."""
@@ -195,6 +198,11 @@ class LSTMTrainer:
         grad_clip = float(self.config.get("grad_clip", 0.0))
         use_amp = bool(self.config.get("use_amp", False)) and torch.cuda.is_available()
         accumulation_steps = max(1, int(self.config.get("accumulation_steps", 1)))
+        # ``quiet`` suppresses per-epoch tqdm progress bars and the per-epoch
+        # statistical-metrics logging. Enable when the trainer is being driven
+        # by an outer optimisation loop (PSO) so the parent's progress bar
+        # stays the only console UI.
+        quiet = bool(self.config.get("quiet", False))
 
         es_cfg = self._resolve_early_stopping()
         patience = es_cfg["patience"]
@@ -265,13 +273,16 @@ class LSTMTrainer:
             # TRAIN
             # -------------------------------------------------
             model.train()
-            train_bar = tqdm(
-                train_loader,
-                desc=f"Epoch {epoch+1}/{epochs} [Train]",
-                leave=False,
-            )
+            if quiet:
+                train_iter = train_loader
+            else:
+                train_iter = tqdm(
+                    train_loader,
+                    desc=f"Epoch {epoch+1}/{epochs} [Train]",
+                    leave=False,
+                )
 
-            for batch_idx, (batch_X, batch_y) in enumerate(train_bar):
+            for batch_idx, (batch_X, batch_y) in enumerate(train_iter):
 
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
@@ -332,18 +343,21 @@ class LSTMTrainer:
             # VALIDATION
             # -------------------------------------------------
             model.eval()
-            val_bar = tqdm(
-                val_loader,
-                desc=f"Epoch {epoch+1}/{epochs} [Val]",
-                leave=False,
-            )
+            if quiet:
+                val_iter = val_loader
+            else:
+                val_iter = tqdm(
+                    val_loader,
+                    desc=f"Epoch {epoch+1}/{epochs} [Val]",
+                    leave=False,
+                )
 
             val_losses = []
             val_preds_all = []
             val_true_all = []
 
             with torch.no_grad():
-                for batch_X, batch_y in val_bar:
+                for batch_X, batch_y in val_iter:
 
                     batch_X = batch_X.to(self.device)
                     batch_y = batch_y.to(self.device)
@@ -368,17 +382,31 @@ class LSTMTrainer:
             # -------------------------------------------------
             # METRICS (SINGLE SOURCE OF TRUTH)
             # -------------------------------------------------
-            train_metrics = compute_and_log_all_statistical_metrics(
-                y_true=train_true_all,
-                y_pred=train_preds_all,
-                label=f"Train Epoch {epoch+1}",
-            )
+            # In quiet mode (PSO inner loop) suppress per-epoch metric
+            # logging — the helper logs to the metrics module logger
+            # internally. Temporarily silencing that logger is the
+            # cleanest way to keep the computation but drop the noise.
+            if quiet:
+                metrics_logger = logging.getLogger(
+                    "src.evaluation.metrics"
+                )
+                _saved_metrics_level = metrics_logger.level
+                metrics_logger.setLevel(logging.WARNING)
+            try:
+                train_metrics = compute_and_log_all_statistical_metrics(
+                    y_true=train_true_all,
+                    y_pred=train_preds_all,
+                    label=f"Train Epoch {epoch+1}",
+                )
 
-            val_metrics = compute_and_log_all_statistical_metrics(
-                y_true=val_true_all,
-                y_pred=val_preds_all,
-                label=f"Val Epoch {epoch+1}",
-            )
+                val_metrics = compute_and_log_all_statistical_metrics(
+                    y_true=val_true_all,
+                    y_pred=val_preds_all,
+                    label=f"Val Epoch {epoch+1}",
+                )
+            finally:
+                if quiet:
+                    metrics_logger.setLevel(_saved_metrics_level)
 
             # -------------------------------------------------
             # ADDITIONAL FINANCIAL SIGNAL
