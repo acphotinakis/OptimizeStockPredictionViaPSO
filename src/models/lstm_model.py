@@ -203,7 +203,11 @@ class LSTMModel:
         self.feature_names: Optional[List[str]] = None
 
         set_seeds(seed)
-        logger.info(f"LSTMModel initialized on device: {self.device}")
+        # Demoted to DEBUG: PSO instantiates LSTMModel once per particle and
+        # the INFO chatter (1000+ lines per swarm) drowns out the parent's
+        # tqdm progress bar. Standalone callers can enable DEBUG logging if
+        # they want this back on the console.
+        logger.debug(f"LSTMModel initialized on device: {self.device}")
 
     def build_model(self, config: Dict[str, Any]) -> Tuple[LSTMNetwork, "LSTMModel"]:
         """
@@ -254,7 +258,7 @@ class LSTMModel:
                 f"dropout_rate must be in [0.0, 0.5], got {self.dropout_rate}"
             )
 
-        logger.info(
+        logger.debug(
             f"Building LSTM model: LSTM_1={self.units_1}, LSTM_2={self.units_2}, "
             f"dropout={self.dropout_rate}, input_size={self.input_size}, "
             f"output_units={self.output_units}, activation={self.activation}, "
@@ -277,7 +281,7 @@ class LSTMModel:
         self.trainable_params = sum(
             p.numel() for p in self.model.parameters() if p.requires_grad
         )
-        logger.info(
+        logger.debug(
             f"Model built: {self.total_params:,} total params, {self.trainable_params:,} trainable"
         )
 

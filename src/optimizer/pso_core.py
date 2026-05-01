@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
@@ -128,54 +129,68 @@ class StandardPSO:
         """
         self.fitness_fn.reset()
         self._initialise_swarm()
-        self._evaluate_all(X_train, y_train, X_val, y_val, iteration=0)
 
-        # Iteration progress bar (parent process only). Per-particle LSTM
-        # training inside fitness is silenced via the trainer's ``quiet``
-        # flag, so the only console output here is this bar plus warnings.
+        # Single startup banner (replaces the per-iteration "Evaluating
+        # swarms..." line that fired T+1 times and corrupted the tqdm bar).
+        logger.info(
+            "%s starting: n_particles=%d n_iterations=%d n_workers=%d",
+            self.__class__.__name__,
+            self.M,
+            self.T,
+            self.n_workers,
+        )
+
+        # Progress bar covers iteration 0 (initial random-position
+        # evaluation, ~M particles trained from scratch) AND iterations
+        # 1..T (velocity update + re-evaluation each step). Without
+        # iteration 0 in the bar, the first 5-15 minutes show nothing.
         pbar = tqdm(
-            range(1, self.T + 1),
+            range(0, self.T + 1),
             desc=f"{self.__class__.__name__}",
-            total=self.T,
+            total=self.T + 1,
             unit="iter",
             dynamic_ncols=True,
             leave=True,
+            file=sys.stderr,
         )
-
-        # Show initial gbest from iteration-0 evaluation
-        pbar.set_postfix(_format_postfix(
-            self._gbest_fitness, self._gbest_params(), self._swarm_diversity()
-        ))
 
         try:
             for t in pbar:
-                w = self._inertia(t)
-                for particle in self._swarm:
-                    self._update_particle(particle, w, t)
-                self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
+                if t == 0:
+                    # Initial random-position evaluation
+                    self._evaluate_all(X_train, y_train, X_val, y_val, iteration=0)
+                else:
+                    w = self._inertia(t)
+                    for particle in self._swarm:
+                        self._update_particle(particle, w, t)
+                    self._evaluate_all(
+                        X_train, y_train, X_val, y_val, iteration=t
+                    )
+                    self.fitness_history.append(self._gbest_fitness)
+                    self.diversity_history.append(self._swarm_diversity())
 
-                self.fitness_history.append(self._gbest_fitness)
-                self.diversity_history.append(self._swarm_diversity())
-
-                # File log retains the full audit trail.
-                logger.info(
+                # Audit trail at DEBUG level so it ends up in the log file
+                # (when setup_logger is at DEBUG) but doesn't corrupt the
+                # tqdm bar on the console at INFO. The full per-iteration
+                # history is also persisted to ``pso_phase1_results.yaml``
+                # at the end of phase1_pso_search.
+                logger.debug(
                     "[%s] iter %3d/%d | gbest=%.6f | diversity=%.4f | params=%s",
                     self.__class__.__name__,
                     t,
                     self.T,
                     self._gbest_fitness,
-                    self.diversity_history[-1],
+                    self._swarm_diversity(),
                     self._gbest_params(),
                 )
 
-                # Console UI: live best-result readout.
                 pbar.set_postfix(_format_postfix(
                     self._gbest_fitness,
                     self._gbest_params(),
-                    self.diversity_history[-1],
+                    self._swarm_diversity(),
                 ))
 
-                if self.checkpoint_dir and t % 10 == 0:
+                if self.checkpoint_dir and t > 0 and t % 10 == 0:
                     self._save_checkpoint(t)
         finally:
             pbar.close()
@@ -245,9 +260,15 @@ class StandardPSO:
         y_val: np.ndarray,
         iteration: int,
     ) -> None:
-        """Evaluate every particle and update pbest / gbest."""
-        logger.info(f"Evaludating swarms...")
-        logger.info(f"number of works = {self.n_workers}")
+        """Evaluate every particle and update pbest / gbest.
+
+        Per-particle / per-iteration chatter is demoted to DEBUG so the
+        parent's tqdm progress bar stays the only console UI. The PSO
+        startup banner and the per-iteration audit-trail line in
+        ``run()`` remain at INFO so the log file still tells the full
+        story.
+        """
+        logger.debug("Evaluating swarm at iteration %d", iteration)
         if self.n_workers > 1:
             self._evaluate_parallel(X_train, y_train, X_val, y_val)
         else:
@@ -255,7 +276,6 @@ class StandardPSO:
                 fitness = self._evaluate_particle(
                     particle, X_train, y_train, X_val, y_val
                 )
-                logger.info(f"Updating weights")
                 self._update_bests(particle, fitness)
 
     def _evaluate_particle(
