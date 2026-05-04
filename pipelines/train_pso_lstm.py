@@ -418,7 +418,7 @@ def phase1_pso_search(
     logger.info("RUNNING IPSO OPTIMIZATION")
     logger.info("=" * 80)
     logger.info(f"Search space: 6D (units_1, units_2, dropout, lr, batch_size, epochs)")
-    logger.info(f"Fitness: F(x) = 0.9 × MSE + 0.1 × MSW")
+    logger.info(f"Fitness: F(x) = 0.9 * MSE + 0.1 * 0.01 * MSW (msw_scale = 0.01)")
     logger.info("=" * 80)
 
     best_params, best_fitness = optimizer.run(
@@ -459,7 +459,7 @@ def phase1_pso_search(
     logger.info("Optimal hyperparameters found:")
     for key, value in best_params.items():
         logger.info(f"  {key}: {value}")
-    logger.info(f"Best validation MSE: {best_fitness:.6f}")
+    logger.info(f"Best composite fitness (0.9*MSE + 0.001*MSW): {best_fitness:.6f}")
     logger.info("=" * 80)
 
     return best_params
@@ -586,7 +586,7 @@ def phase2_final_training(
     logger.info("PHASE 2 COMPLETE")
     logger.info("=" * 80)
     logger.info("This model will not be retrained (TRD compliance).")
-    logger.info("Walk-forward evaluation will use this trained model.")
+    logger.info("Held-out 20% test slice is unlocked for the backtester.")
     logger.info("=" * 80)
 
     model_path = output_dir / "pso_lstm_model.pt"
@@ -639,7 +639,7 @@ def phase2_final_training(
         "retraining_allowed": False,
         # Reproducibility (TRD1 §9.1)
         "random_seed": seed,
-        "tensorflow_seed": seed,
+        "torch_seed": seed,
         "numpy_seed": seed,
         # TRD compliance flags
         "trd_compliant": True,
@@ -769,7 +769,7 @@ def main():
         logger.info(" Model saved to disk")
         logger.info(" Metadata versioned (TRD1 §9.2)")
         logger.info(" Test set isolated (TRD1 §8.1 L-6)")
-        logger.info(" Ready for walk-forward evaluation")
+        logger.info(" Ready for backtest evaluation on held-out test slice")
         logger.info("=" * 80)
 
         sys.exit(0)

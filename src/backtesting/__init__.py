@@ -1,15 +1,12 @@
-from ..backtesting.backtest import CanonicalBacktest
-from ..backtesting.backtest_results import (
-    BacktestResults,
-    save_backtest_results,
-)
+"""Backtesting engine and result containers."""
 
+from .backtest_results import BacktestResults, save_backtest_results
+from .backtester import Backtester, BacktestResult, SessionEvent
 
 __all__ = [
-    "CanonicalBacktest",
-    # Results
+    "Backtester",
+    "BacktestResult",
+    "SessionEvent",
     "BacktestResults",
     "save_backtest_results",
 ]
-
-__version__ = "PRODUCTION_2.1"

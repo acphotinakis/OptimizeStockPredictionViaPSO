@@ -2,14 +2,10 @@
 import argparse
 import logging
 import sys
-from itertools import combinations
 from pathlib import Path
-from typing import cast
 
-import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
-from prettytable import PrettyTable
 
 # Resolve project root (adjust depth if needed)
 CURRENT_FILE = Path(__file__).resolve()
@@ -24,7 +20,7 @@ from src.data.debug_logs import (
     log_all_cleaning_reports,
     log_cleaning_report,
 )
-from src.data.utils import _load_tickers, _parse_timeframe, _save_parquet
+from src.data.utils import _load_tickers, _save_parquet
 from src.utils.data_storage import _load_parquet
 from src.data.cleaner import DataCleaner
 from src.data.alpaca_ingestor import AlpacaIngestor
@@ -32,69 +28,6 @@ from src.utils.logger import LogFileMode, setup_logger
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
-
-
-import matplotlib
-
-matplotlib.use("Agg")  # important for multiprocessing safety
-import matplotlib.pyplot as plt
-
-
-def _plot_ohlc(ax, df, title):
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
-    ax.grid(True, alpha=0.3, linewidth=0.7)
-    for spine in ax.spines.values():
-        spine.set_alpha(0.2)
-
-    x = np.arange(len(df))
-    width = 0.35
-
-    # vertical line: low to high
-    ax.vlines(x, df["low"], df["high"], color="black", linewidth=0.8, alpha=0.7)
-    # open tick (left)
-    ax.hlines(df["open"], x - width, x, color="green", linewidth=1.2, alpha=0.8)
-    # close tick (right)
-    ax.hlines(df["close"], x, x + width, color="red", linewidth=1.2, alpha=0.8)
-
-
-def plot_pipeline_stage(raw_df, aligned_df, cleaned_df, output_dir, ticker, tf):
-    plt.style.use("seaborn-v0_8-darkgrid")
-
-    fig, axes = plt.subplots(
-        3, 2, figsize=(18, 12), sharex=True, gridspec_kw={"width_ratios": [4, 1]}
-    )
-
-    datasets = [
-        (raw_df, "RAW"),
-        (aligned_df, "ALIGNED"),
-        (cleaned_df, "CLEANED"),
-    ]
-
-    for i, (df, name) in enumerate(datasets):
-        price_ax = axes[i, 0]
-        vol_ax = axes[i, 1]
-
-        _plot_ohlc(price_ax, df, name)
-
-        # Volume
-        vol_ax.bar(range(len(df)), df["volume"], color="#888888", alpha=0.6)
-        vol_ax.set_title("Volume", fontsize=10)
-        vol_ax.grid(True, alpha=0.2)
-        for spine in vol_ax.spines.values():
-            spine.set_alpha(0.2)
-
-        vol_ax.set_yticks([])
-
-    fig.suptitle(f"{ticker} · {tf}", fontsize=16, fontweight="bold", y=0.98)
-
-    for ax in axes[-1, :]:
-        ax.set_xlabel("Time Index", fontsize=11)
-
-    plt.tight_layout(rect=(0, 0, 1, 0.96))
-
-    out_path = output_dir / f"{ticker}_{tf}_pipeline.png"
-    plt.savefig(out_path, dpi=200, bbox_inches="tight")
-    plt.close()
 
 
 def ingest_all(
@@ -233,8 +166,6 @@ def main() -> None:
     start_date = cfg.data.start_date
     end_date = cfg.data.end_date
     timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
-    # timeframes = ["1Day"]
-    # timeframes = ["1Min"]
 
     ingestor = AlpacaIngestor()
 
@@ -300,7 +231,6 @@ def main() -> None:
 
     all_cleaning_rows = []
 
-    # tickers = ["AAPL", "SPY"]
     for ticker in tickers:
         logger.info("===== PIPELINE START: %s =====", ticker)
 
@@ -310,11 +240,7 @@ def main() -> None:
             # --------------------------------------------------------
             # LOAD RAW
             # --------------------------------------------------------
-            plot_dir_ = plots_dir / "plots"
-            plot_dir_.mkdir(parents=True, exist_ok=True)
-            # raw_path = raw_output / tf / f"{ticker}.parquet"
             raw_path = get_path(raw_dir, tf, ticker)
-            # raw_path = raw_output / f"{ticker}.parquet"
             if not raw_path.exists():
                 logger.warning("Missing raw data: %s", raw_path)
                 continue
@@ -377,11 +303,6 @@ def main() -> None:
             _save_parquet(aligned_df, get_path(aligned_dir, tf, ticker))
             _save_parquet(cleaned_df, get_path(cleaned_dir, tf, ticker))
             _save_parquet(cleaned_df, get_path(processed_dir, tf, ticker))
-
-            # if tf != "1Min" and tf != "5Min":
-            #     plot_pipeline_stage(
-            #         raw_df, aligned_df, cleaned_df, plot_dir_, ticker, tf
-            #     )
 
     # Cross-ticker analysis runs ONCE after all tickers/timeframes are processed.
     log_all_cleaning_reports(all_cleaning_rows)

@@ -11,8 +11,6 @@ import pandas as pd
 import yaml
 
 
-# Add project root to path
-# Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -48,10 +46,12 @@ def compute_all_metrics(
     Compute all statistical and trading metrics.
 
     Args:
-        backtest_df: DataFrame from backtest engine
-        predictions: Model predictions
-        actual_returns: True returns
-        config: Configuration object
+        backtest_result: BacktestResult produced by Backtester.run().
+        predictions: Model predictions on the test slice.
+        actual_returns: True returns aligned with predictions.
+        config: Configuration object (used for position_fraction scaling
+            of the benchmark series so the IR is computed on a comparable
+            magnitude).
 
     Returns:
         Tuple of (statistical_metrics, trading_metrics)
@@ -149,8 +149,6 @@ def load_backtest_data(
     processed_path = processed_data_path / timeframe / f"{ticker}.parquet"
     df = pd.read_parquet(processed_path).sort_index()
 
-    # force SAME format as test_index
-    # df.index = df.index.tz_convert("UTC").tz_localize(None)
     if df.index.tz is not None:
         df.index = df.index.tz_convert("UTC").tz_localize(None)
 
@@ -184,12 +182,9 @@ def load_backtest_data(
     idx = df_test.index
 
     if idx.tz is None:
-        idx = idx.tz_localize("UTC")  # OR correct source timezone if known
+        idx = idx.tz_localize("UTC")
 
-    # timestamps = idx.tz_convert("America/New_York").to_numpy()
     timestamps = idx.tz_convert("America/New_York")
-
-    # sys.exit(0)
 
     return {
         "X_test": X_test,
@@ -396,20 +391,7 @@ def backtest_baseline_lstm(
 
     logger.info(f" Generated {len(y_pred)} predictions")
 
-    # Initialize canonical backtest engine
-    bt_config = config.backtesting
-
-    # # Run backtest
-    # backtest_df = backtest_engine.run_backtest(y_pred, y_test, dates)
-    bt = Backtester(
-        initial_capital=bt_config.initial_capital,
-        position_fraction=bt_config.position_fraction,
-        transaction_cost=bt_config.transaction_cost,
-        slippage=bt_config.slippage,
-        stop_loss=bt_config.stop_loss,
-        daily_loss_limit=bt_config.daily_loss_limit,
-    )
-
+    bt = _make_backtester(config)
     backtest_result: BacktestResult = bt.run(
         y_pred=y_pred,
         opens=opens,

@@ -29,15 +29,15 @@ MODEL_TYPE = "xgboost"
 
 
 def load_feature_data(data_path: Path) -> dict:
-    """
-    Load preprocessed features from canonical feature pipeline with full diagnostics.
+    """Load preprocessed train/val/test arrays produced by stage 2.
 
     Args:
-        data_path: Directory containing X_train.npy, y_train.npy, etc.
-        config: Optional config dict for dataset/version metadata.
+        data_path: Directory containing ``X_{train,val,test}.npy`` and
+            ``y_{train,val,test}.npy``.
 
     Returns:
-        Dictionary with train/val/test splits.
+        Dict with keys ``X_train``, ``y_train``, ``X_val``, ``y_val``,
+        ``X_test``, ``y_test``.
     """
     logger.info(f"Resolving dataset path: {data_path.resolve()}")
 
@@ -186,28 +186,25 @@ def train_xgboost(
     config: Config,
     output_dir: Path,
 ) -> None:
-    """
-    Train XGBoost with fixed hyperparameters.
+    """Train the XGBoost lag-feature baseline.
 
-    FINAL_PLAN.md Section 4.3: XGBoost Training Phase
-
-    CRITICAL: This function executes EXACTLY ONCE. The model is then FROZEN.
+    Reshapes the (N, F) tabular arrays into ``[X[t], X[t-1], ..., X[t-L]]``
+    lag features inside this function, fits an ``XGBRegressor`` with early
+    stopping on val, and persists model + history + feature importance +
+    metadata to ``output_dir``.
 
     Args:
-        X_train: Training features (N, F) tabular
-        y_train: Training targets (N,)
-        X_val: Validation features (M, F) tabular
-        y_val: Validation targets (M,)
-        config: Configuration dict
-        output_dir: Directory to save model
-
-    Returns:
-        Trained and FROZEN XGBoostModel
+        X_train: Training features (N, F) tabular.
+        y_train: Training targets (N,).
+        X_val: Validation features (M, F) tabular.
+        y_val: Validation targets (M,).
+        config: Project ``Config`` (uses ``config.xgboost``).
+        output_dir: Directory to write model artifacts.
     """
     logger.info("=" * 80)
-    logger.info("XGBOOST TRAINING (FINAL_PLAN.md Section 4.3)")
+    logger.info("XGBOOST TRAINING")
     logger.info("=" * 80)
-    logger.info("CRITICAL: Model will be trained EXACTLY ONCE and then FROZEN")
+    logger.info("Model will be trained EXACTLY ONCE and then FROZEN")
     logger.info("=" * 80)
 
     # Extract config
@@ -262,20 +259,18 @@ def train_xgboost(
         early_stopping_rounds=early_stopping_rounds,
     )
 
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     feature_names = [f"f{i}" for i in range(X_train_lag.shape[1])]
 
     feature_names_path = output_dir / "feature_names.json"
     with open(feature_names_path, "w") as f:
         json.dump(feature_names, f, indent=4)
 
-    logger.info(feature_names)
-
     model, history = trainer.train(
         X_train_lag, y_train_lag, X_val_lag, y_val_lag, feature_names
     )
 
-    # Save model
-    output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "xgboost_model.json"
     model.save(str(model_path))
     logger.info(f"Model saved to {model_path}")
@@ -322,7 +317,6 @@ def train_xgboost(
     metadata = {
         "model_type": MODEL_TYPE,
         "protocol": "CANONICAL_2.0",
-        "source": "FINAL_PLAN.md Section 4.3",
         "training_samples": int(len(X_train_lag)),
         "validation_samples": int(len(X_val_lag)),
         "features_original": int(X_train.shape[1]),

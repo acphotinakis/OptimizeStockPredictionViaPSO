@@ -3,14 +3,13 @@ import gc
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
 import joblib
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
-import matplotlib.pyplot as plt
 
 # Project root setup
 CURRENT_FILE = Path(__file__).resolve()
@@ -363,129 +362,6 @@ def _feature_selection(
     return selector, selected_names, X_train_sel, X_val_sel, X_test_sel
 
 
-import seaborn as sns
-
-
-def save_feature_target_correlations(
-    ticker: str,
-    features: pd.DataFrame,
-    target: pd.Series,
-    output_dir: Path,
-    split_name: str = "none",
-) -> None:
-    out_dir = Path(output_dir) / ticker
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    df = features.copy()
-    df["target"] = target.values
-
-    corr = df.corr(numeric_only=True)[["target"]].sort_values(
-        by="target", ascending=False
-    )
-
-    fig, ax = plt.subplots(figsize=(6, 10))
-    sns.heatmap(corr, annot=False, cmap="coolwarm", ax=ax)
-
-    ax.set_title(f"{ticker} | Feature-Target Correlation")
-
-    fig.tight_layout()
-
-    filename = (
-        "feature_target_correlations.png"
-        if split_name == "none"
-        else f"{split_name}_feature_target_correlations.png"
-    )
-    fig.savefig(out_dir / filename, dpi=150)
-    plt.close(fig)
-
-
-def plot_features_vs_target(
-    ticker: str,
-    features: pd.DataFrame,
-    target: pd.Series,
-    output_dir: Path,
-    chunk_size: int = 10,
-    split_name: str = "none",
-) -> None:
-
-    out_dir = Path(output_dir) / ticker
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    df = features.copy()
-    df["target"] = target.values
-
-    feature_cols = [c for c in df.columns if c != "target"]
-
-    # ----------------------------
-    # normalize all features (z-score)
-    # ----------------------------
-    df_norm = df.copy()
-
-    for col in feature_cols:
-        mean = df_norm[col].mean()
-        std = df_norm[col].std()
-        df_norm[col] = (df_norm[col] - mean) / (std + 1e-10)
-
-    # normalize target
-    t_mean = df_norm["target"].mean()
-    t_std = df_norm["target"].std()
-    df_norm["target"] = (df_norm["target"] - t_mean) / (t_std + 1e-10)
-
-    # ----------------------------
-    # chunk features
-    # ----------------------------
-    def chunk_list(lst, size):
-        for i in range(0, len(lst), size):
-            yield lst[i : i + size]
-
-    chunks = list(chunk_list(feature_cols, chunk_size))
-
-    for i, chunk in enumerate(chunks):
-
-        fig, ax = plt.subplots(figsize=(16, 8))
-
-        # plot chunked features
-        for col in chunk:
-            ax.plot(
-                df_norm.index,
-                df_norm[col],
-                linewidth=0.8,
-                alpha=0.4,
-                label=col,
-            )
-
-        # always plot target
-        ax.plot(
-            df_norm.index,
-            df_norm["target"],
-            linewidth=2.0,
-            color="black",
-            label="target",
-            zorder=10,
-        )
-
-        ax.set_title(
-            f"{ticker} | Features {i*chunk_size}-{i*chunk_size+len(chunk)-1} vs Target"
-        )
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Z-score normalized value")
-        ax.grid(True, alpha=0.3)
-
-        ax.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1),
-            fontsize=8,
-        )
-
-        fig.tight_layout()
-
-        save_path = out_dir / f"{ticker}_features_chunk_{i}.png"
-        if split_name != "none":
-            save_path = out_dir / f"{ticker}_{split_name}_features_chunk_{i}.png"
-        fig.savefig(save_path, dpi=200, bbox_inches="tight")
-        plt.close(fig)
-
-
 def process_ticker_split_first(
     ticker: str,
     df: pd.DataFrame,
@@ -607,10 +483,7 @@ def process_ticker_split_first(
     # directories
     # ----------------------------------------------------------------------------
     selected_dir = splits_dir / "selected"
-    diagnostics_dir = selected_dir / "diagnostics"
-
     selected_dir.mkdir(parents=True, exist_ok=True)
-    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     # ----------------------------------------------------------------------------
     # save metadata
@@ -641,39 +514,6 @@ def process_ticker_split_first(
     X_val_sel_df.to_parquet(selected_dir / f"{ticker}_val_features.parquet")
     X_test_sel_df.to_parquet(selected_dir / f"{ticker}_test_features.parquet")
 
-    # ----------------------------------------------------------------------------
-    # diagnostics plots (CORRECTED)
-    # ----------------------------------------------------------------------------
-    # plot_features_vs_target(
-    #     ticker=ticker,
-    #     features=X_train_sel_df,
-    #     target=y_train_series,
-    #     output_dir=diagnostics_dir,
-    #     split_name="train",
-    # )
-
-    # save_feature_target_correlations(
-    #     ticker=ticker,
-    #     features=X_train_sel_df,
-    #     target=y_train_series,
-    #     output_dir=diagnostics_dir,
-    #     split_name="train",
-    # )
-    # plot_features_vs_target(
-    #     ticker=ticker,
-    #     features=X_train_sel_df,
-    #     target=y_train_series,
-    #     output_dir=diagnostics_dir,
-    #     split_name="train",
-    # )
-
-    # save_feature_target_correlations(
-    #     ticker=ticker,
-    #     features=X_train_sel_df,
-    #     target=y_train_series,
-    #     output_dir=diagnostics_dir,
-    #     split_name="train",
-    # )
     # ============================================================================
     # SAVE NUMPY ARRAYS (MODEL INPUT)
     # ============================================================================
@@ -713,7 +553,7 @@ def process_ticker_split_first(
     frozen_state = {
         "pipeline_version": "2.0.0_split_first",
         "ticker": ticker,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "feature_names_raw": feature_names,
         "feature_names_selected": selected_names,
         "selector": {
@@ -764,71 +604,6 @@ def process_ticker_split_first(
     del X_train_sel, X_val_sel, X_test_sel
     del X_train_scaled, X_val_scaled, X_test_scaled
     gc.collect()
-
-
-def plot_ohlcv_from_parquet(
-    df: pd.DataFrame,
-    output_dir: Path,
-    title: str = "OHLCV Plot",
-    volume: bool = True,
-) -> None:
-
-    required = {"open", "high", "low", "close", "volume"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing columns: {missing}")
-
-    # IMPORTANT: ensure sorted but DO NOT reindex
-    df = df.sort_index()
-
-    # ensure we DO NOT accidentally connect broken sequences
-    df = df.copy()
-
-    fig, axes = plt.subplots(
-        2 if volume else 1,
-        1,
-        figsize=(16, 8),
-        sharex=True,
-        gridspec_kw={"height_ratios": [3, 1] if volume else [1]},
-    )
-
-    if not volume:
-        axes = [axes]
-
-    ax = axes[0]
-
-    # ---------------------------------------------------------
-    # CRITICAL FIX: matplotlib breaks lines ONLY on NaN
-    # so we force gaps by ensuring missing timestamps remain NaN
-    # and we DO NOT interpolate or fill anywhere
-    # ---------------------------------------------------------
-
-    ax.plot(df.index, df["close"], label="close", linewidth=1.2)
-    ax.plot(df.index, df["open"], label="open", linewidth=0.8, alpha=0.7)
-    ax.plot(df.index, df["high"], label="high", linewidth=0.6, alpha=0.5)
-    ax.plot(df.index, df["low"], label="low", linewidth=0.6, alpha=0.5)
-
-    ax.set_title(title)
-    ax.set_ylabel("Price")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left")
-
-    # ---------------------------------------------------------
-    # VOLUME
-    # ---------------------------------------------------------
-    if volume:
-        axv = axes[1]
-        axv.bar(df.index, df["volume"], width=1.0, alpha=0.5)
-        axv.set_ylabel("Volume")
-        axv.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-
-    output_path = output_dir / "ohlcv_plot.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
 
 
 def _process_one_ticker(

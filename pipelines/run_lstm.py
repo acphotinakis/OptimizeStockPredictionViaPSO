@@ -27,58 +27,49 @@ MODEL_TYPE = "lstm_baseline"
 
 
 def load_feature_data(data_path: Path) -> dict:
-    """
-    Load preprocessed features from canonical feature pipeline with full diagnostics.
+    """Load preprocessed train/val/test arrays produced by stage 2.
 
     Args:
-        data_path: Directory containing X_train.npy, y_train.npy, etc.
-        config: Optional config dict for dataset/version metadata.
+        data_path: Directory containing ``X_{train,val,test}.npy`` and
+            ``y_{train,val,test}.npy``.
 
     Returns:
-        Dictionary with train/val/test splits.
+        Dict with keys ``X_train``, ``y_train``, ``X_val``, ``y_val``,
+        ``X_test``, ``y_test``.
     """
     logger.info(f"Resolving dataset path: {data_path.resolve()}")
 
     splits = ["train", "val", "test"]
-    data = {}
+    data: dict = {}
 
     total_samples = 0
-    feature_dim = None
-
-    logger.info(f"Expected splits: {splits}")
+    feature_dim: Optional[int] = None
 
     for split in splits:
         X_path = data_path / f"X_{split}.npy"
         y_path = data_path / f"y_{split}.npy"
 
-        # ----------------------------
-        # File existence + metadata
-        # ----------------------------
         if not X_path.exists() or not y_path.exists():
             raise FileNotFoundError(
                 f"Missing {split} data: {X_path} or {y_path}\n"
-                f"Run canonical feature pipeline first."
+                f"Run pipelines/run_build_features.py first."
             )
 
         x_size_mb = X_path.stat().st_size / 1e6
         y_size_mb = y_path.stat().st_size / 1e6
 
-        logger.info(f"[{split}] Loading files:")
-        logger.info(f"  X: {X_path} ({x_size_mb:.2f} MB)")
-        logger.info(f"  y: {y_path} ({y_size_mb:.2f} MB)")
+        logger.info(f"[{split}] X: {X_path.name} ({x_size_mb:.2f} MB)")
+        logger.info(f"[{split}] y: {y_path.name} ({y_size_mb:.2f} MB)")
 
-        # ----------------------------
-        # Load data
-        # ----------------------------
         X = np.load(X_path)
         y = np.load(y_path)
 
         data[f"X_{split}"] = X
         data[f"y_{split}"] = y
 
-    # ----------------------------
-    # Global dataset summary
-    # ----------------------------
+        total_samples += len(X)
+        feature_dim = X.shape[1] if X.ndim >= 2 else None
+
     logger.info("==== Dataset Summary ====")
     logger.info(f"Total samples across splits: {total_samples}")
     logger.info(f"Feature dimension: {feature_dim}")
@@ -243,28 +234,25 @@ def train_baseline_lstm(
     config: Config,
     output_dir: Path,
 ) -> None:
-    """
-    Train Baseline LSTM with fixed hyperparameters.
+    """Train the baseline LSTM with fixed hyperparameters from config.
 
-    FINAL_PLAN.md Section 4.1: Baseline LSTM Training Phase
-
-    CRITICAL: This function executes EXACTLY ONCE. The model is then FROZEN.
+    The model is fit exactly once with early stopping on val; the trained
+    weights, training history, model config, and metadata are persisted to
+    ``output_dir``. The function does not return the model — downstream
+    inference reloads it from disk via :func:`load_trained_model`.
 
     Args:
-        X_train: Training features (N, F)
-        y_train: Training targets (N,)
-        X_val: Validation features (M, F)
-        y_val: Validation targets (M,)
-        config: Configuration dict
-        output_dir: Directory to save model
-
-    Returns:
-        Trained and FROZEN LSTMModel
+        X_train: Training features (N, F).
+        y_train: Training targets (N,).
+        X_val: Validation features (M, F).
+        y_val: Validation targets (M,).
+        config: Project ``Config`` (uses ``config.lstm_baseline``).
+        output_dir: Directory to write model artifacts.
     """
     logger.info("=" * 80)
-    logger.info("BASELINE LSTM TRAINING (FINAL_PLAN.md Section 4.1)")
+    logger.info("BASELINE LSTM TRAINING")
     logger.info("=" * 80)
-    logger.info("CRITICAL: Model will be trained EXACTLY ONCE and then FROZEN")
+    logger.info("Model will be trained EXACTLY ONCE and then FROZEN")
     logger.info("=" * 80)
 
     # Extract config
@@ -374,7 +362,6 @@ def train_baseline_lstm(
     metadata = {
         "model_type": MODEL_TYPE,
         "protocol": "CANONICAL_1.0",
-        "source": "FINAL_PLAN.md Section 4.1",
         "training_samples": len(X_train_win),
         "validation_samples": len(X_val_win),
         "features": X_train.shape[1],
@@ -396,8 +383,6 @@ def train_baseline_lstm(
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=4)
     logger.info(f"Metadata saved to {metadata_path}")
-
-    # return model
 
 
 def test_baseline_lstm(

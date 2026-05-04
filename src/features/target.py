@@ -29,45 +29,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# def compute_canonical_target(
-#     close_series: pd.Series, horizon: int = 1, method: str = "log_return"
-# ) -> pd.Series:
-#     """
-#     Compute canonical target variable (next-period log return).
-
-#     FORMULA:
-#         y[t] = log(Close[t+1] / Close[t])
-#     """
-#     target = np.log(close_series.shift(-horizon) / close_series)
-
-#     logger.info(
-#         f"Computed target (method={method}, horizon={horizon}): "
-#         f"{len(target)} samples, {target.isna().sum()} NaN"
-#     )
-#     return target
-
-
-# def compute_canonical_target(
-#     close_series: pd.Series, horizon: int = 1, method: str = "next_close"
-# ) -> pd.Series:
-#     """
-#     Compute canonical target variable (future closing price).
-
-#     FORMULA:
-#         y[t] = Close[t + horizon]
-
-#     This is a direct price prediction target (not returns).
-#     """
-
-#     target = close_series.shift(-horizon)
-
-#     logger.info(
-#         f"Computed target (method={method}, horizon={horizon}): "
-#         f"{len(target)} samples, {target.isna().sum()} NaN"
-#     )
-
-#     return target
-
 
 def compute_canonical_target(
     close_series: pd.Series,
