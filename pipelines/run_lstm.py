@@ -238,7 +238,7 @@ def train_baseline_lstm(
 
     The model is fit exactly once with early stopping on val; the trained
     weights, training history, model config, and metadata are persisted to
-    ``output_dir``. The function does not return the model — downstream
+    ``output_dir``. The function does not return the model - downstream
     inference reloads it from disk via :func:`load_trained_model`.
 
     Args:
@@ -295,7 +295,7 @@ def train_baseline_lstm(
     logger.info(lstm_model)
     logger.info("======================================")
 
-    # Build unified trainer config dict — ALL hyperparameters from YAML
+    # Build unified trainer config dict - ALL hyperparameters from YAML
     trainer_config = {
         # Training
         "optimizer": lstm_config.optimizer,

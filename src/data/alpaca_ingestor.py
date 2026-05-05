@@ -249,7 +249,7 @@ class AlpacaIngestor:
 
             if skip_existing and out_path.exists():
                 logger.info(
-                    "[%d/%d] %s already exists — skipping", idx, len(tickers), ticker
+                    "[%d/%d] %s already exists - skipping", idx, len(tickers), ticker
                 )
                 continue
 
@@ -288,7 +288,7 @@ class AlpacaIngestor:
         #     out_path = output_dir / f"{ticker}.parquet"
         #     if skip_existing and out_path.exists():
         #         logger.info(
-        #             "[%d/%d] %s already cached — skipping", idx, len(tickers), ticker
+        #             "[%d/%d] %s already cached - skipping", idx, len(tickers), ticker
         #         )
         #         continue
 
@@ -302,7 +302,7 @@ class AlpacaIngestor:
         #         )
         #         logger.info("  Saved %d bars to %s", len(df), out_path)
         #     else:
-        #         logger.info("  No data for %s — file not written", ticker)
+        #         logger.info("  No data for %s - file not written", ticker)
 
         #     time.sleep(self.RATE_LIMIT_SLEEP)
 

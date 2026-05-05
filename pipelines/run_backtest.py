@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -140,7 +139,7 @@ def load_backtest_data(
     test_index = pd.to_datetime(test_index, utc=True).tz_convert(None)
 
     logger.info(
-        f"[INDEX] range={test_index.min()} → {test_index.max()} | n={len(test_index)}"
+        f"[INDEX] range={test_index.min()} --> {test_index.max()} | n={len(test_index)}"
     )
 
     # -----------------------------
@@ -154,7 +153,7 @@ def load_backtest_data(
 
     logger.info(f"[PRICES] shape={df.shape} cols={df.columns.tolist()}")
     logger.info(
-        f"[PRICES] range={df.index.min()} → {df.index.max()} | dtype={df.index.dtype}"
+        f"[PRICES] range={df.index.min()} --> {df.index.max()} | dtype={df.index.dtype}"
     )
 
     # -----------------------------
@@ -307,9 +306,7 @@ def _load_pso_lstm_model(
     return wrapper
 
 
-def _trim_aux_arrays(
-    *arrays: np.ndarray, lookback: int
-) -> Tuple[np.ndarray, ...]:
+def _trim_aux_arrays(*arrays: np.ndarray, lookback: int) -> Tuple[np.ndarray, ...]:
     """Trim per-bar auxiliary arrays to match windowed model output length.
 
     Both ``build_lstm_windows`` and ``build_xgboost_lag_features`` produce

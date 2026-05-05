@@ -117,7 +117,7 @@ class FeatureSelector:
                     continue
 
                 if abs(corr[i, j]) > self.correlation_threshold:
-                    # keep both for LSTM robustness? NO → keep both only if MI later separates
+                    # keep both for LSTM robustness? NO --> keep both only if MI later separates
                     # deterministic rule: keep first, drop second
                     keep[j] = False
 

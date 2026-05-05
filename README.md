@@ -40,7 +40,7 @@ project (RIT, Spring 2026).
   al. 2021: per-iteration inertia
   `omega(t) = w_max - (w_max - w_min) * tanh(4 t / T)` and a mutation
   probability that decays from 0.30 to 0 over the run. Each particle's
-  fitness training runs for a *fixed 100 epochs* — the `epochs` PSO
+  fitness training runs for a *fixed 100 epochs* - the `epochs` PSO
   dimension is retained for spec compatibility but its decoded value is
   ignored.
 - **Spec-compliant composite fitness.** Phase 1 minimises
@@ -58,7 +58,7 @@ project (RIT, Spring 2026).
 - **Apples-to-apples XGBoost baseline.** The XGBoost pipeline consumes
   the same `X_*.npy` / `y_*.npy` arrays as the LSTM but reshapes them
   into lag features inside `run_xgboost.py` (`feature_type: "lag_based"`)
-  so it predicts the *same* 1-bar-ahead z-scored return — no flattened
+  so it predicts the *same* 1-bar-ahead z-scored return - no flattened
   sequence shortcut.
 
 ---
@@ -189,7 +189,7 @@ For a full run, restore the canonical date range in the config, populate
 
 Everything is driven by `config/default_config.yaml`, parsed into typed
 dataclasses by `src/utils/config_loader.py`. Any new YAML key must also
-exist on the corresponding dataclass — `load_config()` rejects unknown
+exist on the corresponding dataclass - `load_config()` rejects unknown
 keys. The seven top-level blocks are:
 
 | Block | Purpose | Notable knobs |
@@ -207,7 +207,7 @@ data-leakage invariants (`allow_retraining: false`,
 `allow_pipeline_refitting: false`, `allow_test_access_training: false`,
 `require_frozen_state: true`, `require_chronological_splits: true`).
 These are not currently enforced as runtime asserts in every pipeline,
-but they describe the design contract the codebase is built around — do
+but they describe the design contract the codebase is built around - do
 not violate them.
 
 ---
@@ -224,7 +224,7 @@ weighted by `directional_loss_weight = 0.1`, designed to discourage the
 optimiser from collapsing onto the constant-mean predictor (which has
 near-zero variance and yields MSE ~1 under z-scored targets but no
 trading signal). Early stopping on `val_loss` with patience 10. All
-hyperparameters come from the `lstm_baseline` block — none are searched.
+hyperparameters come from the `lstm_baseline` block - none are searched.
 
 ### PSO-LSTM (`pipelines/train_pso_lstm.py`)
 
@@ -253,7 +253,7 @@ re-uses an existing Phase 1 result.
 windowed inputs (`(N, lookback, F)`) are reshaped into 2D lag features
 inside the XGBoost pipeline so the model predicts the same 1-bar-ahead
 z-scored log return that the LSTMs predict. This is what makes the head-
-to-head comparison meaningful — both models see the same supervised
+to-head comparison meaningful - both models see the same supervised
 target on the same chronological split.
 
 ---
@@ -262,7 +262,7 @@ target on the same chronological split.
 
 A *single* 70/10/20 chronological split is established once in
 `run_build_features.py` (`src/evaluation/canonical_split.py`). There is
-no walk-forward path in this codebase — the earlier walk-forward
+no walk-forward path in this codebase - the earlier walk-forward
 prototype was removed, and any references in the older README are
 out of date. All test-set numbers come from `pipelines/run_backtest.py`,
 which dispatches on `--model-type` and reuses the `load_trained_model`
@@ -334,7 +334,7 @@ Python 3.10+. Key libraries:
 | `numpy`, `pandas` | `>=1.26`, `>=2.1` | numerics, data frames |
 | `scikit-learn` | `>=1.4` | scalers, MI, VIF utilities |
 | `scipy` | `>=1.12` | wavelet support routines |
-| `pywavelets` (`pywt`) | — | Haar wavelet denoising |
+| `pywavelets` (`pywt`) | - | Haar wavelet denoising |
 | `alpaca-py`, `alpaca-trade-api` | `>=0.30`, `>=3.0` | OHLCV ingestion |
 | `pandas-market-calendars` | `>=4.3` | NYSE RTH calendar |
 | `pandas-ta`, `ta-lib` | latest | technical indicators |
@@ -346,7 +346,7 @@ Python 3.10+. Key libraries:
 The full pinned list lives in [`requirements.txt`](requirements.txt).
 A working `.env` at the repo root must contain `ALPACA_API_KEY`,
 `ALPACA_SECRET_KEY` (or the legacy `ALPACA_API_SECRET`), and
-`ALPACA_BASE_URL` — see `.env.example`.
+`ALPACA_BASE_URL` - see `.env.example`.
 
 ---
 
@@ -367,7 +367,7 @@ The full bibliography with per-paper PSO-design notes is in
 - **Deng & Peng (2025).** *A Novel Improved Particle Swarm Optimization
   for LSTM.* Source of the composite fitness
   `gamma * MSE + (1 - gamma) * msw_scale * MSW`, with biases excluded
-  from MSW — implemented in `src/optimizer/fitness.py`.
+  from MSW - implemented in `src/optimizer/fitness.py`.
 - **Lanbouri & Achchab.** *Stock Market Prediction on High-Frequency
   Data Using Long-Short Term Memory.* Reference for high-frequency
   intraday LSTM design; does not use PSO and is included as the

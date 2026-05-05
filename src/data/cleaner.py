@@ -146,7 +146,7 @@ class DataCleaner:
         long_gaps = [g for g in gaps if g["missing_observations"] > self.max_gap_fill]
         report["long_gap_count"] = len(long_gaps)
 
-        # build removal mask (inclusive of both endpoints — both g["start"] and
+        # build removal mask (inclusive of both endpoints - both g["start"] and
         # g["end"] are still-NaN rows belonging to the long gap segment)
         for g in long_gaps:
             gap_mask = (df.index >= g["start"]) & (df.index <= g["end"])

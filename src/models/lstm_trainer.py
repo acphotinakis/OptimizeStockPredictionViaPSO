@@ -383,13 +383,11 @@ class LSTMTrainer:
             # METRICS (SINGLE SOURCE OF TRUTH)
             # -------------------------------------------------
             # In quiet mode (PSO inner loop) suppress per-epoch metric
-            # logging — the helper logs to the metrics module logger
+            # logging - the helper logs to the metrics module logger
             # internally. Temporarily silencing that logger is the
             # cleanest way to keep the computation but drop the noise.
             if quiet:
-                metrics_logger = logging.getLogger(
-                    "src.evaluation.metrics"
-                )
+                metrics_logger = logging.getLogger("src.evaluation.metrics")
                 _saved_metrics_level = metrics_logger.level
                 metrics_logger.setLevel(logging.WARNING)
             try:

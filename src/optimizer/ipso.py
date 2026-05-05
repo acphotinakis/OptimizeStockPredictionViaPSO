@@ -1,7 +1,7 @@
 """
 src/optimizer/ipso.py
 
-Improved PSO (IPSO) — Ji, Liew & Yang, IEEE Access 2021.
+Improved PSO (IPSO) - Ji, Liew & Yang, IEEE Access 2021.
 
 Two enhancements over standard PSO:
 

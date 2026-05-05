@@ -114,7 +114,7 @@ def align_to_nyse_calendar(
 
     if schedule.empty:
         logger.warning(
-            "NYSE schedule empty for %s..%s — returning input unmodified",
+            "NYSE schedule empty for %s..%s - returning input unmodified",
             start_date,
             end_date,
         )

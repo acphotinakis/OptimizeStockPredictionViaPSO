@@ -163,9 +163,7 @@ class StandardPSO:
                     w = self._inertia(t)
                     for particle in self._swarm:
                         self._update_particle(particle, w, t)
-                    self._evaluate_all(
-                        X_train, y_train, X_val, y_val, iteration=t
-                    )
+                    self._evaluate_all(X_train, y_train, X_val, y_val, iteration=t)
                     self.fitness_history.append(self._gbest_fitness)
                     self.diversity_history.append(self._swarm_diversity())
 
@@ -184,11 +182,13 @@ class StandardPSO:
                     self._gbest_params(),
                 )
 
-                pbar.set_postfix(_format_postfix(
-                    self._gbest_fitness,
-                    self._gbest_params(),
-                    self._swarm_diversity(),
-                ))
+                pbar.set_postfix(
+                    _format_postfix(
+                        self._gbest_fitness,
+                        self._gbest_params(),
+                        self._swarm_diversity(),
+                    )
+                )
 
                 if self.checkpoint_dir and t > 0 and t % 10 == 0:
                     self._save_checkpoint(t)
@@ -343,7 +343,7 @@ class StandardPSO:
 
         ``model_builder`` and ``fitness_fn`` must be picklable. A common
         regression is a nested-closure ``model_builder`` which fails
-        ``pickle`` — historically this fell back to sequential silently;
+        ``pickle`` - historically this fell back to sequential silently;
         the fallback now surfaces at WARNING level so users can spot it.
         """
         from concurrent.futures import ProcessPoolExecutor

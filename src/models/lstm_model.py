@@ -40,8 +40,8 @@ class LSTMNetwork(nn.Module):
         hidden_size_2: Units in second LSTM layer (20-200)
         dropout_rate: Dropout rate (0.0-0.5)
         output_units: Output dimension (default: 1)
-        activation: Hidden activation name — 'relu' | 'tanh' | 'leaky_relu'
-        output_activation: Output activation name — 'linear' | 'relu' | 'tanh'
+        activation: Hidden activation name - 'relu' | 'tanh' | 'leaky_relu'
+        output_activation: Output activation name - 'linear' | 'relu' | 'tanh'
     """
 
     def __init__(

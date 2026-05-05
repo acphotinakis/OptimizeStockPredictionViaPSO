@@ -122,13 +122,13 @@ CUDA is available; on CPU it silently falls back to fp32.
 **Anti-collapse defaults** are now baked into the config:
 - `loss: "mse_directional"` adds a sign-disagreement penalty on top of MSE
   (controlled by `directional_loss_weight: 0.1`).
-- `dropout_rate: 0.05` (was 0.2) — high dropout was poisoning train metrics
+- `dropout_rate: 0.05` (was 0.2) - high dropout was poisoning train metrics
   vs. the dropout-off val pass and dragging the optimiser into the
   constant-mean local minimum.
 - The target was z-scored at stage 2, so a constant-mean predictor now has
   MSE = 1.0; any improvement below that is real signal.
 
-### 3b. PSO-LSTM (Phase 1 IPSO search → Phase 2 final fit)
+### 3b. PSO-LSTM (Phase 1 IPSO search --> Phase 2 final fit)
 
 ```bash
 python pipelines/train_pso_lstm.py \
@@ -150,7 +150,7 @@ with the PSO-found `lstm_units_*`, `learning_rate`, `dropout`, and
 | `subsample_train_fraction` | `0.25` | Each fitness eval trains on the **most-recent fraction** of the PSO train slice. Phase 2 still trains on the full 80%. |
 
 The `epochs` dimension is in the search-space vector for spec
-compatibility but the decoded value is **ignored** — every particle
+compatibility but the decoded value is **ignored** - every particle
 trains for exactly 100 epochs and so does Phase 2. AMP is enabled in
 both phases (`use_amp: True`); on CPU it silently falls back to fp32.
 
@@ -276,12 +276,12 @@ Healthy signs:
 - `val_metrics[…].directional_accuracy` rising above 0.50.
 
 Trouble signs:
-- `variance_ratio` stuck below 0.05 → predictions are still collapsing.
+- `variance_ratio` stuck below 0.05 --> predictions are still collapsing.
   Try `directional_loss_weight: 0.5` in `default_config.yaml` or switch
   loss to `huber`.
-- `val_loss` strictly increasing → likely overfitting. Reduce
+- `val_loss` strictly increasing --> likely overfitting. Reduce
   `lstm_units_*` or raise dropout to ~0.1.
-- `val_metrics[…].directional_accuracy` exactly 0.50 → constant-predict
+- `val_metrics[…].directional_accuracy` exactly 0.50 --> constant-predict
   collapse confirmed.
 
 ---
@@ -320,7 +320,7 @@ only the missing chunks.
   the process must be started from there (the ingestor calls `load_dotenv()`
   with no path arg).
 - **Empty trainer features**: rerun stage 2 with `--timeframe` matching the
-  one used downstream — running multiple timeframes in one stage 2
+  one used downstream - running multiple timeframes in one stage 2
   invocation would have overwritten earlier ones.
 - **Stage 2 OOM under `--workers > 1`**: each worker holds the full ticker
   in memory at once. Drop `--workers` until the run fits, or shrink the
@@ -334,8 +334,8 @@ only the missing chunks.
   defaults are designed to avoid this; if you see it anyway, `variance_ratio
   < 0.05` confirms collapse and the troubleshooting block has next steps.
 - **Backtest model-path errors**: each model type expects a different
-  directory layout (see 4a-c). LSTM baseline → the `train/` subdir;
-  PSO-LSTM → the Phase-2 output dir; XGBoost → the `train/` subdir with
+  directory layout (see 4a-c). LSTM baseline --> the `train/` subdir;
+  PSO-LSTM --> the Phase-2 output dir; XGBoost --> the `train/` subdir with
   its three JSON sidecars.
 - **PSO is "still running" after hours**: the canonical workload is 20
   particles × 50 iterations × 100 epochs = 100 000 epoch-trainings, which

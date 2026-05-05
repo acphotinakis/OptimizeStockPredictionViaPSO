@@ -369,7 +369,7 @@ def phase1_pso_search(
     # Build a picklable model_builder by binding the parent-scope state
     # (seed, test hash, X_test) onto the module-level _pso_model_builder.
     # functools.partial of a top-level function IS picklable, whereas a
-    # nested closure is NOT — using a closure here silently demoted PSO
+    # nested closure is NOT - using a closure here silently demoted PSO
     # to sequential evaluation regardless of pso.n_workers.
     model_builder = partial(
         _pso_model_builder,

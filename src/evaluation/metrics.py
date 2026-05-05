@@ -70,17 +70,17 @@ def directional_accuracy(y_true, y_pred, threshold=1e-8, exclude_zeros=True):
     """
     if exclude_zeros:
         # Only evaluate where actual has clear direction
-        mask = (np.abs(y_true) > threshold)
-        
+        mask = np.abs(y_true) > threshold
+
         if mask.sum() == 0:
             logger.warning("No directional samples (all |y| <= threshold)")
-            return float('nan')
-        
+            return float("nan")
+
         y_true_filt = y_true[mask]
         y_pred_filt = y_pred[mask]
-        
+
         # Safe to use sign() now (no zeros)
-        correct = (np.sign(y_true_filt) == np.sign(y_pred_filt))
+        correct = np.sign(y_true_filt) == np.sign(y_pred_filt)
         return float(correct.mean())
     else:
         # Ternary: treats (0,0) as correct but (0,±1) as wrong
@@ -147,8 +147,6 @@ def auc_ternary(
         )
     except Exception:
         return float("nan")
-
-
 
 
 # ======================================================================
@@ -387,7 +385,7 @@ def _log_metrics(
             else:
                 parts.append(f"{k.upper()}={v:.10f}")
 
-    logger.info(f"{label} — " + "  ".join(parts))
+    logger.info(f"{label} - " + "  ".join(parts))
 
 
 def _log_results(
