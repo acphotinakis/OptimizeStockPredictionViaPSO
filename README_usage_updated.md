@@ -1,4 +1,4 @@
-# PSO/IPSO-LSTM Stock Price Prediction System
+# PSO-LSTM Stock Price Prediction System
 
 **A production-grade financial machine learning system for stock return prediction using LSTM neural networks optimized via Particle Swarm Optimization (PSO) and improved PSO.**
 
@@ -287,161 +287,58 @@ peer_selection:
 
 ## Usage
 
-### Run YFinance Indices
-```
-Run a small Yahoo Finance index-suite experiment .
+Run commands from the project root after activating the virtual environment.
 
-python main.py --provider yfinance --run-index-suite --indices DJIA,SP500,NIFTY50 --device auto
+### Yahoo Finance
 
-```
-
-
-### Run Alpaca Indices
-
-Run a small Alpaca index-suite experiment .
+Yahoo Finance does not require API credentials.
 
 ```powershell
-python main.py --provider alpaca --symbols AAPL,GOOGL --device auto --search-iters 3 --swarm-size 4 --epochs 5
+python main.py --provider yfinance --run-index-suite --indices DJIA,SP500,NIFTY50 --device auto --plot
 ```
 
-### 1. Data Ingestion
+For a single ticker or index:
 
-Fetch and clean raw OHLCV data from Alpaca API:
-
-```bash
-python pipelines/data_ingest_align_clean.py \
-  --tickers AAPL MSFT GOOGL \
-  --start-date 2020-01-01 \
-  --end-date 2026-01-01 \
-  --timeframe 1Day \
-  --output-dir data/raw/1Day
+```powershell
+python main.py --provider yfinance --symbol AAPL --method ipso --device auto --plot
 ```
 
-**Output:**
-- `data/raw/1Day/{ticker}.parquet` - Raw OHLCV data
-- `data/cleaned/1Day/{ticker}.parquet` - Cleaned data (gap handling, OHLCV validation)
-- `data/aligned/1Day/{ticker}.parquet` - SPY-aligned synchronized data
+You can also use the provider-specific entry point:
 
-### 2. Feature Engineering
-
-Generate features, split data, and fit feature pipeline:
-
-```bash
-python pipelines/run_build_features.py \
-  --ticker AAPL \
-  --timeframe 1Day \
-  --data-dir data/aligned/1Day \
-  --output-dir data/features_v2/AAPL \
-  --config config/default_config.yaml
+```powershell
+python pipelines/run_yfinance.py --run-index-suite --indices DJIA,SP500,NIFTY50 --device auto --plot
 ```
 
-**Output:**
-- `data/features_v2/AAPL/X_train.npy` - Training features (N_train, F)
-- `data/features_v2/AAPL/y_train.npy` - Training targets (N_train,)
-- `data/features_v2/AAPL/X_val.npy` - Validation features
-- `data/features_v2/AAPL/X_test.npy` - Test features
-- `data/features_v2/AAPL/frozen_pipeline.pkl` - Fitted scalers/selectors/wavelets
+### Alpaca
 
-**Key Operations:**
-1. Technical indicators (45+ features)
-2. Cross-ticker features (market context, peers, sector)
-3. Wavelet denoising (Haar, 3-level)
-4. Feature selection (4-stage: variance → correlation → VIF → MI)
-5. MinMax scaling ([-1, 1])
-6. Chronological split (70/10/20)
+Set your Alpaca credentials locally before running. Do not commit `.env` or API keys.
 
-### 3. Model Training
-
-#### Option A: Baseline LSTM (Fixed Hyperparameters)
-
-```bash
-python pipelines/run_lstm.py \
-  --ticker AAPL \
-  --timeframe 1Day \
-  --data-path data/features_v2/AAPL \
-  --config config/default_config.yaml \
-  --device cuda
+```powershell
+$env:ALPACA_API_KEY="your_key"
+$env:ALPACA_API_SECRET="your_secret"
 ```
 
-**Output:**
-- `results/experiments/AAPL_1Day_lstm_baseline_{run_id}/train/`
-  - `baseline_lstm_model.pt` - Trained model weights
-  - `model_config.json` - Architecture metadata
-  - `training_history.json` - Loss curves
+Run the Alpaca pipeline on selected traded companies:
 
-#### Option B: PSO-LSTM (Hyperparameter Search)
-
-```bash
-python pipelines/train_pso_lstm.py \
-  --ticker AAPL \
-  --timeframe 1Day \
-  --data-path data/features_v2/AAPL \
-  --config config/default_config.yaml \
-  --device cuda
+```powershell
+python main.py --provider alpaca --symbols AAPL,GOOGL,NVDA,META --timeframe 1Day --feed iex --adjustment raw --device auto --amp --plot
 ```
 
-**PSO Process:**
-1. **Phase 1**: 20 particles × 50 iterations (1000 LSTM trainings)
-2. **Phase 2**: Final training with best hyperparameters
-3. **Fitness**: `0.9 × MSE + 0.1 × MSW` (Mean Squared Weights penalty)
+For the built-in index-proxy suite:
 
-**Output:**
-- `results/pso_lstm/AAPL_1Day/best_model.pt`
-- `results/pso_lstm/AAPL_1Day/pso_history.json` - Convergence tracking
-- `results/pso_lstm/AAPL_1Day/best_params.json` - Optimal hyperparameters
-
-#### Option C: XGBoost Baseline
-
-```bash
-python pipelines/run_xgboost.py \
-  --ticker AAPL \
-  --timeframe 1Day \
-  --data-path data/features_v2/AAPL \
-  --config config/default_config.yaml
+```powershell
+python main.py --provider alpaca --run-index-suite --indices DJIA,SP500,NIFTY50 --timeframe 1Day --feed iex --adjustment raw --device auto --amp --plot
 ```
 
-### 4. Evaluation
+You can also use the provider-specific entry point:
 
-#### Backtesting
-
-Run unified backtesting with trading simulation:
-
-```bash
-python pipelines/run_backtest.py \
-  --model-type lstm_baseline \
-  --model-path results/experiments/AAPL_1Day_lstm_baseline_{run_id}/train/baseline_lstm_model.pt \
-  --data-path data/features_v2/AAPL \
-  --output-dir results/backtest/AAPL \
-  --config config/default_config.yaml
+```powershell
+python pipelines/run_alpaca.py --symbols AAPL,GOOGL,NVDA,META --timeframe 1Day --feed iex --adjustment raw --device auto --amp --plot
 ```
 
-**Output:**
-- `results/backtest/AAPL/metrics.json` - Full metrics
-- `results/backtest/AAPL/equity_curve.csv` - Time series results
-- `results/backtest/AAPL/plots/` - Visualization (equity, drawdown, returns, signals)
+### Outputs
 
-**Metrics Computed:**
-- **Statistical**: RMSE, MAE, R², Directional Accuracy, MAPE
-- **Trading**: Sharpe Ratio, Sortino Ratio, CAGR, Max Drawdown, Calmar Ratio, Profit Factor, Win Rate, Information Ratio
-
-#### Walk-Forward Validation
-
-Expanding-window validation with per-fold retraining:
-
-```bash
-python pipelines/lstm_walk_forward_evaluation.py \
-  --ticker AAPL \
-  --timeframe 1Day \
-  --data-path data/features_v2/AAPL \
-  --config config/default_config.yaml \
-  --n-folds 5
-```
-
-**Walk-Forward Protocol:**
-1. Initial split: 70/10/20
-2. Each fold: retrain on expanding window
-3. Per-fold: independent scaling, PSO search (if applicable)
-4. Aggregate metrics across folds
+By default, reports are written to `results_index_suite/` for Yahoo Finance and `results_alpaca_index_suite/` for Alpaca. Generated image artifacts are written to `img/`. Override these locations with `--output-dir` and `--img-dir` when needed.
 
 ---
 
