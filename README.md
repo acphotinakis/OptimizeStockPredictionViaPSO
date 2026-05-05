@@ -132,7 +132,7 @@ OptimizeStockPredictionViaPSO/
     utils/                       config_loader, logger, seed, data_storage
   docs/
     QUICKSTART.md                end-to-end run instructions (canonical how-to)
-    TRD1.md  TRD2.md  TRD3.md    feature / model / evaluation specs
+    feature / model / evaluation specs
     research_notes.md            PSO bibliography
   constants.py                   DEFAULT_CONFIG_PATH, MAX_GAP_FILL_BARS
   requirements.txt

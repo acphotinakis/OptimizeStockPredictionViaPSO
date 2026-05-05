@@ -22,12 +22,11 @@ from src.optimizer.particle import LB, UB
 from src.utils.config_loader import Config, load_config
 from src.utils.logger import LogFileMode, setup_logger
 
-
 logger = logging.getLogger(__name__)
 
 
 def set_all_seeds(seed: int) -> None:
-    """Set all random seeds for full reproducibility (TRD1 §9.1).
+    """Set all random seeds for full reproducibility .
 
     Delegates to :func:`src.models.utils.set_seeds`, which seeds
     Python's ``random``, NumPy, and PyTorch (CPU and CUDA) so model
@@ -38,14 +37,14 @@ def set_all_seeds(seed: int) -> None:
         seed: Random seed value applied to every supported RNG.
     """
     set_seeds(seed)
-    logger.info(f"All seeds set to {seed} (TRD1 §9.1 compliance)")
+    logger.info(f"All seeds set to {seed} ")
 
 
 def create_pso_split(
     X: np.ndarray, y: np.ndarray, pso_train_ratio: float = 0.9
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Create TRD-compliant 72/8 split for PSO Phase 1 (TRD2 §7.4).
+    Create TRD-compliant 72/8 split for PSO Phase 1 .
 
     Takes 80% data and splits into:
     - 72% for PSO training (90% of 80%)
@@ -66,7 +65,7 @@ def create_pso_split(
     X_pso_val = X[split_idx:]
     y_pso_val = y[split_idx:]
 
-    logger.info("TRD2 §7.4 PSO split created:")
+    logger.info("PSO split created:")
     logger.info(f"  PSO train: {len(X_pso_train)} samples (72% of total)")
     logger.info(f"  PSO val:   {len(X_pso_val)} samples (8% of total)")
 
@@ -75,7 +74,7 @@ def create_pso_split(
 
 def validate_no_leakage(data: Dict, lookback: int) -> None:
     """
-    Validate TRD1 §8 data leakage prevention rules.
+    Validate TRD1 8 data leakage prevention rules.
 
     Args:
         data: Dictionary with train/val/test splits
@@ -85,24 +84,24 @@ def validate_no_leakage(data: Dict, lookback: int) -> None:
         AssertionError: If any TRD rule is violated
     """
     logger.info("=" * 80)
-    logger.info("VALIDATING TRD1 §8 DATA LEAKAGE RULES")
+    logger.info("VALIDATING TRD1 8 DATA LEAKAGE RULES")
     logger.info("=" * 80)
 
-    # TRD1 §8.1 L-7: Window boundaries
+    # TRD1 8.1 L-7: Window boundaries
     assert data["X_train"].shape[0] >= lookback, (
-        f"TRD1 §8.1 L-7 VIOLATION: Train set too small for lookback window "
+        f"TRD1 8.1 L-7 VIOLATION: Train set too small for lookback window "
         f"(need >={lookback}, got {data['X_train'].shape[0]})"
     )
     logger.info(" L-7: Window boundary check passed")
 
-    # TRD1 §8.2: Temporal ordering (assuming preprocessed data is ordered)
+    # TRD1 8.2: Temporal ordering (assuming preprocessed data is ordered)
     logger.info(" L-1: Temporal ordering assumed from preprocessing")
 
-    # TRD1 §8.1 L-3, L-4, L-5: Scaler/correlation/wavelet fit on train only
+    # TRD1 8.1 L-3, L-4, L-5: Scaler/correlation/wavelet fit on train only
     logger.info(" L-3, L-4, L-5: Scaler/selector fit on train only (upstream)")
 
     logger.info("=" * 80)
-    logger.info(" ALL TRD1 §8 LEAKAGE CHECKS PASSED")
+    logger.info(" ALL TRD1 8 LEAKAGE CHECKS PASSED")
     logger.info("=" * 80)
 
 
@@ -112,8 +111,8 @@ def load_preprocessed_data(data_path: Path) -> Dict:
 
     TRD Requirements:
     - Data must be pre-split 70/10/20 (train/val/test)
-    - Features must be pre-scaled (TRD1 §4.2)
-    - Features must be pre-selected (TRD1 §5)
+    - Features must be pre-scaled
+    - Features must be pre-selected
 
     Args:
         data_path: Directory containing X_train.npy, y_train.npy, etc.
@@ -176,7 +175,7 @@ def _pso_model_builder(
         seed: Reproducibility seed.
         test_hash: SHA-256 of the canonical contiguous test array, captured
             in the parent before PSO begins; checked here to enforce
-            test-set isolation (TRD1 §8.1 L-6).
+            test-set isolation .
         X_test: Test array referenced for the hash check; never used to
             train.
 
@@ -222,21 +221,17 @@ def _pso_model_builder(
     model_wrapper = LSTMModel(seed=seed)
     model_wrapper.build_model(architecture_config)
 
-    trainer = LSTMTrainer(
-        lstm_model=model_wrapper, config=trainer_config, seed=seed
-    )
+    trainer = LSTMTrainer(lstm_model=model_wrapper, config=trainer_config, seed=seed)
     trained_wrapper, _ = trainer.train(X_train, y_train, X_val, y_val)
 
     # progress=False so the inner "Predicting" tqdm bar does not clobber
     # the parent's PSO iteration progress bar.
     y_pred = trained_wrapper.predict(X_val, progress=False)
 
-    # TRD1 §8.1 L-6: Verify test set never accessed during the swarm
+    # TRD1 8.1 L-6: Verify test set never accessed during the swarm
     # evaluation. Hash the canonical contiguous layout so the digest
     # matches the value captured before PSO began regardless of view state.
-    current_hash = hashlib.sha256(
-        np.ascontiguousarray(X_test).tobytes()
-    ).hexdigest()
+    current_hash = hashlib.sha256(np.ascontiguousarray(X_test).tobytes()).hexdigest()
     assert (
         current_hash == test_hash
     ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
@@ -256,10 +251,10 @@ def phase1_pso_search(
     output_dir: Path,
 ) -> Dict:
     """
-    Phase 1: PSO hyperparameter search (TRD2 §7.4).
+    Phase 1: PSO hyperparameter search .
 
     Search on 72% train, validate on 8% val.
-    Test set (20%) is NEVER accessed (TRD1 §8.1 L-6).
+    Test set (20%) is NEVER accessed .
 
     Args:
         X_train: Training features (70% of total)
@@ -276,18 +271,18 @@ def phase1_pso_search(
         Dictionary of best hyperparameters
     """
     logger.info("=" * 80)
-    logger.info("PHASE 1: PSO HYPERPARAMETER SEARCH (TRD2 §7.4)")
+    logger.info("PHASE 1: PSO HYPERPARAMETER SEARCH ")
     logger.info("=" * 80)
     logger.info("TRD-Compliant Split: 72% PSO train, 8% PSO val, 20% test (ISOLATED)")
     logger.info("=" * 80)
 
-    # TRD2 §7.4: Combine train (70%) + val (10%) = 80% for PSO split
+    # TRD2 7.4: Combine train (70%) + val (10%) = 80% for PSO split
     X_combined = np.concatenate([X_train, X_val], axis=0)
     y_combined = np.concatenate([y_train, y_val], axis=0)
 
     logger.info(f"Combined 80% data: X={X_combined.shape}, y={y_combined.shape}")
 
-    # TRD2 §7.4: Split 80% into 72% PSO train + 8% PSO val
+    # TRD2 7.4: Split 80% into 72% PSO train + 8% PSO val
     X_pso_train, y_pso_train, X_pso_val, y_pso_val = create_pso_split(
         X_combined, y_combined, pso_train_ratio=0.9
     )
@@ -328,23 +323,21 @@ def phase1_pso_search(
         f"  X_pso_val:   {X_pso_val_win.shape}, y_pso_val:   {y_pso_val_win.shape}"
     )
 
-    # TRD1 §8.1 L-6: Protect test set from access. Canonicalize the
+    # TRD1 8.1 L-6: Protect test set from access. Canonicalize the
     # array layout before hashing so non-contiguous views (e.g. slices
     # or transposes) hash to the same digest as their contiguous form.
-    _test_data_hash = hashlib.sha256(
-        np.ascontiguousarray(X_test).tobytes()
-    ).hexdigest()
+    _test_data_hash = hashlib.sha256(np.ascontiguousarray(X_test).tobytes()).hexdigest()
     logger.info(f"Test set protected (hash: {_test_data_hash[:16]}...)")
 
-    # TRD1 §7.2: Validate that the YAML-declared search-space bounds
+    # TRD1 7.2: Validate that the YAML-declared search-space bounds
     # match the canonical particle-encoding bounds (LB/UB). The PSO core
     # consumes LB/UB directly via Particle, so any drift between the
     # config and the encoding would silently change the search space.
     expected_log_lr_min = float(np.log(pso_config.search_space.learning_rate.min))
     expected_log_lr_max = float(np.log(pso_config.search_space.learning_rate.max))
-    expected_batch_idx_max = float(
-        len(pso_config.search_space.batch_size.choices)
-    ) - 0.01
+    expected_batch_idx_max = (
+        float(len(pso_config.search_space.batch_size.choices)) - 0.01
+    )
     bound_checks = [
         ("units_1.min", pso_config.search_space.lstm_units_1.min, LB[0]),
         ("units_1.max", pso_config.search_space.lstm_units_1.max, UB[0]),
@@ -389,7 +382,7 @@ def phase1_pso_search(
     # PSO core will call this with (y_true, y_pred, model)
     fitness_fn = SpecCompliantFitness(gamma=0.9)
 
-    # TRD1 §7.1: Initialize IPSO optimizer
+    # TRD1 7.1: Initialize IPSO optimizer
     logger.info("Initializing IPSO optimizer...")
     n_workers = max(1, int(getattr(pso_config, "n_workers", 1)))
     if n_workers > 1:
@@ -478,7 +471,7 @@ def phase2_final_training(
     """
     Phase 2: Final training on combined 80% (train+val) with PSO params.
 
-    TRD2 §7.4: Phase 2 Protocol
+    TRD2 7.4: Phase 2 Protocol
     - Train on 80% combined data (train 70% + val 10%)
     - Use exact epoch count from PSO (NO early stopping)
     - Model is FROZEN after this phase
@@ -498,7 +491,7 @@ def phase2_final_training(
         Trained and FROZEN LSTMModel
     """
     logger.info("=" * 80)
-    logger.info("PHASE 2: FINAL TRAINING ON COMBINED 80% (TRD2 §7.4)")
+    logger.info("PHASE 2: FINAL TRAINING ON COMBINED 80% ")
     logger.info("=" * 80)
     logger.info("Training on train (70%) + val (10%) = 80% total")
     logger.info("Using PSO-optimized hyperparameters")
@@ -566,9 +559,7 @@ def phase2_final_training(
 
     model_wrapper = LSTMModel(seed=seed)
     model_wrapper.build_model(architecture_config)
-    trainer = LSTMTrainer(
-        lstm_model=model_wrapper, config=trainer_config, seed=seed
-    )
+    trainer = LSTMTrainer(lstm_model=model_wrapper, config=trainer_config, seed=seed)
 
     logger.info("=" * 80)
     logger.info("TRAINING (SINGLE FINAL FIT - NO EARLY STOPPING)")
@@ -609,19 +600,19 @@ def phase2_final_training(
         )
     logger.info(f"Model config saved to {config_path}")
 
-    # TRD1 §9.2: Save complete metadata (MANDATORY)
+    # TRD1 9.2: Save complete metadata (MANDATORY)
     metadata = {
         # Model identification
         "model_type": "pso_lstm",
         "protocol": "TRD_COMPLIANT_1.0",
-        "trd_sources": ["TRD1 §5, §7, §8, §9", "TRD2 §7.4", "TRD3"],
+        "trd_sources": ["TRD1 5, 7, 8, 9", "TRD2 7.4", "TRD3"],
         # Data splits
         "split_ratios": "72/8/20 (PSO train/PSO val/test)",
         "phase1_pso_train_samples": int(len(X_combined) * 0.9 - lookback),
         "phase1_pso_val_samples": int(len(X_combined) * 0.1 - lookback),
         "phase2_train_samples": len(X_combined_win),
         "test_samples_isolated": "Never accessed during training",
-        # Feature schema (TRD1 §9.2)
+        # Feature schema
         "feature_schema_version": (
             feature_metadata.get("version", "1.0.0") if feature_metadata else "1.0.0"
         ),
@@ -637,7 +628,7 @@ def phase2_final_training(
         "training_complete": True,
         "model_frozen": True,
         "retraining_allowed": False,
-        # Reproducibility (TRD1 §9.1)
+        # Reproducibility
         "random_seed": seed,
         "torch_seed": seed,
         "numpy_seed": seed,
@@ -653,7 +644,7 @@ def phase2_final_training(
         yaml.dump(metadata, f, default_flow_style=False)
     logger.info(f"Metadata saved to {metadata_path}")
 
-    # Save scaler parameters if available (TRD1 §9.2)
+    # Save scaler parameters if available
     if feature_metadata and "scaler_params" in feature_metadata:
         scaler_path = output_dir / "scaler_params.json"
         with open(scaler_path, "w") as f:
@@ -694,7 +685,7 @@ def main():
     parser.add_argument(
         "--feature-metadata",
         type=Path,
-        help="Path to feature pipeline metadata (for TRD §9.2 compliance)",
+        help="Path to feature pipeline metadata (for TRD 9.2 compliance)",
     )
 
     args = parser.parse_args()
@@ -709,13 +700,13 @@ def main():
         config = load_config(args.config)
         lookback = config.lstm_baseline.lookback
 
-        # Set all seeds for reproducibility (TRD1 §9.1)
+        # Set all seeds for reproducibility
         set_all_seeds(config.lstm_baseline.random_seed)
 
         # Load preprocessed data
         data = load_preprocessed_data(args.data_path)
 
-        # TRD1 §8: Validate no data leakage
+        # TRD1 8: Validate no data leakage
         validate_no_leakage(data, lookback)
 
         # Load feature metadata if provided
@@ -767,8 +758,8 @@ def main():
         logger.info(" Phase 2: Final training on 80% data complete")
         logger.info(" Model trained and frozen (TRD compliance)")
         logger.info(" Model saved to disk")
-        logger.info(" Metadata versioned (TRD1 §9.2)")
-        logger.info(" Test set isolated (TRD1 §8.1 L-6)")
+        logger.info(" Metadata versioned ")
+        logger.info(" Test set isolated ")
         logger.info(" Ready for backtest evaluation on held-out test slice")
         logger.info("=" * 80)
 

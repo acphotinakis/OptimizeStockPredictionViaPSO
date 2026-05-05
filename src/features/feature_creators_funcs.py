@@ -168,7 +168,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
 
     # ========================================================================
-    # CATEGORY A: PRICE FEATURES (TRD1 §3.1)
+    # CATEGORY A: PRICE FEATURES
     # ========================================================================
     out["open"] = O
     out["high"] = H
@@ -178,7 +178,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["log_return"] = np.log(C / C.shift(1))
 
     # ========================================================================
-    # CATEGORY B: TREND-FOLLOWING INDICATORS (TRD1 §3.2)
+    # CATEGORY B: TREND-FOLLOWING INDICATORS
     # ========================================================================
     # EMA indicators (Lanbouri & Achchab 2020, Zeng et al. 2025)
     # FIX Issue #10: Use min_periods=span for proper warm-up
@@ -198,7 +198,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["macd"] = out["ema12"] - ema26
 
     # ========================================================================
-    # CATEGORY C: VOLATILITY INDICATORS (TRD1 §3.3)
+    # CATEGORY C: VOLATILITY INDICATORS
     # ========================================================================
     # Bollinger Bands (Lanbouri & Achchab 2020)
     sma20 = out["ma20"]
@@ -212,7 +212,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         out["boll_upper"] - out["boll_lower"] + 1e-10
     )
 
-    # Average True Range (TRD1 §3.3 - Wilder's Smoothing)
+    # Average True Range
     # TR calculation: max(H-L, |H-C_prev|, |L-C_prev|)
     prev_C = C.shift(1)
     tr = pd.DataFrame(
@@ -224,7 +224,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
 
     # ========================================================================
-    # CATEGORY D: MOMENTUM/OSCILLATOR INDICATORS (TRD1 §3.4)
+    # CATEGORY D: MOMENTUM/OSCILLATOR INDICATORS
     # ========================================================================
     # CCI - Commodity Channel Index (Zeng et al. 2025)
     # Typical Price: (H + L + C) / 3

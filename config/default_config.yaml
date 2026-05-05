@@ -1,7 +1,6 @@
 # ============================================================================
 # UNION CONFIGURATION (EXPERIMENTAL)
 # Combines:
-# - FINAL_PLAN.md Canonical TRD Configuration
 # - PSO-LSTM Experimental Configuration
 # ============================================================================
 
@@ -66,9 +65,9 @@ data:
 # FEATURES (UNION)
 # ============================================================================
 features:
-  # Wavelet Denoising (TRD-required)
+  # Wavelet Denoising 
   wavelet:
-    enabled: true            # Apply wavelet denoising (TRD §4.1)
+    enabled: true            # Apply wavelet denoising 
     wavelet: "haar"
     level: 3
     mode: "symmetric"

@@ -334,7 +334,7 @@ only the missing chunks.
   defaults are designed to avoid this; if you see it anyway, `variance_ratio
   < 0.05` confirms collapse and the troubleshooting block has next steps.
 - **Backtest model-path errors**: each model type expects a different
-  directory layout (see §4a-c). LSTM baseline → the `train/` subdir;
+  directory layout (see 4a-c). LSTM baseline → the `train/` subdir;
   PSO-LSTM → the Phase-2 output dir; XGBoost → the `train/` subdir with
   its three JSON sidecars.
 - **PSO is "still running" after hours**: the canonical workload is 20

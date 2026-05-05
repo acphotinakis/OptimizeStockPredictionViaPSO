@@ -4,7 +4,7 @@ Wavelet Denoising Module for Financial Time-Series
 Implements 3-level Haar wavelet transform with soft thresholding for noise reduction.
 Strictly enforces leakage-free processing: threshold computed on training data only.
 
-TRD Reference: TRD1 §4.1, TRD2 §4.1, TRD3 §4.1
+TRD Reference: TRD1 4.1, TRD2 4.1, TRD3 4.1
 Paper Attribution: Zeng et al. 2025
 
 Author: System Architect

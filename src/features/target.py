@@ -3,7 +3,7 @@ Canonical Target Computation Module
 
 This module provides a SINGLE source of truth for target variable computation.
 
-TARGET DEFINITION (TRD1 §1.3):
+TARGET DEFINITION :
     y[t] = log(Close[t+1] / Close[t])
 
 Equivalent to:

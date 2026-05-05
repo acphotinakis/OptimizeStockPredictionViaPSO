@@ -1,9 +1,9 @@
 """
 Canonical Temporal Split Implementation
 
-Implements the authoritative 70/10/20 chronological split as defined in FINAL_PLAN.md.
+Implements the authoritative 70/10/20 chronological split.
 
-MANDATORY RULES (FINAL_PLAN.md Section 2):
+MANDATORY RULES:
 - Train: 70% earliest data
 - Val: 10% next chronological block
 - Test: 20% most recent data
@@ -36,12 +36,6 @@ def compute_canonical_split(
 
     CRITICAL: This is the ONLY authorized split function for the system.
     All models MUST use identical splits for fair comparison.
-
-    Split Rules (FINAL_PLAN.md Section 2.1):
-    - Chronological ordering preserved
-    - No shuffling
-    - No overlap
-    - Fixed boundaries
 
     Args:
         data: Full dataset with DatetimeIndex
@@ -160,6 +154,6 @@ def verify_split_integrity(
     assert train_data.index[-1] < val_data.index[0], "Train not before val"
     assert val_data.index[-1] < test_data.index[0], "Val not before test"
 
-    logger.info(" Split integrity verified (FINAL_PLAN.md compliant)")
+    logger.info(" Split integrity verified")
 
     return True
