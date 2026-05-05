@@ -123,8 +123,15 @@ def align_to_nyse_calendar(
     freq = normalize_freq(timeframe)
 
     if timeframe in ("1Day", "1D"):
-        # For daily bars use one entry per session (session close in UTC).
-        canonical_index = pd.DatetimeIndex(schedule["market_close"]).tz_convert("UTC")
+        # For daily bars use one entry per NYSE session, stamped at session
+        # open in ET (= 00:00 ET = 05:00 UTC). This matches Alpaca's daily-bar
+        # timestamp convention; using market_close (21:00 UTC) here would
+        # mismatch every raw row and force the cleaner to drop them all.
+        canonical_index = (
+            pd.DatetimeIndex(schedule.index)
+            .tz_localize("America/New_York")
+            .tz_convert("UTC")
+        )
     else:
         # ``mcal.date_range`` returns RTH-only timestamps in UTC for intraday
         # frequencies. This naturally excludes pre-market / after-hours.
