@@ -29,7 +29,7 @@ pyyaml>=6.0.0
 python-dotenv>=1.0.0
 
 # Logging & monitoring
-tqdm>=4.66.0
+tqdm>=4.70.1
 prettytable>=3.10.0
 
 # Testing
