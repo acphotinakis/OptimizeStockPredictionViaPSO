@@ -18,7 +18,7 @@ pandas-ta>=0.3.14b
 ta-lib>=0.4.28
 
 # Data storage
-pyarrow>=15.0.0
+pyarrow>=25.0.1
 tables>=3.9.0
 
 # Scientific computing
