@@ -15,7 +15,7 @@ pandas-market-calendars>=4.3.0
 
 # Technical indicators
 pandas-ta>=0.3.14b
-ta-lib>=0.4.28
+ta-lib>=0.8.1
 
 # Data storage
 pyarrow>=15.0.0
