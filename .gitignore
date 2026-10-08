@@ -24,7 +24,7 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
 
 # IDE
 .vscode/
@@ -38,62 +38,74 @@ ENV/
 .ipynb_checkpoints
 *.ipynb
 
-# Data
-data/raw/
-data/processed/
-data/features/
+# Environment & Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.credentials
+credentials.json
+secrets.json
+service-account.json
 
-# Results
+# Machine-learning datasets and serialized artifacts
+*.parquet
+*.feather
+*.arrow
+*.npy
+*.npz
+*.csv
+*.joblib
+*.pickle
+*.pkl
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.hdf5
+*.h5
+
+# Local datasets and experiment outputs
+data/
+!src/data/
 results/
 logs/
 *.log
-
-# Environment
-.env
-
-# Model checkpoints
-*.pth
-*.pt
-*.pkl
-*.h5
+checkpoints/
+wandb/
+mlruns/
 
 # Plots
 *.png
 *.jpg
-# *.pdf
+
+# Python tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
 
 # OS
 Thumbs.db
 
-
-
-debug_unzip
+# Project archives and temp files
+debug_unzip/
 project_archive.zip
-
-# .agent_skills
-
-.agent_skills
-
-# .gemini
-
-data/
-!src/data/
-
+backup/
 _feature_opts/
-
-tests/
-
-ac
-
 streamlit/
-
-# plans/
-
 plans/
+ac/
 
-.gemini/
+# Tooling
+.agent_skills/
 .gemini/
 CLAUDE.md
 .claude/*
-
-backup/

@@ -15,17 +15,17 @@ PROJECT_ROOT = CURRENT_FILE.parents[1]  # adjust if structure changes
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.debug_logs import (
+from src.data.debug_logs import (  # noqa: E402
     flatten_cleaning_report,
     log_all_cleaning_reports,
     log_cleaning_report,
 )
-from src.data.utils import _load_tickers, _save_parquet
-from src.utils.data_storage import _load_parquet
-from src.data.cleaner import DataCleaner
-from src.data.alpaca_ingestor import AlpacaIngestor
-from src.utils.logger import LogFileMode, setup_logger
-from src.utils.config_loader import load_config
+from src.data.utils import _load_tickers, _save_parquet  # noqa: E402
+from src.utils.data_storage import _load_parquet  # noqa: E402
+from src.data.cleaner import DataCleaner  # noqa: E402
+from src.data.alpaca_ingestor import AlpacaIngestor  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
+from src.utils.config_loader import load_config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +128,7 @@ def align_to_nyse_calendar(
         # timestamp convention; using market_close (21:00 UTC) here would
         # mismatch every raw row and force the cleaner to drop them all.
         canonical_index = (
-            pd.DatetimeIndex(schedule.index)
-            .tz_localize("America/New_York")
-            .tz_convert("UTC")
+            pd.DatetimeIndex(schedule.index).tz_localize("America/New_York").tz_convert("UTC")
         )
     else:
         # ``mcal.date_range`` returns RTH-only timestamps in UTC for intraday

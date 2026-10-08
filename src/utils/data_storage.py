@@ -1,26 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import json
-import pickle
-import sys
-from pathlib import Path
 import logging
-import numpy as np
-import psutil
-import os
-import json
-import sys
 from pathlib import Path
+from typing import Dict, List, Tuple
+
 import numpy as np
-import logging
-from tqdm import tqdm
-from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +17,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def load_training_data(ticker_dir: Path):
+def load_training_data(
+    ticker_dir: Path,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     logger.info("\n[TRAIN] Loading data...")
 
     X_train_flat = np.load(ticker_dir / "X_train.npy", mmap_mode="r")
@@ -82,28 +71,54 @@ def load_windows(data_dir: Path, ticker: str):
     )
 
 
-def load_feature_names(features_dir: Path, ticker: str) -> list:
-    """Load feature names from metadata.pkl for a given ticker."""
-    path = features_dir / ticker / "metadata.pkl"
+def load_feature_names(features_dir: Path, ticker: str) -> List[str]:
+    """Safely load feature names from JSON metadata for a given ticker.
 
-    if not path.exists():
-        raise FileNotFoundError(f"Metadata file not found: {path}")
+    Avoids unsafe pickle deserialization by reading standard JSON metadata.
+    Searches for feature_names.json, selected_features.json, metadata.json,
+    or <ticker>_frozen_state.json in order.
+    """
+    ticker_dir = features_dir / ticker
 
-    try:
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-    except Exception as e:
-        raise RuntimeError(f"Failed to read or parse {path}: {e}")
+    # 1. Direct feature_names.json
+    fn_path = ticker_dir / "feature_names.json"
+    if fn_path.exists():
+        with open(fn_path, "r", encoding="utf-8") as f:
+            names = json.load(f)
+        if isinstance(names, list):
+            return names
 
-    if "feature_names" not in data:
-        raise KeyError(f"'feature_names' key missing in {path}")
+    # 2. selected_features.json
+    sf_path = ticker_dir / "selected_features.json"
+    if sf_path.exists():
+        with open(sf_path, "r", encoding="utf-8") as f:
+            names = json.load(f)
+        if isinstance(names, list):
+            return names
 
-    feature_names = data["feature_names"]
+    # 3. metadata.json
+    meta_path = ticker_dir / "metadata.json"
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "feature_names" in data:
+            names = data["feature_names"]
+            if isinstance(names, list):
+                return names
 
-    if not isinstance(feature_names, list):
-        raise TypeError(f"'feature_names' in {path} is not a list")
+    # 4. <ticker>_frozen_state.json
+    frozen_path = ticker_dir / f"{ticker}_frozen_state.json"
+    if frozen_path.exists():
+        with open(frozen_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            names = data.get("feature_names_selected") or data.get("feature_names_raw")
+            if isinstance(names, list):
+                return names
 
-    return feature_names
+    raise FileNotFoundError(
+        f"No valid feature names JSON file found for ticker '{ticker}' in {ticker_dir}"
+    )
 
 
 def _load_parquet(path: Path) -> pd.DataFrame:
@@ -112,10 +127,10 @@ def _load_parquet(path: Path) -> pd.DataFrame:
 
     df = pd.read_parquet(path)
     df = df.sort_index()
-    logger.info(f"Loaded {path} | Rows: {len(df)}")
-    logger.info(f"Columns: {df.columns.tolist()}")
+    logger.info("Loaded %s | Rows: %d", path, len(df))
+    logger.info("Columns: %s", df.columns.tolist())
     if not df.index.is_monotonic_increasing:
-        logger.warning(f"Non-monotonic index, sorting")
+        logger.warning("Non-monotonic index, sorting")
         df = df.sort_index()
 
     return df
@@ -139,13 +154,15 @@ def _load_parquet_close_volume(path: Path, tf: str) -> pd.DataFrame:
     df = df[["close"]]
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
-    logger.info(f"Loaded {path} | Rows: {len(df)}")
-    logger.info(f"Columns: {df.columns.tolist()}")
+    logger.info("Loaded %s | Rows: %d", path, len(df))
+    logger.info("Columns: %s", df.columns.tolist())
 
     return df
 
 
-def load_all_timeframes(raw_output_dir: Path, ticker: str, timeframes: list[str]):
+def load_all_timeframes(
+    raw_output_dir: Path, ticker: str, timeframes: List[str]
+) -> Dict[str, pd.DataFrame]:
     data = {}
 
     for tf in timeframes:
@@ -166,7 +183,6 @@ def load_all_timeframes(raw_output_dir: Path, ticker: str, timeframes: list[str]
         # ------------------------------------------------------------
         # 2. Convert UTC --> America/New_York (DST-aware)
         # ------------------------------------------------------------
-        # df.index = df.index.tz_convert("America/New_York")
         if df.index.tz is None:
             df.index = df.index.tz_localize("America/New_York")
         else:

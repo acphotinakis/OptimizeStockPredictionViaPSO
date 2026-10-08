@@ -11,7 +11,6 @@ from typing import Dict
 import numpy as np
 import sys
 from pathlib import Path
-import numpy as np
 import logging
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -142,9 +141,7 @@ def auc_ternary(
                 y_pred,  # score for "up"
             ]
         )
-        return float(
-            roc_auc_score(y_bin, score_matrix, average="micro", multi_class="ovr")
-        )
+        return float(roc_auc_score(y_bin, score_matrix, average="micro", multi_class="ovr"))
     except Exception:
         return float("nan")
 

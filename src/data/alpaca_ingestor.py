@@ -21,7 +21,6 @@ from datetime import timezone
 import pandas as pd
 from dotenv import load_dotenv
 
-from src.utils.config_loader import Config
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +48,7 @@ class AlpacaIngestor:
         # (README convention) or ``ALPACA_API_SECRET`` (.env.example convention)
         # so users templated from either source work without renaming.
         api_key = api_key or os.getenv("ALPACA_API_KEY")
-        secret_key = (
-            api_secret
-            or os.getenv("ALPACA_SECRET_KEY")
-            or os.getenv("ALPACA_API_SECRET")
-        )
+        secret_key = api_secret or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
 
         if not api_key or not secret_key:
             logger.error(
@@ -132,8 +127,7 @@ class AlpacaIngestor:
         tf = self.timeframe_map.get(timeframe)
         if tf is None:
             raise ValueError(
-                f"Unsupported timeframe: {timeframe!r}. "
-                f"Choose from {list(self.timeframe_map)}"
+                f"Unsupported timeframe: {timeframe!r}. Choose from {list(self.timeframe_map)}"
             )
 
         request_params = StockBarsRequest(
@@ -248,16 +242,12 @@ class AlpacaIngestor:
             out_path = output_dir / f"{ticker}.parquet"
 
             if skip_existing and out_path.exists():
-                logger.info(
-                    "[%d/%d] %s already exists - skipping", idx, len(tickers), ticker
-                )
+                logger.info("[%d/%d] %s already exists - skipping", idx, len(tickers), ticker)
                 continue
 
             logger.info("[%d/%d] Processing %s", idx, len(tickers), ticker)
 
-            for chunk_start, chunk_end in self._chunk_time_range(
-                start_dt, end_dt, years=2
-            ):
+            for chunk_start, chunk_end in self._chunk_time_range(start_dt, end_dt, years=2):
                 logger.info(
                     "  Fetching %s [%s --> %s]",
                     ticker,

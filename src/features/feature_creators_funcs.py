@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-from numba import njit
 import logging
-from typing import Optional
+
+try:
+    from numba import njit
+except ImportError:
+
+    def njit(func=None, **kwargs):
+        if func is not None:
+            return func
+
+        def decorator(f):
+            return f
+
+        return decorator
+
 
 import numpy as np
 import pandas as pd
@@ -58,16 +70,12 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Lag-1 autocorrelation ─────────────────────────────────────────────────
     for w in (20, 60):
-        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=w).apply(
-            _fast_autocorr, raw=True
-        )
+        out[f"ret_autocorr_1_{w}"] = r.rolling(w, min_periods=w).apply(_fast_autocorr, raw=True)
 
     # ── Price range ratio ─────────────────────────────────────────────────────
     for w in (20, 60):
         roll_C = C.rolling(w, min_periods=w)
-        out[f"range_ratio_{w}"] = (roll_C.max() - roll_C.min()) / (
-            roll_C.mean() + 1e-10
-        )
+        out[f"range_ratio_{w}"] = (roll_C.max() - roll_C.min()) / (roll_C.mean() + 1e-10)
 
     # ── Realized volatility ───────────────────────────────────────────────────
     r_sq = r**2
@@ -75,9 +83,7 @@ def compute_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
         out[f"rv_{w}"] = np.sqrt(r_sq.rolling(w, min_periods=w).sum())
 
     # ── Hurst exponent (R/S) ──────────────────────────────────────────────────
-    out["hurst_exp_60"] = (
-        r.rolling(60, min_periods=60).apply(_hurst_single, raw=True).fillna(0.5)
-    )
+    out["hurst_exp_60"] = r.rolling(60, min_periods=60).apply(_hurst_single, raw=True).fillna(0.5)
     logger.info(
         f"Computed {len(out.columns)} statistical features for {len(out)} samples "
         f"(columns: {list(out.columns.tolist())}...)"
@@ -148,7 +154,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     C = df["close"]
     H = df["high"]
     L = df["low"]
-    O = df["open"]
+    open_ = df["open"]
     V = df["volume"]
 
     # Validate no NaN/Inf in input
@@ -156,7 +162,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         ("close", C),
         ("high", H),
         ("low", L),
-        ("open", O),
+        ("open", open_),
         ("volume", V),
     ]:
         if series.isna().any():
@@ -170,7 +176,7 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     # ========================================================================
     # CATEGORY A: PRICE FEATURES
     # ========================================================================
-    out["open"] = O
+    out["open"] = open_
     out["high"] = H
     out["low"] = L
     out["close"] = C
@@ -208,16 +214,12 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     out["boll_mid"] = sma20  # Zeng et al. 2025 explicit requirement
 
     # Bollinger Band %B (position within bands)
-    out["bb_pct_b"] = (C - out["boll_lower"]) / (
-        out["boll_upper"] - out["boll_lower"] + 1e-10
-    )
+    out["bb_pct_b"] = (C - out["boll_lower"]) / (out["boll_upper"] - out["boll_lower"] + 1e-10)
 
     # Average True Range
     # TR calculation: max(H-L, |H-C_prev|, |L-C_prev|)
     prev_C = C.shift(1)
-    tr = pd.DataFrame(
-        {"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}
-    ).max(axis=1)
+    tr = pd.DataFrame({"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}).max(axis=1)
 
     # ATR14: Wilder's RMA in a single pass.
     # Formula: ATR[t] = (13*ATR[t-1] + TR[t]) / 14, equivalent to EWM with alpha=1/14.
@@ -249,16 +251,14 @@ def compute_trd_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     range_hl = HH - LL
 
     # Double EMA smoothing (3-period)
-    d_s = (
-        relative_range.ewm(span=3, adjust=False).mean().ewm(span=3, adjust=False).mean()
-    )
+    d_s = relative_range.ewm(span=3, adjust=False).mean().ewm(span=3, adjust=False).mean()
     hld_s = range_hl.ewm(span=3, adjust=False).mean().ewm(span=3, adjust=False).mean()
     out["smi"] = 200 * (d_s / (hld_s + 1e-10))
 
     # WVAD momentum (Zeng et al. 2025). Raw cumulative WVAD is split-dependent
     # under per-split feature generation; expose only the windowed momentum.
     hl_range = H - L + 1e-10
-    co_diff = C - O
+    co_diff = C - open_
     wvad_contrib = (co_diff / hl_range) * V
     wvad = wvad_contrib.cumsum()
     out["wvad_momentum_20"] = wvad.diff(20) / (
@@ -332,21 +332,19 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
     C = df["close"]
     H = df["high"]
     L = df["low"]
-    O = df["open"]
+    open_ = df["open"]
     prev_C = C.shift(1)
 
     # True range for intraday volatility
-    tr = pd.DataFrame(
-        {"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}
-    ).max(axis=1)
+    tr = pd.DataFrame({"hl": H - L, "hc": (H - prev_C).abs(), "lc": (L - prev_C).abs()}).max(axis=1)
 
     out = pd.DataFrame(
         {
             "mid_price": (H + L) / 2.0,
             "hl_ratio": (H - L) / (prev_C + 1e-10),  # Intraday range / prior close
-            "co_ratio": (C - O) / (prev_C + 1e-10),  # Close-open / prior close
+            "co_ratio": (C - open_) / (prev_C + 1e-10),  # Close-open / prior close
             "true_range": tr / (prev_C + 1e-10),  # Normalized true range
-            "intrabar_vol": (H - L) / (O + 1e-10),  # Intrabar volatility
+            "intrabar_vol": (H - L) / (open_ + 1e-10),  # Intrabar volatility
         },
         index=df.index,
     )
@@ -403,15 +401,11 @@ def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
         np.cumsum(np.where(C > C.shift(1), V, np.where(C < C.shift(1), -V, 0))),
         index=df.index,
     )
-    out["obv_momentum_20"] = obv.diff(20) / (
-        obv.abs().rolling(20, min_periods=20).mean() + 1e-10
-    )
+    out["obv_momentum_20"] = obv.diff(20) / (obv.abs().rolling(20, min_periods=20).mean() + 1e-10)
 
     # ── Accumulation/Distribution slope (momentum only) ──────────────────────
     adl = (clv * V).cumsum()
-    out["adl_slope_10"] = adl.diff(10) / (
-        adl.abs().rolling(10, min_periods=10).mean() + 1e-10
-    )
+    out["adl_slope_10"] = adl.diff(10) / (adl.abs().rolling(10, min_periods=10).mean() + 1e-10)
 
     # ── Chaikin Money Flow ────────────────────────────────────────────────────
     out["cmf_20"] = (clv * V).rolling(20, min_periods=20).sum() / (

@@ -6,20 +6,7 @@ from enum import Enum
 
 import numpy as np
 import pandas as pd
-import sys
-from pathlib import Path
-from typing import Any, Dict, Optional
-
-import numpy as np
-import pandas as pd
 import logging
-
-
-# Add project root to path
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 
 from src.evaluation.metrics import (
     sharpe_ratio,
@@ -32,6 +19,7 @@ from src.evaluation.metrics import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 SIGNAL_THRESHOLD = 1e-4
 
@@ -135,9 +123,9 @@ def alt_generate_signals(
     n_neutral = np.sum(signals == 0)
 
     logger.info(f"Signals generated: {len(signals)} total")
-    logger.info(f"  Long: {n_long} ({100*n_long/len(signals):.1f}%)")
-    logger.info(f"  Short: {n_short} ({100*n_short/len(signals):.1f}%)")
-    logger.info(f"  Neutral: {n_neutral} ({100*n_neutral/len(signals):.1f}%)")
+    logger.info(f"  Long: {n_long} ({100 * n_long / len(signals):.1f}%)")
+    logger.info(f"  Short: {n_short} ({100 * n_short / len(signals):.1f}%)")
+    logger.info(f"  Neutral: {n_neutral} ({100 * n_neutral / len(signals):.1f}%)")
 
     return signals
 
@@ -202,9 +190,7 @@ class Backtester:
             state["bar_cost_accumulator"] = 0.0
 
             # 1. Check session boundaries
-            session_event = self._check_session_boundary(
-                t, timestamps, session_starts, et_index
-            )
+            session_event = self._check_session_boundary(t, timestamps, session_starts, et_index)
 
             # 2. Update session state if opening
             if session_event == SessionEvent.OPEN:
@@ -224,9 +210,7 @@ class Backtester:
             state = self._apply_risk_controls(t, state, signals)
 
             # 6. Record bar return and per-bar cost
-            bar_ret = (state["equity"][-1] - state["equity"][-2]) / (
-                state["equity"][-2] + 1e-10
-            )
+            bar_ret = (state["equity"][-1] - state["equity"][-2]) / (state["equity"][-2] + 1e-10)
             state["bar_returns"].append(bar_ret)
             state["bar_costs"].append(float(state["bar_cost_accumulator"]))
             state["current_step"] = t
@@ -433,9 +417,7 @@ class Backtester:
 
         # Check daily loss limit
         session_open_equity = state["session_open_equity"]
-        session_dd = (session_open_equity - current_equity) / (
-            session_open_equity + 1e-10
-        )
+        session_dd = (session_open_equity - current_equity) / (session_open_equity + 1e-10)
         if session_dd > self.daily_limit:
             state["daily_halt"] = True
 

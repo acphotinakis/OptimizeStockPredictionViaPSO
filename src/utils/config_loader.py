@@ -318,7 +318,6 @@ class FitnessConfig:
 
 @dataclass
 class PSOConfig:
-
     enabled: bool
     n_particles: int
     n_iterations: int

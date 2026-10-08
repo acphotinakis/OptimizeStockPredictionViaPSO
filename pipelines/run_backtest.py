@@ -2,7 +2,6 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -13,24 +12,24 @@ import yaml
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.models.lstm_model import LSTMModel
-from src.models.xgboost_model import XGBoostModel
-from src.models import set_seeds
-from src.backtesting.backtester import BacktestResult, Backtester
-from pipelines.run_lstm import (
+from src.models.lstm_model import LSTMModel  # noqa: E402
+from src.models.xgboost_model import XGBoostModel  # noqa: E402
+from src.models import set_seeds  # noqa: E402
+from src.backtesting.backtester import BacktestResult, Backtester  # noqa: E402
+from pipelines.run_lstm import (  # noqa: E402
     load_trained_model as load_trained_lstm_model,
     save_results,
 )
-from pipelines.run_xgboost import load_trained_model as load_trained_xgb_model
-from src.data.windowing import build_lstm_windows, build_xgboost_lag_features
-from src.utils.config_loader import Config, load_config
-from src.backtesting.backtest_results import BacktestResults, save_backtest_results
-from src.evaluation.metrics import (
+from pipelines.run_xgboost import load_trained_model as load_trained_xgb_model  # noqa: E402
+from src.data.windowing import build_lstm_windows, build_xgboost_lag_features  # noqa: E402
+from src.utils.config_loader import Config, load_config  # noqa: E402
+from src.backtesting.backtest_results import BacktestResults, save_backtest_results  # noqa: E402
+from src.evaluation.metrics import (  # noqa: E402
     compute_and_log_all_statistical_metrics,
     compute_and_log_all_trading_metrics,
 )
-from src.evaluation.plotting import create_all_plots
-from src.utils.logger import LogFileMode, setup_logger
+from src.evaluation.plotting import create_all_plots  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +84,8 @@ def compute_all_metrics(
     return statistical_metrics, trading_metrics
 
 
-def build_experiment_dir(
-    ticker: str, timeframe: str, run_id: str, model_type: str
-) -> Path:
-    return (
-        PROJECT_ROOT
-        / "results"
-        / "experiments"
-        / f"{ticker}_{timeframe}_{model_type}_{run_id}"
-    )
+def build_experiment_dir(ticker: str, timeframe: str, run_id: str, model_type: str) -> Path:
+    return PROJECT_ROOT / "results" / "experiments" / f"{ticker}_{timeframe}_{model_type}_{run_id}"
 
 
 def build_experiment_dirs(base: Path) -> dict:
@@ -138,9 +130,7 @@ def load_backtest_data(
     # -----------------------------
     test_index = pd.to_datetime(test_index, utc=True).tz_convert(None)
 
-    logger.info(
-        f"[INDEX] range={test_index.min()} --> {test_index.max()} | n={len(test_index)}"
-    )
+    logger.info(f"[INDEX] range={test_index.min()} --> {test_index.max()} | n={len(test_index)}")
 
     # -----------------------------
     # Load price data
@@ -152,9 +142,7 @@ def load_backtest_data(
         df.index = df.index.tz_convert("UTC").tz_localize(None)
 
     logger.info(f"[PRICES] shape={df.shape} cols={df.columns.tolist()}")
-    logger.info(
-        f"[PRICES] range={df.index.min()} --> {df.index.max()} | dtype={df.index.dtype}"
-    )
+    logger.info(f"[PRICES] range={df.index.min()} --> {df.index.max()} | dtype={df.index.dtype}")
 
     # -----------------------------
     # ALIGNMENT CHECK
@@ -283,9 +271,7 @@ def _load_pso_lstm_model(
         "activation",
         "output_activation",
     )
-    architecture_config = {
-        k: full_config[k] for k in architecture_keys if k in full_config
-    }
+    architecture_config = {k: full_config[k] for k in architecture_keys if k in full_config}
     architecture_config.setdefault("output_units", 1)
     architecture_config.setdefault("activation", "relu")
     architecture_config.setdefault("output_activation", "linear")
@@ -374,9 +360,7 @@ def backtest_baseline_lstm(
     timestamps = timestamps[lookback:-1]
     logger.info("Running canonical evaluation via model.evaluate()...")
     metrics, y_pred = model.evaluate(X_test_win, y_test_win)
-    logger.info(
-        f"[WINDOWS] X={X_test_win.shape} y={y_test_win.shape} || {y_pred.shape}"
-    )
+    logger.info(f"[WINDOWS] X={X_test_win.shape} y={y_test_win.shape} || {y_pred.shape}")
 
     # Ensure alignment
     if len(y_pred) != len(y_test):
@@ -445,9 +429,7 @@ def backtest_pso_lstm(
 
     logger.info("Running canonical evaluation via model.evaluate()...")
     metrics, y_pred = model.evaluate(X_test_win, y_test_win)
-    logger.info(
-        f"[WINDOWS] X={X_test_win.shape} y={y_test_win.shape} || {y_pred.shape}"
-    )
+    logger.info(f"[WINDOWS] X={X_test_win.shape} y={y_test_win.shape} || {y_pred.shape}")
 
     if len(y_pred) != len(y_test):
         raise ValueError(
@@ -513,9 +495,7 @@ def backtest_xgboost(
 
     logger.info("Running canonical evaluation via model.evaluate()...")
     metrics, y_pred = model.evaluate(X_test_lag, y_test_lag)
-    logger.info(
-        f"[LAG FEATURES] X={X_test_lag.shape} y={y_test_lag.shape} || {y_pred.shape}"
-    )
+    logger.info(f"[LAG FEATURES] X={X_test_lag.shape} y={y_test_lag.shape} || {y_pred.shape}")
 
     if len(y_pred) != len(y_test):
         raise ValueError(

@@ -63,9 +63,7 @@ def build_lstm_windows(
     N = len(X)
     n_windows = N - lookback - horizon - 1
     if n_windows <= 0:
-        raise ValueError(
-            f"Not enough samples ({N}) for lookback={lookback} + horizon={horizon}"
-        )
+        raise ValueError(f"Not enough samples ({N}) for lookback={lookback} + horizon={horizon}")
 
     X_seq = np.array(
         [X[i : i + lookback] for i in range(n_windows)],
@@ -178,7 +176,7 @@ def build_xgboost_lag_features(
 
     logger.info(
         f"Built {len(y_aligned)} lagged samples: "
-        f"X {X.shape} --> {X_lagged.shape} ({lookback+1} lags), "
+        f"X {X.shape} --> {X_lagged.shape} ({lookback + 1} lags), "
         f"y {y.shape} --> {y_aligned.shape}"
     )
 

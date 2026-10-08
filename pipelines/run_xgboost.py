@@ -7,19 +7,18 @@ from typing import Dict, Optional
 import uuid
 
 import numpy as np
-import yaml
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from plots.xgboost_plots import plot_full_xgboost_training_report
-from src.models.xgboost_model import XGBoostModel
-from src.models.xgboost_trainer import XGBoostTrainer
-from src.data.windowing import build_xgboost_lag_features
-from src.utils.config_loader import Config, load_config
-from src.utils.logger import LogFileMode, setup_logger
-from src.models import set_seeds
+from plots.xgboost_plots import plot_full_xgboost_training_report  # noqa: E402
+from src.models.xgboost_model import XGBoostModel  # noqa: E402
+from src.models.xgboost_trainer import XGBoostTrainer  # noqa: E402
+from src.data.windowing import build_xgboost_lag_features  # noqa: E402
+from src.utils.config_loader import Config, load_config  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
+from src.models import set_seeds  # noqa: E402
 
 # Configure logging
 
@@ -58,8 +57,7 @@ def load_feature_data(data_path: Path) -> dict:
         # ----------------------------
         if not X_path.exists() or not y_path.exists():
             raise FileNotFoundError(
-                f"Missing {split} data: {X_path} or {y_path}\n"
-                f"Run canonical feature pipeline first."
+                f"Missing {split} data: {X_path} or {y_path}\nRun canonical feature pipeline first."
             )
 
         x_size_mb = X_path.stat().st_size / 1e6
@@ -105,12 +103,8 @@ def load_test_data(data_path: Path, lookback: int) -> tuple[np.ndarray, np.ndarr
 
     logger.info(f"[test] Raw shapes -> X: {X_test.shape}, y: {y_test.shape}")
 
-    X_test_win, y_test_win = build_xgboost_lag_features(
-        X_test, y_test, lookback=lookback
-    )
-    logger.info(
-        f"[test] Windowed shapes -> X: {X_test_win.shape}, y: {y_test_win.shape}"
-    )
+    X_test_win, y_test_win = build_xgboost_lag_features(X_test, y_test, lookback=lookback)
+    logger.info(f"[test] Windowed shapes -> X: {X_test_win.shape}, y: {y_test_win.shape}")
 
     if np.isnan(X_test_win).any() or np.isnan(y_test_win).any():
         raise ValueError("Test data contains NaN values")
@@ -154,7 +148,6 @@ def save_results(
 
 def load_trained_model(model_dir: Path, config: Config) -> XGBoostModel:
     model_path = model_dir / "xgboost_model.json"
-    config_path = model_dir / "model_config.json"
     feature_importance_json_path = model_dir / "feature_importance.json"
     feature_names_path = model_dir / "feature_names.json"
 
@@ -222,12 +215,10 @@ def train_xgboost(
     logger.info("Using LAG-BASED representation (NOT flattened sequences)")
     logger.info(f"Each sample: [X[t], X[t-1], ..., X[t-{lookback}]]")
 
-    X_train_lag, y_train_lag = build_xgboost_lag_features(
-        X_train, y_train, lookback=lookback
-    )
+    X_train_lag, y_train_lag = build_xgboost_lag_features(X_train, y_train, lookback=lookback)
     X_val_lag, y_val_lag = build_xgboost_lag_features(X_val, y_val, lookback=lookback)
 
-    logger.info(f"Lag-based feature shapes:")
+    logger.info("Lag-based feature shapes:")
     logger.info(f"  X_train: {X_train_lag.shape}, y_train: {y_train_lag.shape}")
     logger.info(f"  X_val:   {X_val_lag.shape}, y_val:   {y_val_lag.shape}")
     logger.info(f"  Features per sample: {X_train_lag.shape[1]}")
@@ -267,9 +258,7 @@ def train_xgboost(
     with open(feature_names_path, "w") as f:
         json.dump(feature_names, f, indent=4)
 
-    model, history = trainer.train(
-        X_train_lag, y_train_lag, X_val_lag, y_val_lag, feature_names
-    )
+    model, history = trainer.train(X_train_lag, y_train_lag, X_val_lag, y_val_lag, feature_names)
 
     model_path = output_dir / "xgboost_model.json"
     model.save(str(model_path))
@@ -283,8 +272,7 @@ def train_xgboost(
         for key, value in history.items():
             if isinstance(value, dict):
                 history_serializable[key] = {
-                    k: v.tolist() if isinstance(v, np.ndarray) else v
-                    for k, v in value.items()
+                    k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in value.items()
                 }
             else:
                 history_serializable[key] = value
@@ -337,7 +325,9 @@ def train_xgboost(
             default=lambda x: (
                 float(x)
                 if isinstance(x, (np.float32, np.float64))
-                else int(x) if isinstance(x, (np.int32, np.int64)) else str(x)
+                else int(x)
+                if isinstance(x, (np.int32, np.int64))
+                else str(x)
             ),
         )
 
@@ -345,12 +335,7 @@ def train_xgboost(
 
 
 def build_experiment_dir(ticker: str, timeframe: str, run_id: str) -> Path:
-    return (
-        PROJECT_ROOT
-        / "results"
-        / "experiments"
-        / f"{ticker}_{timeframe}_{MODEL_TYPE}_{run_id}"
-    )
+    return PROJECT_ROOT / "results" / "experiments" / f"{ticker}_{timeframe}_{MODEL_TYPE}_{run_id}"
 
 
 def build_experiment_dirs(base: Path) -> dict:
@@ -436,9 +421,7 @@ def test_xgboost(
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--config", type=Path, default=PROJECT_ROOT / "config/default_config.yaml"
-    )
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config/default_config.yaml")
 
     parser.add_argument("--ticker", type=str, required=True)
     parser.add_argument("--timeframe", type=str, required=True)

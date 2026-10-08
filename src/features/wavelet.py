@@ -18,7 +18,11 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import pywt
+
+try:
+    import pywt
+except ImportError:
+    pywt = None
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,9 @@ def _apply_wavelet(
     Returns:
         Tuple of (X_updated, names_updated) with close_denoised replacing close
     """
+    if pywt is None:
+        raise ImportError("PyWavelets (pywt) is required for wavelet denoising.")
+
     if "close" not in names:
         logger.warning("'close' feature not found, skipping wavelet denoising")
         return X, names, None
@@ -46,17 +53,13 @@ def _apply_wavelet(
 
     if fit_mode:
         # FIT MODE: Compute threshold on training data
-        close_denoised, threshold = apply_wavelet_denoising(
-            close_series, threshold_train=None
-        )
+        close_denoised, threshold = apply_wavelet_denoising(close_series, threshold_train=None)
         _wavelet_threshold = threshold
     else:
         # TRANSFORM MODE: Use fitted threshold
         if _wavelet_threshold is None:
             raise RuntimeError("Wavelet threshold not fitted")
-        close_denoised = apply_wavelet_denoising(
-            close_series, threshold_train=_wavelet_threshold
-        )
+        close_denoised = apply_wavelet_denoising(close_series, threshold_train=_wavelet_threshold)
 
     # Replace close with close_denoised
     X[:, close_idx] = close_denoised.values
@@ -151,9 +154,7 @@ def apply_wavelet_denoising(
     else:
         # TRANSFORM MODE: Use pre-computed threshold (val/test)
         threshold = threshold_train
-        logger.info(
-            f"Wavelet denoising (transform): applying threshold={threshold:.6f}"
-        )
+        logger.info(f"Wavelet denoising (transform): applying threshold={threshold:.6f}")
 
     # Apply soft thresholding to detail coefficients (D1, D2, D3)
     # Approximation A3 (coeffs[0]) is preserved unchanged
@@ -226,9 +227,7 @@ def denoise_pipeline(
     logger.info("Wavelet denoising pipeline: processing train/val/test splits")
 
     # Fit: compute threshold on training data
-    train_denoised, threshold = apply_wavelet_denoising(
-        close_train, threshold_train=None
-    )
+    train_denoised, threshold = apply_wavelet_denoising(close_train, threshold_train=None)
 
     # Transform: apply threshold to validation and test
     val_denoised = apply_wavelet_denoising(close_val, threshold_train=threshold)

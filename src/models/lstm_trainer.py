@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import json
 import numpy as np
 import torch
@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import sys
 import time
-from scipy.stats import skew, kurtosis
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -99,9 +98,7 @@ class LSTMTrainer:
         """
         self.config = config
         self.seed = seed
-        self.device = (
-            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
 
         self.lstm_model = lstm_model
 
@@ -178,8 +175,6 @@ class LSTMTrainer:
         X_val: np.ndarray,
         y_val: np.ndarray,
     ) -> Tuple[LSTMModel, Dict[str, Any]]:
-
-        import time
 
         # -------------------------------------------------
         # VALIDATION
@@ -261,7 +256,6 @@ class LSTMTrainer:
         # TRAINING LOOP
         # =================================================
         for epoch in range(epochs):
-
             epoch_start = time.time()
             epoch_grad_norms = []
 
@@ -278,12 +272,11 @@ class LSTMTrainer:
             else:
                 train_iter = tqdm(
                     train_loader,
-                    desc=f"Epoch {epoch+1}/{epochs} [Train]",
+                    desc=f"Epoch {epoch + 1}/{epochs} [Train]",
                     leave=False,
                 )
 
             for batch_idx, (batch_X, batch_y) in enumerate(train_iter):
-
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
 
@@ -348,7 +341,7 @@ class LSTMTrainer:
             else:
                 val_iter = tqdm(
                     val_loader,
-                    desc=f"Epoch {epoch+1}/{epochs} [Val]",
+                    desc=f"Epoch {epoch + 1}/{epochs} [Val]",
                     leave=False,
                 )
 
@@ -358,7 +351,6 @@ class LSTMTrainer:
 
             with torch.no_grad():
                 for batch_X, batch_y in val_iter:
-
                     batch_X = batch_X.to(self.device)
                     batch_y = batch_y.to(self.device)
 
@@ -394,13 +386,13 @@ class LSTMTrainer:
                 train_metrics = compute_and_log_all_statistical_metrics(
                     y_true=train_true_all,
                     y_pred=train_preds_all,
-                    label=f"Train Epoch {epoch+1}",
+                    label=f"Train Epoch {epoch + 1}",
                 )
 
                 val_metrics = compute_and_log_all_statistical_metrics(
                     y_true=val_true_all,
                     y_pred=val_preds_all,
-                    label=f"Val Epoch {epoch+1}",
+                    label=f"Val Epoch {epoch + 1}",
                 )
             finally:
                 if quiet:
@@ -409,9 +401,7 @@ class LSTMTrainer:
             # -------------------------------------------------
             # ADDITIONAL FINANCIAL SIGNAL
             # -------------------------------------------------
-            variance_ratio = float(
-                np.var(val_preds_all) / (np.var(val_true_all) + 1e-8)
-            )
+            variance_ratio = float(np.var(val_preds_all) / (np.var(val_true_all) + 1e-8))
 
             # -------------------------------------------------
             # LOSS SLOPE
@@ -445,9 +435,7 @@ class LSTMTrainer:
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 best_epoch = epoch
-                best_weights = {
-                    k: v.cpu().clone() for k, v in model.state_dict().items()
-                }
+                best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
@@ -496,24 +484,16 @@ class LSTMTrainer:
             raise ValueError(f"{split_name} X must be numpy array")
 
         if X.dtype not in [np.float32, np.float64]:
-            raise ValueError(
-                f"{split_name} X dtype must be float32 or float64, got {X.dtype}"
-            )
+            raise ValueError(f"{split_name} X dtype must be float32 or float64, got {X.dtype}")
 
         if X.ndim != 3:
-            raise ValueError(
-                f"{split_name} X must be 3D (N, 20, F), got shape {X.shape}"
-            )
+            raise ValueError(f"{split_name} X must be 3D (N, 20, F), got shape {X.shape}")
 
         if X.shape[1] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 timestep, got {X.shape[1]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 timestep, got {X.shape[1]}")
 
         if X.shape[2] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 feature, got {X.shape[2]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 feature, got {X.shape[2]}")
 
         if np.isnan(X).any():
             raise ValueError(f"{split_name} X contains NaN values")
@@ -529,9 +509,7 @@ class LSTMTrainer:
                 raise ValueError(f"{split_name} y must be 1D (N,), got shape {y.shape}")
 
             if len(y) != len(X):
-                raise ValueError(
-                    f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}"
-                )
+                raise ValueError(f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}")
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")
@@ -543,9 +521,7 @@ class LSTMTrainer:
         model = self.lstm_model.model
         if model is not None:
             total_params = sum(p.numel() for p in model.parameters())
-            trainable_params = sum(
-                p.numel() for p in model.parameters() if p.requires_grad
-            )
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         else:
             total_params = 0
             trainable_params = 0

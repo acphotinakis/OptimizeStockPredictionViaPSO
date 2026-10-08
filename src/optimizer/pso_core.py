@@ -12,8 +12,14 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import torch
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
 import numpy as np
+
 from tqdm.auto import tqdm
 
 from .particle import LB, UB, Particle
@@ -273,9 +279,7 @@ class StandardPSO:
             self._evaluate_parallel(X_train, y_train, X_val, y_val)
         else:
             for particle in self._swarm:
-                fitness = self._evaluate_particle(
-                    particle, X_train, y_train, X_val, y_val
-                )
+                fitness = self._evaluate_particle(particle, X_train, y_train, X_val, y_val)
                 self._update_bests(particle, fitness)
 
     def _evaluate_particle(
@@ -291,7 +295,7 @@ class StandardPSO:
         Failed evaluations (OOM, NaN loss, divergent training) are logged and
         return ``+inf`` so the swarm can continue without losing the entire run.
         """
-        if torch.cuda.is_available():
+        if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         try:
@@ -299,9 +303,7 @@ class StandardPSO:
             lookback = params["lookback"]
 
             if X_train.shape[1] < lookback:
-                raise ValueError(
-                    f"X_train lookback {X_train.shape[1]} < required {lookback}"
-                )
+                raise ValueError(f"X_train lookback {X_train.shape[1]} < required {lookback}")
 
             X_tr = X_train[:, :lookback, :]
             X_vl = X_val[:, :lookback, :]
@@ -335,7 +337,7 @@ class StandardPSO:
             )
             return float("inf")
         finally:
-            if torch.cuda.is_available():
+            if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
     def _evaluate_parallel(self, X_train, y_train, X_val, y_val) -> None:
@@ -351,9 +353,7 @@ class StandardPSO:
         try:
             with ProcessPoolExecutor(max_workers=self.n_workers) as ex:
                 futures = [
-                    ex.submit(
-                        self._evaluate_particle, p, X_train, y_train, X_val, y_val
-                    )
+                    ex.submit(self._evaluate_particle, p, X_train, y_train, X_val, y_val)
                     for p in self._swarm
                 ]
                 for particle, future in zip(self._swarm, futures):
@@ -369,9 +369,7 @@ class StandardPSO:
                 e,
             )
             for particle in self._swarm:
-                fitness = self._evaluate_particle(
-                    particle, X_train, y_train, X_val, y_val
-                )
+                fitness = self._evaluate_particle(particle, X_train, y_train, X_val, y_val)
                 self._update_bests(particle, fitness)
 
     def _update_bests(self, particle: Particle, fitness: float) -> None:

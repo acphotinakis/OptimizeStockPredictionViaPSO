@@ -23,14 +23,18 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # Specification-required parameters
 GAMMA = 0.9  # Weight for MSE component
 MSW_WEIGHT = 1.0 - GAMMA  # Weight for MSW component (0.1)
 
 
-def compute_msw(model: torch.nn.Module) -> float:
+def compute_msw(model: "torch.nn.Module") -> float:
     """Compute Mean Squared Weight (MSW) for an LSTM model.
 
     MSW is the mean of squared weights across the model's recurrent and
@@ -38,6 +42,7 @@ def compute_msw(model: torch.nn.Module) -> float:
     MSW penalty targets the LSTM cell weight matrices, not bias terms.
     Including biases dilutes the penalty (biases are small but
     plentiful) and pushes MSW magnitudes far above the MSE scale.
+
 
     Args:
         model: PyTorch model whose named parameters are inspected. Only
@@ -51,12 +56,15 @@ def compute_msw(model: torch.nn.Module) -> float:
     References:
         Deng & Peng 2025: MSW regularization for improved generalization.
     """
+    if torch is None:
+        raise ImportError("PyTorch is required to compute MSW.")
+
     total_sq_weight = 0.0
     n_params = 0
 
     for name, param in model.named_parameters():
         if "weight" in name and "bias" not in name:
-            total_sq_weight += torch.sum(param ** 2).item()
+            total_sq_weight += torch.sum(param**2).item()
             n_params += param.numel()
 
     if n_params == 0:
@@ -131,8 +139,7 @@ class SpecCompliantFitness:
 
         if model is None:
             raise ValueError(
-                "Model required for MSW computation. "
-                "Fitness function must receive trained model."
+                "Model required for MSW computation. Fitness function must receive trained model."
             )
 
         msw = compute_msw(model)

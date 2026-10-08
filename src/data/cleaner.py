@@ -1,24 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
-import sys
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Tuple
 
-import numpy as np
 import pandas as pd
-from pandas import Timedelta
-
-from src.data.utils import _parse_timeframe
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-logger = logging.getLogger(__name__)
 
 from constants import MAX_GAP_FILL_BARS
 from src.data.debug_logs import _log_ohlcv_validation_report
+
+logger = logging.getLogger(__name__)
 
 
 class DataCleaner:
@@ -103,7 +93,7 @@ class DataCleaner:
             df, gap_info["gap_segments"]
         )
         self.validation_errors["_remove_long_gaps_report"] = _remove_long_gaps_report
-        logger.info(f"First 10 rows LONG GAP REMOVAL")
+        logger.info("First 10 rows LONG GAP REMOVAL")
         logger.info(f"\n{df[:10]}")
 
         # Refresh gap_info against the post-removal frame so any timestamp-
@@ -117,10 +107,8 @@ class DataCleaner:
         # 6. Apply bounded causal forward fill on the surviving short gaps
         # -----------------------------
         df, _bounded_forward_fill_report = self._bounded_forward_fill(df, gap_info)
-        self.validation_errors["_bounded_forward_fill_report"] = (
-            _bounded_forward_fill_report
-        )
-        logger.info(f"First 10 rows FORWARD FILL")
+        self.validation_errors["_bounded_forward_fill_report"] = _bounded_forward_fill_report
+        logger.info("First 10 rows FORWARD FILL")
         logger.info(f"\n{df[:10]}")
 
         # -----------------------------
@@ -490,9 +478,7 @@ class DataCleaner:
     # SYNCHRONIZED CLEANING SUPPORT (Issue #2 Fix)
     # =========================================================
 
-    def get_invalid_mask(
-        self, df: pd.DataFrame, after_forward_fill: bool = True
-    ) -> pd.Series:
+    def get_invalid_mask(self, df: pd.DataFrame, after_forward_fill: bool = True) -> pd.Series:
         """
         Return boolean mask of invalid rows (without removing them).
 

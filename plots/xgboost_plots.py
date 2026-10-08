@@ -20,7 +20,7 @@ def load_json(path: Path) -> dict:
 def load_npy(path: Path):
     if not path.exists():
         return None
-    return np.load(path, allow_pickle=True)
+    return np.load(path, allow_pickle=False)
 
 
 def ensure_dir(path: Path) -> None:
@@ -48,13 +48,10 @@ def plot_full_xgboost_training_report(experiment_path: Path) -> None:
     # -------------------------
     # LOAD ARTIFACTS
     # -------------------------
-    metadata = load_json(train_dir / "metadata.json")
     feature_importance = load_json(train_dir / "feature_importance.json")
     training_history = load_json(train_dir / "training_history.json")
-    model_config = load_json(train_dir / "model_config.json")
 
     test_metrics = load_json(test_dir / "test_metrics.json")
-    test_results = load_json(test_dir / "test_results.json")
 
     y_true = load_npy(test_dir / "test_ground_truth.npy")
     y_pred = load_npy(test_dir / "test_predictions.npy")

@@ -18,7 +18,7 @@ FIXED (NOT OPTIMIZED):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict
 
 import numpy as np
@@ -46,7 +46,7 @@ def decode(position: np.ndarray) -> Dict[str, Any]:
                         batch_size, epochs, lookback (fixed at 20).
     """
     x = np.clip(position, LB, UB)
-    
+
     # Decode each dimension
     units_1 = int(np.round(x[0]))  # [50, 300]
     units_2 = int(np.round(x[1]))  # [20, 200]
@@ -54,7 +54,7 @@ def decode(position: np.ndarray) -> Dict[str, Any]:
     learning_rate = float(np.exp(x[3]))  # [0.001, 0.01]
     batch_size = BATCH_SIZE_CHOICES[int(x[4])]  # {32, 64}
     epochs = int(np.round(x[5]))  # [50, 300]
-    
+
     return {
         "units_1": units_1,
         "units_2": units_2,
@@ -68,7 +68,7 @@ def decode(position: np.ndarray) -> Dict[str, Any]:
 
 def random_position(rng: np.random.Generator) -> np.ndarray:
     """Sample a random particle position uniformly inside [LB, UB].
-    
+
     Returns:
         Length-6 array for 6D search space.
     """
@@ -77,7 +77,7 @@ def random_position(rng: np.random.Generator) -> np.ndarray:
 
 def random_velocity(rng: np.random.Generator) -> np.ndarray:
     """Sample initial velocity as ±25% of the search range.
-    
+
     Returns:
         Length-6 array for 6D search space.
     """

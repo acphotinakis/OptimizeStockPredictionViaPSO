@@ -40,9 +40,12 @@ class FrozenMinMaxScaler:
         self._params: Optional[Dict[str, Dict[str, float]]] = None
         self._feature_names: Optional[List[str]] = None
 
-    def fit(
-        self, X: np.ndarray, feature_names: Optional[List[str]] = None
-    ) -> "FrozenMinMaxScaler":
+    @property
+    def is_fitted(self) -> bool:
+        """Return whether scaler has been fitted."""
+        return self._fitted
+
+    def fit(self, X: np.ndarray, feature_names: Optional[List[str]] = None) -> "FrozenMinMaxScaler":
         """
         Fit scaler on training data.
 
@@ -78,9 +81,7 @@ class FrozenMinMaxScaler:
             feature_names = [f"feature_{i}" for i in range(F)]
 
         if len(feature_names) != F:
-            raise ValueError(
-                f"feature_names length ({len(feature_names)}) != columns ({F})"
-            )
+            raise ValueError(f"feature_names length ({len(feature_names)}) != columns ({F})")
 
         # Compute min/max per feature
         self._params = {}
@@ -97,15 +98,13 @@ class FrozenMinMaxScaler:
             }
 
             logger.info(
-                f"Scaler fit [{fname}]: min={x_min:.8f}, max={x_max:.8f}, range={x_max-x_min:.8f}"
+                f"Scaler fit [{fname}]: min={x_min:.8f}, max={x_max:.8f}, range={x_max - x_min:.8f}"
             )
 
         self._feature_names = list(feature_names)
         self._fitted = True
 
-        logger.info(
-            f"Scaler fitted: {F} features, range={self.feature_range}, " f"samples={N}"
-        )
+        logger.info(f"Scaler fitted: {F} features, range={self.feature_range}, samples={N}")
 
         return self
 
@@ -138,8 +137,7 @@ class FrozenMinMaxScaler:
 
         if F != len(self._feature_names):
             raise ValueError(
-                f"Feature count mismatch: fitted on {len(self._feature_names)}, "
-                f"got {F}"
+                f"Feature count mismatch: fitted on {len(self._feature_names)}, got {F}"
             )
 
         X_scaled = np.zeros_like(X, dtype=np.float32)
@@ -150,7 +148,6 @@ class FrozenMinMaxScaler:
         for i, fname in enumerate(self._feature_names):
             params = self._params[fname]
             x_min = params["min"]
-            x_max = params["max"]
             x_range = params["range"]
 
             if x_range == 0:
@@ -196,8 +193,7 @@ class FrozenMinMaxScaler:
 
         if F != len(self._feature_names):
             raise ValueError(
-                f"Feature count mismatch: fitted on {len(self._feature_names)}, "
-                f"got {F}"
+                f"Feature count mismatch: fitted on {len(self._feature_names)}, got {F}"
             )
 
         X_orig = np.zeros_like(X_scaled, dtype=np.float32)
@@ -208,7 +204,6 @@ class FrozenMinMaxScaler:
         for i, fname in enumerate(self._feature_names):
             params = self._params[fname]
             x_min = params["min"]
-            x_max = params["max"]
             x_range = params["range"]
 
             if x_range == 0:
@@ -216,9 +211,7 @@ class FrozenMinMaxScaler:
                 X_orig[:, i] = x_min
             else:
                 # Inverse formula
-                X_orig[:, i] = (
-                    x_min + (X_scaled[:, i] - range_min) / range_span * x_range
-                )
+                X_orig[:, i] = x_min + (X_scaled[:, i] - range_min) / range_span * x_range
 
         # Restore original shape
         if len(original_shape) == 1:
@@ -226,9 +219,7 @@ class FrozenMinMaxScaler:
 
         return X_orig
 
-    def fit_transform(
-        self, X: np.ndarray, feature_names: Optional[List[str]] = None
-    ) -> np.ndarray:
+    def fit_transform(self, X: np.ndarray, feature_names: Optional[List[str]] = None) -> np.ndarray:
         """
         Fit and transform in one step (training data only).
 
@@ -344,6 +335,11 @@ class FrozenStandardScaler:
         self._params: Optional[Dict[str, Dict[str, float]]] = None
         self._feature_names: Optional[List[str]] = None
 
+    @property
+    def is_fitted(self) -> bool:
+        """Return whether scaler has been fitted."""
+        return self._fitted
+
     def fit(
         self, X: np.ndarray, feature_names: Optional[List[str]] = None
     ) -> "FrozenStandardScaler":
@@ -375,9 +371,7 @@ class FrozenStandardScaler:
         if feature_names is None:
             feature_names = [f"feature_{i}" for i in range(F)]
         if len(feature_names) != F:
-            raise ValueError(
-                f"feature_names length ({len(feature_names)}) != columns ({F})"
-            )
+            raise ValueError(f"feature_names length ({len(feature_names)}) != columns ({F})")
 
         self._params = {}
         for i, fname in enumerate(feature_names):
@@ -385,9 +379,7 @@ class FrozenStandardScaler:
             mu = float(x_col.mean())
             sd = float(x_col.std(ddof=0))
             self._params[fname] = {"mean": mu, "std": sd}
-            logger.info(
-                f"StandardScaler fit [{fname}]: mean={mu:.8f}, std={sd:.8f}"
-            )
+            logger.info(f"StandardScaler fit [{fname}]: mean={mu:.8f}, std={sd:.8f}")
 
         self._feature_names = list(feature_names)
         self._fitted = True
@@ -408,8 +400,7 @@ class FrozenStandardScaler:
 
         if F != len(self._feature_names):
             raise ValueError(
-                f"Feature count mismatch: fitted on {len(self._feature_names)}, "
-                f"got {F}"
+                f"Feature count mismatch: fitted on {len(self._feature_names)}, got {F}"
             )
 
         out = np.zeros_like(X, dtype=np.float32)
@@ -438,8 +429,7 @@ class FrozenStandardScaler:
 
         if F != len(self._feature_names):
             raise ValueError(
-                f"Feature count mismatch: fitted on {len(self._feature_names)}, "
-                f"got {F}"
+                f"Feature count mismatch: fitted on {len(self._feature_names)}, got {F}"
             )
 
         out = np.zeros_like(X_scaled, dtype=np.float32)
@@ -455,9 +445,7 @@ class FrozenStandardScaler:
             out = out.ravel()
         return out
 
-    def fit_transform(
-        self, X: np.ndarray, feature_names: Optional[List[str]] = None
-    ) -> np.ndarray:
+    def fit_transform(self, X: np.ndarray, feature_names: Optional[List[str]] = None) -> np.ndarray:
         self.fit(X, feature_names)
         return self.transform(X)
 
@@ -477,7 +465,5 @@ class FrozenStandardScaler:
         scaler._fitted = params["fitted"]
         scaler._feature_names = params["feature_names"]
         scaler._params = params["params"]
-        logger.info(
-            f"StandardScaler reconstructed: {len(scaler._feature_names)} features"
-        )
+        logger.info(f"StandardScaler reconstructed: {len(scaler._feature_names)} features")
         return scaler

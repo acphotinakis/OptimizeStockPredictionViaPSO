@@ -8,18 +8,17 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
-import yaml
 import uuid
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from plots.lstm_baseline_plots import generate_all_plots
-from src.models import LSTMModel, LSTMTrainer, set_seeds
-from src.data.windowing import build_lstm_windows
-from src.utils.config_loader import Config, load_config
-from src.utils.logger import LogFileMode, setup_logger
+from plots.lstm_baseline_plots import generate_all_plots  # noqa: E402
+from src.models import LSTMModel, LSTMTrainer, set_seeds  # noqa: E402
+from src.data.windowing import build_lstm_windows  # noqa: E402
+from src.utils.config_loader import Config, load_config  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +91,7 @@ def load_test_data(data_path: Path, lookback: int) -> tuple[np.ndarray, np.ndarr
     logger.info(f"[test] Raw shapes -> X: {X_test.shape}, y: {y_test.shape}")
 
     X_test_win, y_test_win = build_lstm_windows(X_test, y_test, lookback)
-    logger.info(
-        f"[test] Windowed shapes -> X: {X_test_win.shape}, y: {y_test_win.shape}"
-    )
+    logger.info(f"[test] Windowed shapes -> X: {X_test_win.shape}, y: {y_test_win.shape}")
 
     if np.isnan(X_test_win).any() or np.isnan(y_test_win).any():
         raise ValueError("Test data contains NaN values")
@@ -102,9 +99,7 @@ def load_test_data(data_path: Path, lookback: int) -> tuple[np.ndarray, np.ndarr
     return X_test_win, y_test_win
 
 
-def load_trained_model(
-    model_dir: Path, config: Config, device: Optional[str] = None
-) -> LSTMModel:
+def load_trained_model(model_dir: Path, config: Config, device: Optional[str] = None) -> LSTMModel:
     """Reconstruct LSTM architecture and load frozen weights."""
     model_path = model_dir / "baseline_lstm_model.pt"
     config_path = model_dir / "model_config.json"
@@ -170,12 +165,7 @@ def save_results(
 
 
 def build_experiment_dir(ticker: str, timeframe: str, run_id: str) -> Path:
-    return (
-        PROJECT_ROOT
-        / "results"
-        / "experiments"
-        / f"{ticker}_{timeframe}_{MODEL_TYPE}_{run_id}"
-    )
+    return PROJECT_ROOT / "results" / "experiments" / f"{ticker}_{timeframe}_{MODEL_TYPE}_{run_id}"
 
 
 def build_experiment_dirs(base: Path) -> dict:
@@ -269,7 +259,7 @@ def train_baseline_lstm(
     X_train_win, y_train_win = build_lstm_windows(X_train, y_train, lookback)
     X_val_win, y_val_win = build_lstm_windows(X_val, y_val, lookback)
 
-    logger.info(f"Windowed shapes:")
+    logger.info("Windowed shapes:")
     logger.info(f"  X_train: {X_train_win.shape}, y_train: {y_train_win.shape}")
     logger.info(f"  X_val:   {X_val_win.shape}, y_val:   {y_val_win.shape}")
 
@@ -420,9 +410,7 @@ def test_baseline_lstm(
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--config", type=Path, default=PROJECT_ROOT / "config/default_config.yaml"
-    )
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config/default_config.yaml")
 
     parser.add_argument("--ticker", type=str, required=True)
     parser.add_argument("--timeframe", type=str, required=True)

@@ -4,7 +4,11 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from sklearn.feature_selection import mutual_info_regression
+
+try:
+    from sklearn.feature_selection import mutual_info_regression
+except ImportError:
+    mutual_info_regression = None
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +43,7 @@ class FeatureSelector:
     # PUBLIC API
     # ────────────────────────────────────────────────────────────────
 
-    def fit(
-        self, X: np.ndarray, y: np.ndarray, feature_names: List[str]
-    ) -> "FeatureSelector":
+    def fit(self, X: np.ndarray, y: np.ndarray, feature_names: List[str]) -> "FeatureSelector":
 
         if len(feature_names) != X.shape[1]:
             raise ValueError("feature_names must match X columns")
@@ -74,9 +76,7 @@ class FeatureSelector:
 
         return self
 
-    def transform(
-        self, X: np.ndarray, feature_names: List[str]
-    ) -> Tuple[np.ndarray, List[str]]:
+    def transform(self, X: np.ndarray, feature_names: List[str]) -> Tuple[np.ndarray, List[str]]:
 
         if not self._is_fitted:
             raise RuntimeError("Call fit() first")
@@ -146,6 +146,8 @@ def _mask(lst: list, mask: np.ndarray) -> list:
 
 
 def _compute_mi(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    if mutual_info_regression is None:
+        raise ImportError("scikit-learn is required for mutual information computation.")
     X = np.nan_to_num(X)
     y = np.nan_to_num(y)
 

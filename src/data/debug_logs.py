@@ -1,13 +1,8 @@
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
-import numpy as np
 import pandas as pd
 
-from src.data.alpaca_ingestor import AlpacaIngestor
-from src.utils.logger import setup_logger
-from src.utils.config_loader import Config, load_config
-from constants import MAX_GAP_FILL_BARS
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +44,7 @@ def _log_table_stats(df: pd.DataFrame, ticker: str):
 
     missing = df.isna().mean().mean()
 
-    stats_summary.append(
-        {"ticker": ticker, "mean_close": mean_close, "std_close": std_close}
-    )
+    stats_summary.append({"ticker": ticker, "mean_close": mean_close, "std_close": std_close})
 
     table.add_row(
         [
@@ -134,9 +127,7 @@ def _log_ohlcv_validation_report(report: dict, ticker: str):
         for k, v in breakdown.items():
             breakdown_table.add_row([k, v])
 
-        logger.info(
-            "\n=== OHLCV Validation Breakdown (%s) ===\n%s", ticker, breakdown_table
-        )
+        logger.info("\n=== OHLCV Validation Breakdown (%s) ===\n%s", ticker, breakdown_table)
 
     # ------------------------------------------------------------------
     # Summary stats
@@ -399,9 +390,7 @@ def log_all_cleaning_reports(rows: list[dict]):
     # ------------------------------------------------------------
     timeframe_order = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
 
-    df["timeframe"] = pd.Categorical(
-        df["timeframe"], categories=timeframe_order, ordered=True
-    )
+    df["timeframe"] = pd.Categorical(df["timeframe"], categories=timeframe_order, ordered=True)
 
     # Sort: ticker --> timeframe --> feed
     df = df.sort_values(["ticker", "timeframe", "feed"])
@@ -420,9 +409,7 @@ def log_all_cleaning_reports(rows: list[dict]):
     # ------------------------------------------------------------
     # 3. Select value columns
     # ------------------------------------------------------------
-    value_cols = [
-        c for c in df.columns if c not in ["ticker", "feed", "timeframe", "key"]
-    ]
+    value_cols = [c for c in df.columns if c not in ["ticker", "feed", "timeframe", "key"]]
 
     # ------------------------------------------------------------
     # 4. Pivot (metrics as rows)

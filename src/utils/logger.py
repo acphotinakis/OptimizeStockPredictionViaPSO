@@ -7,6 +7,9 @@ import logging
 import sys
 from pathlib import Path
 from enum import Enum
+import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class LogFileMode(str, Enum):
@@ -101,9 +104,7 @@ def _log_table_stats(alpaca_ingestor, raw_dir, tickers):
 
         missing = df.isna().mean().mean()
 
-        stats_summary.append(
-            {"ticker": ticker, "mean_close": mean_close, "std_close": std_close}
-        )
+        stats_summary.append({"ticker": ticker, "mean_close": mean_close, "std_close": std_close})
 
         table.add_row(
             [

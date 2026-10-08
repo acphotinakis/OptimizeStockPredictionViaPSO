@@ -176,7 +176,7 @@ def plot_returns_distribution(
         color="green",
         linestyle=":",
         linewidth=1.5,
-        label=f"Mean: {mean_ret:.3f}%",
+        label=f"Mean: {mean_ret:.3f}% (Std: {std_ret:.3f}%)",
     )
 
     ax.set_xlabel("Return (%)")

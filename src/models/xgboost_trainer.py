@@ -141,12 +141,8 @@ class XGBoostTrainer:
         )
 
         # Extract history
-        evals_result = (
-            regressor.evals_result_ if hasattr(regressor, "evals_result_") else {}
-        )
-        best_iteration = (
-            regressor.best_iteration if hasattr(regressor, "best_iteration") else 0
-        )
+        evals_result = regressor.evals_result_ if hasattr(regressor, "evals_result_") else {}
+        best_iteration = regressor.best_iteration if hasattr(regressor, "best_iteration") else 0
 
         # Extract feature importance
         feature_importance = None
@@ -158,9 +154,7 @@ class XGBoostTrainer:
             if feature_names and len(feature_names) == len(importance_values):
                 feature_importance = dict(zip(feature_names, importance_values))
             else:
-                feature_importance = {
-                    f"f{i}": float(v) for i, v in enumerate(importance_values)
-                }
+                feature_importance = {f"f{i}": float(v) for i, v in enumerate(importance_values)}
 
             top_features = sorted(feature_importance.items(), key=lambda x: -x[1])[:10]
             logger.info("\nTop 10 important features:")
@@ -197,9 +191,7 @@ class XGBoostTrainer:
             evals_result,
         )
 
-    def _validate_inputs(
-        self, X: np.ndarray, y: Optional[np.ndarray], split_name: str
-    ) -> None:
+    def _validate_inputs(self, X: np.ndarray, y: Optional[np.ndarray], split_name: str) -> None:
         """
         Validate input array shapes and dtypes.
 
@@ -215,17 +207,13 @@ class XGBoostTrainer:
             raise ValueError(f"{split_name} X must be numpy array")
 
         if X.dtype not in [np.float32, np.float64]:
-            raise ValueError(
-                f"{split_name} X dtype must be float32 or float64, got {X.dtype}"
-            )
+            raise ValueError(f"{split_name} X dtype must be float32 or float64, got {X.dtype}")
 
         if X.ndim != 2:
             raise ValueError(f"{split_name} X must be 2D (N, F), got shape {X.shape}")
 
         if X.shape[1] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 feature, got {X.shape[1]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 feature, got {X.shape[1]}")
 
         if np.isnan(X).any():
             raise ValueError(f"{split_name} X contains NaN values")
@@ -241,9 +229,7 @@ class XGBoostTrainer:
                 raise ValueError(f"{split_name} y must be 1D (N,), got shape {y.shape}")
 
             if len(y) != len(X):
-                raise ValueError(
-                    f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}"
-                )
+                raise ValueError(f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}")
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")

@@ -36,27 +36,27 @@ enforcement:
 data:
   start_date: "2020-01-01"
   end_date: "2026-01-01"
-  
+
   train_end: "2024-04-05"
-  val_end: "2025-04-05" 
+  val_end: "2025-04-05"
   test_end: "2026-04-05"
-  
+
   # start_date: "2026-01-05"
   # end_date: "2026-04-05"
   train_years: 3
   val_years: 1
   test_years: 1
-  
+
   # freq: "1Min"
   freq: "1Min"
-  
+
   session_start: "09:30"
   session_end: "16:00"
-  
+
   timezone: "America/New_York"
-  
+
   benchmark_ticker: "SPY"
-  
+
   max_missing_fraction: 0.05
   max_ffill_bars: 5
 
@@ -65,20 +65,20 @@ data:
 # FEATURES (UNION)
 # ============================================================================
 features:
-  # Wavelet Denoising 
+  # Wavelet Denoising
   wavelet:
-    enabled: true            # Apply wavelet denoising 
+    enabled: true            # Apply wavelet denoising
     wavelet: "haar"
     level: 3
     mode: "symmetric"
-  
+
   # Feature Selection (4-stage pipeline)
   selector:
     variance_threshold: 1.0e-6
     correlation_threshold: 0.95      # Zeng et al. 2025
     vif_threshold: 10.0               # Standard econometric
     mi_quantile_threshold: 0.25       # Keep top 75%
-  
+
   # Cross-ticker Features
   cross_ticker:
     enabled: true
@@ -93,7 +93,7 @@ features:
     enabled: true
     feature_range: [-1.0, 1.0]
     # Parameters fit on TRAIN only, frozen forever
-  
+
   # Windowing
   windowing:
     lookback: 20  # Fixed for all models
@@ -146,10 +146,10 @@ lstm_baseline:
   shuffle: false
   lookback: 20
   prediction_horizon: 1
-  
+
   random_seed: 42
   deterministic: true
-  
+
   validation_split: 0.10
 
   # Early stopping
@@ -158,7 +158,7 @@ lstm_baseline:
     monitor: "val_loss"
     patience: 10
     restore_best_weights: true
-  
+
   # Advanced Training
   grad_clip: 1.0
   use_amp: true
@@ -173,7 +173,7 @@ lstm_baseline:
 xgboost:
   lookback: 20
   name: "XGBoost-v1.0"
-  
+
   # Fixed hyperparameters
   objective: "reg:squarederror"
   max_depth: 6
@@ -185,12 +185,12 @@ xgboost:
   gamma: 0.0
   reg_alpha: 0.0
   reg_lambda: 1.0
-  tree_method: "hist" 
+  tree_method: "hist"
   max_bin: 256
   n_jobs: -1  # Set to 1 for fully reproducible runs (across machines)
   importance_type: "gain"
   verbosity: 0
-  
+
   # Early stopping
   early_stopping_rounds: 50
   # Feature representation
@@ -208,7 +208,7 @@ pso:
   # IPSO HYPERPARAMETER OPTIMIZATION (Spec-compliant implementation)
   # ================================================================
   enabled: true              # PSO optimization enabled
-  
+
   # Algorithm Parameters (IPSO - Improved PSO per Ji et al. 2021)
   n_particles: 20            # Swarm size (SPEC REQUIRED)
   n_iterations: 50           # Total iterations (SPEC REQUIRED)
@@ -217,7 +217,7 @@ pso:
   c1: 1.5                   # Cognitive coefficient (SPEC REQUIRED)
   c2: 1.5                   # Social coefficient (SPEC REQUIRED)
   v_clamp_fraction: 0.20    # Velocity clamping
-  
+
   # Search Space (6D - SPEC COMPLIANT)
   search_space:
     lstm_units_1:
@@ -238,7 +238,7 @@ pso:
     epochs:
       min: 50               # Training epochs range (SPEC REQUIRED)
       max: 300
-  
+
   # Fixed parameters (NOT optimized by PSO)
   lookback: 20              # FIXED at 20 (SPEC REQUIRED)
   shuffle: false            # MANDATORY (no temporal shuffling)

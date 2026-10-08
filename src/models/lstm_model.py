@@ -23,7 +23,6 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from src.evaluation.metrics import compute_and_log_all_statistical_metrics
-from src.utils.config_loader import Config
 
 from .utils import set_seeds
 
@@ -113,9 +112,7 @@ class LSTMNetwork(nn.Module):
             dropout=0.0,
         )
 
-        self.dropout_1 = (
-            nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
-        )
+        self.dropout_1 = nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
 
         self.lstm_2 = nn.LSTM(
             input_size=hidden_size_1,
@@ -125,9 +122,7 @@ class LSTMNetwork(nn.Module):
             dropout=0.0,
         )
 
-        self.dropout_2 = (
-            nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
-        )
+        self.dropout_2 = nn.Dropout(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
         # -------------------------
         # Output layer
         # -------------------------
@@ -196,9 +191,7 @@ class LSTMModel:
             device: 'cuda' or 'cpu' (auto-detected if None)
         """
         self.seed = seed
-        self.device = (
-            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         self.model: Optional[LSTMNetwork] = None
         self.feature_names: Optional[List[str]] = None
 
@@ -254,9 +247,7 @@ class LSTMModel:
         if not (20 <= self.units_2 <= 200):
             raise ValueError(f"lstm_units_2 must be in [20, 200], got {self.units_2}")
         if not (0.0 <= self.dropout_rate <= 0.5):
-            raise ValueError(
-                f"dropout_rate must be in [0.0, 0.5], got {self.dropout_rate}"
-            )
+            raise ValueError(f"dropout_rate must be in [0.0, 0.5], got {self.dropout_rate}")
 
         logger.debug(
             f"Building LSTM model: LSTM_1={self.units_1}, LSTM_2={self.units_2}, "
@@ -278,18 +269,14 @@ class LSTMModel:
         self.config = config
 
         self.total_params = sum(p.numel() for p in self.model.parameters())
-        self.trainable_params = sum(
-            p.numel() for p in self.model.parameters() if p.requires_grad
-        )
+        self.trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         logger.debug(
             f"Model built: {self.total_params:,} total params, {self.trainable_params:,} trainable"
         )
 
         return self.model, self
 
-    def predict(
-        self, X: np.ndarray, batch_size: int = 512, progress: bool = True
-    ) -> np.ndarray:
+    def predict(self, X: np.ndarray, batch_size: int = 512, progress: bool = True) -> np.ndarray:
         """
         Memory-safe batched inference.
 
@@ -432,24 +419,16 @@ class LSTMModel:
             raise ValueError(f"{split_name} X must be numpy array")
 
         if X.dtype not in [np.float32, np.float64]:
-            raise ValueError(
-                f"{split_name} X dtype must be float32 or float64, got {X.dtype}"
-            )
+            raise ValueError(f"{split_name} X dtype must be float32 or float64, got {X.dtype}")
 
         if X.ndim != 3:
-            raise ValueError(
-                f"{split_name} X must be 3D (N, T, F), got shape {X.shape}"
-            )
+            raise ValueError(f"{split_name} X must be 3D (N, T, F), got shape {X.shape}")
 
         if X.shape[1] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 timestep, got {X.shape[1]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 timestep, got {X.shape[1]}")
 
         if X.shape[2] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 feature, got {X.shape[2]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 feature, got {X.shape[2]}")
 
         if np.isnan(X).any():
             raise ValueError(f"{split_name} X contains NaN values")
@@ -465,9 +444,7 @@ class LSTMModel:
                 raise ValueError(f"{split_name} y must be 1D (N,), got shape {y.shape}")
 
             if len(y) != len(X):
-                raise ValueError(
-                    f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}"
-                )
+                raise ValueError(f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}")
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")

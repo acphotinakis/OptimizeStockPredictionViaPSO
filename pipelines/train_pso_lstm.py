@@ -14,13 +14,13 @@ import yaml
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.windowing import build_lstm_windows
-from src.models import LSTMModel, LSTMTrainer
-from src.models.utils import set_seeds
-from src.optimizer import IPSO, SpecCompliantFitness
-from src.optimizer.particle import LB, UB
-from src.utils.config_loader import Config, load_config
-from src.utils.logger import LogFileMode, setup_logger
+from src.data.windowing import build_lstm_windows  # noqa: E402
+from src.models import LSTMModel, LSTMTrainer  # noqa: E402
+from src.models.utils import set_seeds  # noqa: E402
+from src.optimizer import IPSO, SpecCompliantFitness  # noqa: E402
+from src.optimizer.particle import LB, UB  # noqa: E402
+from src.utils.config_loader import Config, load_config  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +136,7 @@ def load_preprocessed_data(data_path: Path) -> Dict:
         data[f"X_{split}"] = np.load(X_path)
         data[f"y_{split}"] = np.load(y_path)
 
-        logger.info(
-            f"  {split}: X={data[f'X_{split}'].shape}, y={data[f'y_{split}'].shape}"
-        )
+        logger.info(f"  {split}: X={data[f'X_{split}'].shape}, y={data[f'y_{split}'].shape}")
 
     return data
 
@@ -232,9 +230,7 @@ def _pso_model_builder(
     # evaluation. Hash the canonical contiguous layout so the digest
     # matches the value captured before PSO began regardless of view state.
     current_hash = hashlib.sha256(np.ascontiguousarray(X_test).tobytes()).hexdigest()
-    assert (
-        current_hash == test_hash
-    ), "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
+    assert current_hash == test_hash, "CRITICAL TRD VIOLATION: Test set accessed during PSO (L-6)"
 
     return y_pred, trained_wrapper.model
 
@@ -310,18 +306,12 @@ def phase1_pso_search(
 
     # Build LSTM windows
     logger.info(f"Building LSTM windows (lookback={lookback})...")
-    X_pso_train_win, y_pso_train_win = build_lstm_windows(
-        X_pso_train, y_pso_train, lookback
-    )
+    X_pso_train_win, y_pso_train_win = build_lstm_windows(X_pso_train, y_pso_train, lookback)
     X_pso_val_win, y_pso_val_win = build_lstm_windows(X_pso_val, y_pso_val, lookback)
 
-    logger.info(f"Windowed shapes:")
-    logger.info(
-        f"  X_pso_train: {X_pso_train_win.shape}, y_pso_train: {y_pso_train_win.shape}"
-    )
-    logger.info(
-        f"  X_pso_val:   {X_pso_val_win.shape}, y_pso_val:   {y_pso_val_win.shape}"
-    )
+    logger.info("Windowed shapes:")
+    logger.info(f"  X_pso_train: {X_pso_train_win.shape}, y_pso_train: {y_pso_train_win.shape}")
+    logger.info(f"  X_pso_val:   {X_pso_val_win.shape}, y_pso_val:   {y_pso_val_win.shape}")
 
     # TRD1 8.1 L-6: Protect test set from access. Canonicalize the
     # array layout before hashing so non-contiguous views (e.g. slices
@@ -335,9 +325,7 @@ def phase1_pso_search(
     # config and the encoding would silently change the search space.
     expected_log_lr_min = float(np.log(pso_config.search_space.learning_rate.min))
     expected_log_lr_max = float(np.log(pso_config.search_space.learning_rate.max))
-    expected_batch_idx_max = (
-        float(len(pso_config.search_space.batch_size.choices)) - 0.01
-    )
+    expected_batch_idx_max = float(len(pso_config.search_space.batch_size.choices)) - 0.01
     bound_checks = [
         ("units_1.min", pso_config.search_space.lstm_units_1.min, LB[0]),
         ("units_1.max", pso_config.search_space.lstm_units_1.max, UB[0]),
@@ -358,9 +346,7 @@ def phase1_pso_search(
         if not np.isclose(float(cfg), float(bound), rtol=1e-6, atol=1e-6)
     ]
     if drift:
-        details = ", ".join(
-            f"{name}: config={cfg} vs LB/UB={bound}" for name, cfg, bound in drift
-        )
+        details = ", ".join(f"{name}: config={cfg} vs LB/UB={bound}" for name, cfg, bound in drift)
         raise ValueError(
             "PSO search-space drift detected between YAML config and "
             f"particle encoding LB/UB: {details}"
@@ -410,8 +396,8 @@ def phase1_pso_search(
     logger.info("=" * 80)
     logger.info("RUNNING IPSO OPTIMIZATION")
     logger.info("=" * 80)
-    logger.info(f"Search space: 6D (units_1, units_2, dropout, lr, batch_size, epochs)")
-    logger.info(f"Fitness: F(x) = 0.9 * MSE + 0.1 * 0.01 * MSW (msw_scale = 0.01)")
+    logger.info("Search space: 6D (units_1, units_2, dropout, lr, batch_size, epochs)")
+    logger.info("Fitness: F(x) = 0.9 * MSE + 0.1 * 0.01 * MSW (msw_scale = 0.01)")
     logger.info("=" * 80)
 
     best_params, best_fitness = optimizer.run(
@@ -508,9 +494,7 @@ def phase2_final_training(
 
     # Build LSTM windows
     logger.info(f"Building LSTM windows (lookback={lookback})...")
-    X_combined_win, y_combined_win = build_lstm_windows(
-        X_combined, y_combined, lookback
-    )
+    X_combined_win, y_combined_win = build_lstm_windows(X_combined, y_combined, lookback)
 
     logger.info(f"Windowed shape: X={X_combined_win.shape}, y={y_combined_win.shape}")
 
@@ -618,9 +602,7 @@ def phase2_final_training(
         ),
         "n_features": X_train.shape[1],
         "lookback": lookback,
-        "feature_names": (
-            feature_metadata.get("feature_names", []) if feature_metadata else []
-        ),
+        "feature_names": (feature_metadata.get("feature_names", []) if feature_metadata else []),
         # PSO optimization results
         "pso_hyperparameters": best_params,
         "pso_optimization_complete": True,
@@ -740,7 +722,7 @@ def main():
             )
 
         # Phase 2: Final Training
-        model = phase2_final_training(
+        _ = phase2_final_training(
             X_train=data["X_train"],
             y_train=data["y_train"],
             X_val=data["X_val"],

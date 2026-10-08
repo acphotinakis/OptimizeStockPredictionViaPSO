@@ -17,7 +17,7 @@ Version: CANONICAL 1.0
 
 import json
 import logging
-from typing import Dict, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -52,15 +52,11 @@ def compute_canonical_split(
     """
     # Validate inputs
     if not np.isclose(train_pct + val_pct + test_pct, 1.0):
-        raise ValueError(
-            f"Split percentages must sum to 1.0, got {train_pct + val_pct + test_pct}"
-        )
+        raise ValueError(f"Split percentages must sum to 1.0, got {train_pct + val_pct + test_pct}")
 
     # Ensure chronological ordering
     if not data.index.is_monotonic_increasing:
-        raise ValueError(
-            "Data must be chronologically ordered (monotonic increasing index)"
-        )
+        raise ValueError("Data must be chronologically ordered (monotonic increasing index)")
 
     n = len(data)
 
@@ -107,16 +103,14 @@ def compute_canonical_split(
     logger.info("CANONICAL TEMPORAL SPLIT")
     logger.info("=" * 80)
     logger.info(f"Total samples: {n}")
-    logger.info(f"Train: {len(train_data)} samples ({100*len(train_data)/n:.1f}%)")
+    logger.info(f"Train: {len(train_data)} samples ({100 * len(train_data) / n:.1f}%)")
     logger.info(f"  Period: {train_data.index[0]} to {train_data.index[-1]}")
-    logger.info(f"Val:   {len(val_data)} samples ({100*len(val_data)/n:.1f}%)")
+    logger.info(f"Val:   {len(val_data)} samples ({100 * len(val_data) / n:.1f}%)")
     logger.info(f"  Period: {val_data.index[0]} to {val_data.index[-1]}")
-    logger.info(f"Test:  {len(test_data)} samples ({100*len(test_data)/n:.1f}%)")
+    logger.info(f"Test:  {len(test_data)} samples ({100 * len(test_data) / n:.1f}%)")
     logger.info(f"  Period: {test_data.index[0]} to {test_data.index[-1]}")
     logger.info("=" * 80)
-    logger.info(
-        "SPLIT_METADATA_JSON: %s", json.dumps(split_metadata, indent=2, default=str)
-    )
+    logger.info("SPLIT_METADATA_JSON: %s", json.dumps(split_metadata, indent=2, default=str))
 
     return train_data, val_data, test_data
 

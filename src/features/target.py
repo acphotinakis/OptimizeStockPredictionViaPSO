@@ -22,7 +22,6 @@ Version: 2.0.0 - AUDIT REMEDIATION
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -53,9 +52,7 @@ def compute_canonical_target(
         target = close_series.shift(-horizon)
 
     else:
-        raise ValueError(
-            f"Unsupported method '{method}'. Use 'log_return' or 'next_close'."
-        )
+        raise ValueError(f"Unsupported method '{method}'. Use 'log_return' or 'next_close'.")
 
     logger.info(
         f"Computed target (method={method}, horizon={horizon}): "
@@ -109,8 +106,7 @@ def verify_target_alignment(
         )
 
     logger.info(
-        f"Target verification passed: max_diff={max_diff:.2e}, "
-        f"{valid_mask.sum()} samples checked"
+        f"Target verification passed: max_diff={max_diff:.2e}, {valid_mask.sum()} samples checked"
     )
 
     return True

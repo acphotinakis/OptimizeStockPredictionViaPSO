@@ -18,19 +18,19 @@ PROJECT_ROOT = CURRENT_FILE.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.features.target import compute_canonical_target
-from pipelines.data_ingest_align_clean import _load_tickers
-from src.evaluation.canonical_split import (
+from src.features.target import compute_canonical_target  # noqa: E402
+from pipelines.data_ingest_align_clean import _load_tickers  # noqa: E402
+from src.evaluation.canonical_split import (  # noqa: E402
     compute_canonical_split,
     verify_split_integrity,
 )
-from src.utils.data_storage import _load_parquet
-from src.features.feature_generators import generate_raw_features
-from src.features.scaler import FrozenMinMaxScaler, FrozenStandardScaler
-from src.features.selector import FeatureSelector
-from src.utils.logger import LogFileMode, setup_logger
-from src.utils.config_loader import Config, load_config
-from src.models import set_seeds
+from src.utils.data_storage import _load_parquet  # noqa: E402
+from src.features.feature_generators import generate_raw_features  # noqa: E402
+from src.features.scaler import FrozenMinMaxScaler, FrozenStandardScaler  # noqa: E402
+from src.features.selector import FeatureSelector  # noqa: E402
+from src.utils.logger import LogFileMode, setup_logger  # noqa: E402
+from src.utils.config_loader import Config, load_config  # noqa: E402
+from src.models import set_seeds  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +214,7 @@ def _generate_raw_for_split(
     X_raw = pd.DataFrame(X_raw_np, columns=feature_names, index=datetime_index)
     y_raw = pd.DataFrame(y_raw_np, columns=["target"], index=datetime_index)
 
-    logger.info(
-        f"[{ticker}][{split_name}] X_raw={X_raw.shape}, y_raw={y_raw.shape}"
-    )
+    logger.info(f"[{ticker}][{split_name}] X_raw={X_raw.shape}, y_raw={y_raw.shape}")
 
     return X_raw, y_raw, feature_names
 
@@ -247,12 +245,8 @@ def _split_data(
     X_train_raw, y_train_raw, feature_names = _generate_raw_for_split(
         ticker, train_df, target_method, "TRAIN"
     )
-    X_val_raw, y_val_raw, _ = _generate_raw_for_split(
-        ticker, val_df, target_method, "VAL"
-    )
-    X_test_raw, y_test_raw, _ = _generate_raw_for_split(
-        ticker, test_df, target_method, "TEST"
-    )
+    X_val_raw, y_val_raw, _ = _generate_raw_for_split(ticker, val_df, target_method, "VAL")
+    X_test_raw, y_test_raw, _ = _generate_raw_for_split(ticker, test_df, target_method, "TEST")
 
     idx_train = X_train_raw.index
     idx_val = X_val_raw.index
@@ -291,9 +285,7 @@ def _scale_data(
 ]:
     # Feature Scaler (Stage 7) - features mapped to [-1, 1] for LSTM stability.
     feature_scaler = FrozenMinMaxScaler(feature_range=(-1.0, 1.0))
-    feature_scaler.fit(
-        X_train_raw.values, feature_names=list(X_train_raw.columns)
-    )
+    feature_scaler.fit(X_train_raw.values, feature_names=list(X_train_raw.columns))
 
     # Target Scaler (Stage 8) - z-score (mean=0, std=1) instead of MinMax.
     # Returns are dominated by outliers, so MinMax-to-[-1,1] compresses the bulk
@@ -369,9 +361,9 @@ def process_ticker_split_first(
     config: Config,
     target_method: str = "log_return",
 ) -> None:
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
     logger.info(f"[{ticker}] START SPLIT-FIRST PIPELINE")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     # create splits directory
     splits_dir = output_dir / "splits"
@@ -401,9 +393,7 @@ def process_ticker_split_first(
     X_val_raw.to_parquet(raw_dir / f"{ticker}_val_raw.parquet")
     X_test_raw.to_parquet(raw_dir / f"{ticker}_test_raw.parquet")
 
-    inspect_features(
-        ticker=ticker, data=X_train_raw, columns=feature_names
-    )
+    inspect_features(ticker=ticker, data=X_train_raw, columns=feature_names)
     inspect_targets(
         ticker=ticker,
         data=y_train_raw,
@@ -453,13 +443,13 @@ def process_ticker_split_first(
         y_train_scaled.reshape(-1, 1), columns=[target_method], index=idx_train
     ).to_parquet(scaled_dir / f"{ticker}_y_train_scaled.parquet")
 
-    pd.DataFrame(
-        y_val_scaled.reshape(-1, 1), columns=[target_method], index=idx_val
-    ).to_parquet(scaled_dir / f"{ticker}_y_val_scaled.parquet")
+    pd.DataFrame(y_val_scaled.reshape(-1, 1), columns=[target_method], index=idx_val).to_parquet(
+        scaled_dir / f"{ticker}_y_val_scaled.parquet"
+    )
 
-    pd.DataFrame(
-        y_test_scaled.reshape(-1, 1), columns=[target_method], index=idx_test
-    ).to_parquet(scaled_dir / f"{ticker}_y_test_scaled.parquet")
+    pd.DataFrame(y_test_scaled.reshape(-1, 1), columns=[target_method], index=idx_test).to_parquet(
+        scaled_dir / f"{ticker}_y_test_scaled.parquet"
+    )
 
     joblib.dump(feature_scaler, output_dir / "feature_scaler.joblib")
     joblib.dump(target_scaler, output_dir / "target_scaler.joblib")
@@ -503,11 +493,8 @@ def process_ticker_split_first(
     X_val_sel_df = pd.DataFrame(X_val_sel, columns=selected_names, index=idx_val)
     X_test_sel_df = pd.DataFrame(X_test_sel, columns=selected_names, index=idx_test)
 
-    y_train_series = pd.Series(y_train_scaled.squeeze(), index=idx_train)
-    y_val_series = pd.Series(y_val_scaled.squeeze(), index=idx_val)
-    y_test_series = pd.Series(y_test_scaled.squeeze(), index=idx_test)
-
     # ----------------------------------------------------------------------------
+
     # save features
     # ----------------------------------------------------------------------------
     X_train_sel_df.to_parquet(selected_dir / f"{ticker}_train_features.parquet")
@@ -597,7 +584,7 @@ def process_ticker_split_first(
 
     logger.info(f"[{ticker}] Artifacts saved to {output_dir}")
     logger.info(f"[{ticker}] PIPELINE COMPLETE")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     # Cleanup
     del X_train_raw, X_val_raw, X_test_raw
@@ -741,8 +728,6 @@ def main() -> None:
     logger.info("PRODUCTION FEATURE PIPELINE v3.0 - SPLIT-FIRST ARCHITECTURE")
     logger.info("=" * 80)
     logger.info(f"Arguments: {args}")
-
-    config = load_config(args.config)
 
     tickers = _load_tickers(args.tickers)
     timeframe = args.timeframe

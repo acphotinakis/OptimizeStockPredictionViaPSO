@@ -3,20 +3,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
 import yaml
-
-import logging
-import sys
-
-
-# Add project root to path
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtesting.backtester import BacktestResult
 
@@ -111,15 +102,11 @@ def save_backtest_results(
         "statistical_metrics": results.statistical_metrics,
         "trading_metrics": results.trading_metrics,
         "summary": {
-            "total_return": float(
-                results.equity_curve[-1] / results.equity_curve[0] - 1
-            ),
+            "total_return": float(results.equity_curve[-1] / results.equity_curve[0] - 1),
             "final_capital": float(results.equity_curve[-1]),
             "n_trades": int(np.sum(np.abs(np.diff(results.signals)) > 0)),
             "n_days": (
-                len(results.dates)
-                if results.dates is not None
-                else len(results.predictions)
+                len(results.dates) if results.dates is not None else len(results.predictions)
             ),
             "total_costs": float(np.sum(results.trade_costs)),
         },
@@ -229,8 +216,8 @@ def generate_backtest_report(
 
     report = f"""# Backtest Report: {results.model_type.upper()}
 
-**Ticker:** {results.ticker}  
-**Date:** {results.timestamp}  
+**Ticker:** {results.ticker}
+**Date:** {results.timestamp}
 **Model:** {results.model_type}
 
 ---
@@ -240,12 +227,12 @@ def generate_backtest_report(
 | Metric | Value |
 |--------|-------|
 | **Total Return** | {total_return:.2%} |
-| **Annualized Return** | {trade.get('annualized_return', trade.get('cagr', 0.0)):.2%} |
-| **Sharpe Ratio** | {trade.get('sharpe', 0.0):.2f} |
-| **Max Drawdown** | {trade.get('max_drawdown', 0.0):.2%} |
-| **Win Rate** | {trade.get('win_rate', 0.0):.2%} |
+| **Annualized Return** | {trade.get("annualized_return", trade.get("cagr", 0.0)):.2%} |
+| **Sharpe Ratio** | {trade.get("sharpe", 0.0):.2f} |
+| **Max Drawdown** | {trade.get("max_drawdown", 0.0):.2%} |
+| **Win Rate** | {trade.get("win_rate", 0.0):.2%} |
 | **Total Trades** | {n_trades} |
-| **Total Costs** | {total_costs:.4f} ({total_costs*100:.2f}%) |
+| **Total Costs** | {total_costs:.4f} ({total_costs * 100:.2f}%) |
 
 ---
 
@@ -253,12 +240,12 @@ def generate_backtest_report(
 
 | Metric | Value |
 |--------|-------|
-| **RMSE** | {stat.get('rmse', 0.0):.6f} |
-| **MAE** | {stat.get('mae', 0.0):.6f} |
-| **MAPE** | {stat.get('mape', 0.0):.2f}% |
-| **R²** | {stat.get('r2', 0.0):.4f} |
-| **Directional Accuracy** | {stat.get('directional_accuracy', 0.0):.2%} |
-| **F1 (Ternary)** | {stat.get('f1_ternary', 0.0):.4f} |
+| **RMSE** | {stat.get("rmse", 0.0):.6f} |
+| **MAE** | {stat.get("mae", 0.0):.6f} |
+| **MAPE** | {stat.get("mape", 0.0):.2f}% |
+| **R²** | {stat.get("r2", 0.0):.4f} |
+| **Directional Accuracy** | {stat.get("directional_accuracy", 0.0):.2%} |
+| **F1 (Ternary)** | {stat.get("f1_ternary", 0.0):.4f} |
 
 ---
 
@@ -266,21 +253,21 @@ def generate_backtest_report(
 
 | Metric | Value |
 |--------|-------|
-| **Sharpe Ratio** | {trade.get('sharpe', 0.0):.2f} |
-| **Sortino Ratio** | {trade.get('sortino', 0.0):.2f} |
-| **Calmar Ratio** | {trade.get('calmar', 0.0):.2f} |
-| **Profit Factor** | {trade.get('profit_factor', 0.0):.2f} |
-| **CAGR** | {trade.get('cagr', 0.0):.2%} |
-| **Max Drawdown** | {trade.get('max_drawdown', 0.0):.2%} |
-| **Information Ratio** | {trade.get('information_ratio', 0.0):.2f} |
+| **Sharpe Ratio** | {trade.get("sharpe", 0.0):.2f} |
+| **Sortino Ratio** | {trade.get("sortino", 0.0):.2f} |
+| **Calmar Ratio** | {trade.get("calmar", 0.0):.2f} |
+| **Profit Factor** | {trade.get("profit_factor", 0.0):.2f} |
+| **CAGR** | {trade.get("cagr", 0.0):.2%} |
+| **Max Drawdown** | {trade.get("max_drawdown", 0.0):.2%} |
+| **Information Ratio** | {trade.get("information_ratio", 0.0):.2f} |
 
 ---
 
 ## Model Information
 
-**Type:** {results.model_metadata.get('model_type', 'N/A')}  
-**Architecture:** {results.model_metadata.get('architecture', 'N/A')}  
-**Framework:** {results.model_metadata.get('framework', 'N/A')}
+**Type:** {results.model_metadata.get("model_type", "N/A")}
+**Architecture:** {results.model_metadata.get("architecture", "N/A")}
+**Framework:** {results.model_metadata.get("framework", "N/A")}
 
 ---
 
@@ -296,9 +283,9 @@ def generate_backtest_report(
 
 Backtest completed successfully with {n_trades} trades over {len(results.dates) if results.dates is not None else len(results.predictions)} trading days.
 
-**Final Portfolio Value:** {results.equity_curve[-1]:.2f}  
-**Total Return:** {total_return:.2%}  
-**Risk-Adjusted Return (Sharpe):** {trade.get('sharpe', 0.0):.2f}
+**Final Portfolio Value:** {results.equity_curve[-1]:.2f}
+**Total Return:** {total_return:.2%}
+**Risk-Adjusted Return (Sharpe):** {trade.get("sharpe", 0.0):.2f}
 """
 
     with open(output_path, "w") as f:

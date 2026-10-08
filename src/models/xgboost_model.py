@@ -114,9 +114,7 @@ class XGBoostModel:
         logger.info(f"Model loaded from {path}")
         return cls(booster, feature_names, feature_importance)
 
-    def _validate_inputs(
-        self, X: np.ndarray, y: Optional[np.ndarray], split_name: str
-    ) -> None:
+    def _validate_inputs(self, X: np.ndarray, y: Optional[np.ndarray], split_name: str) -> None:
         """
         Validate input array shapes and dtypes.
 
@@ -132,17 +130,13 @@ class XGBoostModel:
             raise ValueError(f"{split_name} X must be numpy array")
 
         if X.dtype not in [np.float32, np.float64]:
-            raise ValueError(
-                f"{split_name} X dtype must be float32 or float64, got {X.dtype}"
-            )
+            raise ValueError(f"{split_name} X dtype must be float32 or float64, got {X.dtype}")
 
         if X.ndim != 2:
             raise ValueError(f"{split_name} X must be 2D (N, F), got shape {X.shape}")
 
         if X.shape[1] < 1:
-            raise ValueError(
-                f"{split_name} X must have at least 1 feature, got {X.shape[1]}"
-            )
+            raise ValueError(f"{split_name} X must have at least 1 feature, got {X.shape[1]}")
 
         if np.isnan(X).any():
             raise ValueError(f"{split_name} X contains NaN values")
@@ -158,9 +152,7 @@ class XGBoostModel:
                 raise ValueError(f"{split_name} y must be 1D (N,), got shape {y.shape}")
 
             if len(y) != len(X):
-                raise ValueError(
-                    f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}"
-                )
+                raise ValueError(f"{split_name} X and y length mismatch: {len(X)} vs {len(y)}")
 
             if np.isnan(y).any():
                 raise ValueError(f"{split_name} y contains NaN values")

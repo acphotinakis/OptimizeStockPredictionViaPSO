@@ -54,7 +54,7 @@ def _save_parquet(df: pd.DataFrame, path: Path) -> None:
 def _load_tickers(path: str) -> list[str]:
     with open(path) as f:
         return [
-            l.split()[0] for l in f if l.split() and not l.split()[0].startswith("#")
+            line.split()[0] for line in f if line.split() and not line.split()[0].startswith("#")
         ]
 
 
