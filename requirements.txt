@@ -2,7 +2,7 @@
 # Python 3.10+
 
 # Core ML/DL
-torch>=2.2.0
+torch>=2.14.1
 numpy>=1.26.0
 pandas>=2.1.0
 scikit-learn>=1.4.0
